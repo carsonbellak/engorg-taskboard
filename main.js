@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
@@ -19,6 +19,7 @@ const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
 const registerWifiChecker   = require('./ipc/wifi-checker');
 const registerContribute    = require('./ipc/contribute');
+const registerFtdi          = require('./ipc/ftdi');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -44,6 +45,25 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // ── Web Serial support (UART Bridge utility) ───────────────────────────────
+  // Local trusted desktop app: grant permission checks, and relay the OS serial
+  // port list to the renderer so the user can pick which COM port to add.
+  const ses = mainWindow.webContents.session;
+  ses.setPermissionCheckHandler(() => true);
+  ses.setDevicePermissionHandler((details) => details.deviceType === 'serial' || true);
+  let pendingSerialCallback = null;
+  ses.on('select-serial-port', (event, portList, webContents, callback) => {
+    event.preventDefault();
+    pendingSerialCallback = callback;
+    mainWindow.webContents.send('serial:portList', portList.map((p) => ({
+      portId: p.portId, portName: p.portName, displayName: p.displayName,
+      vendorId: p.vendorId, productId: p.productId,
+    })));
+  });
+  ipcMain.on('serial:selectPort', (e, portId) => {
+    if (pendingSerialCallback) { pendingSerialCallback(portId || ''); pendingSerialCallback = null; }
   });
 }
 
@@ -94,6 +114,7 @@ app.whenReady().then(() => {
   registerUtilityStore();
   registerWifiChecker(getMainWindow);
   registerContribute();
+  registerFtdi();
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,

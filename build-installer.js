@@ -26,6 +26,7 @@ function build() {
         'ipc/printer.js', 'ipc/slicer.js', 'ipc/outlook.js',
         'ipc/wifi-checker.js', 'renderer/wifi-checker.js', 'renderer/engineering.js',
         'ipc/contribute.js',
+        'ipc/ftdi.js', 'ipc/ftdi_helper.py', 'renderer/uart-bridge.js',
         'installer.iss'];
       const newestKey = keyFiles.reduce((max, f) => {
         try { return Math.max(max, fs.statSync(path.join(ROOT, f)).mtimeMs); }

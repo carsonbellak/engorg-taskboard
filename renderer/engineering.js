@@ -41,8 +41,15 @@ const engineeringUtilities = (() => {
       activate() { wifiChecker.mount(document.getElementById('view-wifi-checker')); wifiChecker.activate(); },
       deactivate() { wifiChecker.deactivate(); },
     },
+    'uart-bridge': {
+      id: 'uart-bridge', name: 'UART Bridge', icon: '🔌',
+      description: 'Wire up COM/UART ports and FTDI bit-bang devices on a canvas — drag TX→RX to bridge, send hex/ASCII/pulses, and monitor traffic.',
+      paneId: 'eng-util-uart-bridge',
+      activate() { uartBridge.mount(document.getElementById('view-uart-bridge')); uartBridge.activate(); },
+      deactivate() { uartBridge.deactivate(); },
+    },
   };
-  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker'];
+  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {

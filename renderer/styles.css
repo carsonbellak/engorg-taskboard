@@ -10309,3 +10309,70 @@ body.theme-light .syn-builtin { color: #059669; }
 .wifi-radio { display: flex; gap: 18px; font-size: 13px; color: var(--text-primary); }
 .wifi-radio label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 
+/* ============================================================
+   UART BRIDGE
+   ============================================================ */
+.uart-bridge { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; overflow: hidden; }
+.uart-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+.uart-toolbar .kicad-btn { font-size: 13px; padding: 8px 12px; }
+.uart-hint { font-size: 12px; color: var(--text-muted); }
+
+.uart-canvas { position: relative; flex: 1; min-height: 220px; overflow: auto; background:
+  radial-gradient(var(--border-color) 1px, transparent 1px); background-size: 22px 22px; }
+.uart-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.uart-wire { stroke: var(--accent, #3B82F6); stroke-width: 2.5; }
+.uart-wire-temp { stroke: var(--accent, #3B82F6); stroke-width: 2; stroke-dasharray: 5 4; opacity: 0.7; }
+.uart-wire-hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
+#uart-nodes { position: absolute; inset: 0; }
+
+.uart-node { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); user-select: none; }
+.uart-node-head { display: flex; align-items: center; gap: 7px; padding: 8px 10px; cursor: move;
+  border-bottom: 1px solid var(--border-color); border-radius: 10px 10px 0 0; background: var(--bg-hover); }
+.uart-node-name { font-weight: 700; font-size: 13px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uart-node-type { font-size: 10px; font-weight: 700; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px; }
+.uart-node-x { border: none; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 17px; line-height: 1; }
+.uart-node-x:hover { color: var(--danger, #ef4444); }
+.uart-status { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint, #94a3b8); flex-shrink: 0; }
+.uart-status.on { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.uart-node-body { padding: 9px 10px; display: flex; flex-direction: column; gap: 7px; }
+.uart-cfg { display: flex; gap: 5px; align-items: center; }
+.uart-cfg .kicad-input { padding: 5px 6px; font-size: 12px; }
+.uart-send { display: flex; gap: 5px; }
+.uart-sm { flex-shrink: 0; width: 92px; }
+.uart-lbl { font-size: 12px; color: var(--text-secondary); }
+.uart-mask { width: 70px !important; }
+.uart-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.uart-cb { display: flex; align-items: center; gap: 5px; }
+.uart-int { width: 60px !important; padding: 5px 6px !important; }
+.uart-send-btn { margin-left: auto; padding: 6px 12px !important; font-size: 12px !important; }
+.uart-conn { width: 100%; font-size: 13px; }
+
+/* terminals */
+.uart-term { position: absolute; width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid var(--bg-secondary); cursor: crosshair; z-index: 2; }
+.uart-term-rx { left: -8px; top: 27px; background: #f59e0b; }
+.uart-term-tx { right: -8px; top: 27px; background: #3b82f6; }
+.uart-term:hover { transform: scale(1.25); }
+
+/* monitor */
+.uart-monitor-wrap { flex-shrink: 0; height: 200px; display: flex; flex-direction: column; border-top: 1px solid var(--border-color); }
+.uart-monitor-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+.uart-monitor-head .kicad-btn { padding: 4px 10px; font-size: 11px; }
+.uart-monitor { flex: 1; overflow: auto; padding: 6px 12px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; background: var(--bg-input, var(--bg-primary)); }
+.uart-logline { padding: 1px 0; white-space: pre-wrap; word-break: break-all; color: var(--text-primary); }
+.uart-logline .uart-ts { color: var(--text-muted); }
+.uart-rx .uart-hex { color: #f59e0b; }
+.uart-tx .uart-hex { color: #3b82f6; }
+.uart-ascii { color: var(--text-muted); }
+.uart-sys { color: var(--text-muted); font-style: italic; }
+
+/* port picker modal rows */
+.uart-modal-title { font-size: 16px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px; }
+.uart-modal-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
+.uart-portlist { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.uart-port-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  padding: 9px 11px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; }
+.uart-port-row:hover { border-color: var(--accent); background: var(--bg-hover); }
+.uart-port-row span { font-size: 11px; color: var(--text-muted); }
+

@@ -58,6 +58,19 @@ contextBridge.exposeInMainWorld('api', {
     setTemp: (opts) => ipcRenderer.invoke('wifi:setTemp', opts),
     writeFile: (opts) => ipcRenderer.invoke('wifi:writeFile', opts)
   },
+  // UART Bridge — Web Serial port-picker relay + FTDI bit-bang
+  serial: {
+    onPortList: (cb) => ipcRenderer.on('serial:portList', (e, ports) => cb(ports)),
+    selectPort: (portId) => ipcRenderer.send('serial:selectPort', portId)
+  },
+  ftdi: {
+    list: () => ipcRenderer.invoke('ftdi:list'),
+    open: (index) => ipcRenderer.invoke('ftdi:open', index),
+    bitmode: (index, mask, mode) => ipcRenderer.invoke('ftdi:bitmode', index, mask, mode),
+    baud: (index, baud) => ipcRenderer.invoke('ftdi:baud', index, baud),
+    write: (index, bytes) => ipcRenderer.invoke('ftdi:write', index, bytes),
+    close: (index) => ipcRenderer.invoke('ftdi:close', index)
+  },
   // Contribute — submit local changes to the canonical repo as a GitHub PR
   contribute: {
     getChanges: () => ipcRenderer.invoke('contribute:getChanges'),
