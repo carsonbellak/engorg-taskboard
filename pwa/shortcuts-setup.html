@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Siri Voice Setup — Engineering Task Board</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0F172A; --card: #1E293B; --card2: #283548;
+      --border: #334155; --text: #F1F5F9; --muted: #94A3B8;
+      --accent: #818CF8; --success: #22C55E;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg:#F8FAFC; --card:#FFFFFF; --card2:#F1F5F9; --border:#E2E8F0; --text:#0F172A; --muted:#64748B; --accent:#3B82F6; --success:#16A34A; }
+    }
+    body { font-family: system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); padding:20px 16px 60px; min-height:100vh; line-height:1.5; }
+    .wrap { max-width:480px; margin:0 auto; }
+    h1 { font-size:22px; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:14px; margin-bottom:24px; }
+
+    /* Progress */
+    .prog { display:flex; align-items:center; gap:10px; margin-bottom:20px; font-size:13px; color:var(--muted); }
+    .prog-bar { flex:1; height:6px; background:var(--card2); border-radius:99px; overflow:hidden; }
+    .prog-fill { height:100%; background:var(--accent); transition:width .3s; border-radius:99px; }
+
+    /* Card */
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; animation:up .25s ease; }
+    @keyframes up { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .step-badge { display:inline-block; background:var(--accent); color:#fff; border-radius:99px; padding:3px 12px; font-size:12px; font-weight:700; margin-bottom:12px; }
+    .card h2 { font-size:19px; margin-bottom:10px; }
+    .card p { color:var(--muted); font-size:15px; margin-bottom:14px; }
+    .card p strong { color:var(--text); }
+
+    /* Value box */
+    .label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:700; margin-bottom:5px; }
+    .val { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:13px; font-family:ui-monospace,'SF Mono',monospace; font-size:13px; word-break:break-all; margin-bottom:14px; line-height:1.5; }
+
+    /* Tip */
+    .tip { background:rgba(129,140,248,.09); border-left:3px solid var(--accent); border-radius:6px; padding:11px 13px; font-size:13.5px; color:var(--muted); margin-bottom:14px; }
+    .tip strong { color:var(--text); }
+
+    /* Buttons */
+    .btn { display:block; width:100%; padding:14px; border:none; border-radius:10px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; transition:.12s; }
+    .btn:active { transform:scale(.98); }
+    .primary { background:var(--accent); color:#fff; }
+    .secondary { background:var(--card2); color:var(--text); border:1px solid var(--border); }
+    .green { background:var(--success); color:#fff; }
+    .row { display:flex; gap:10px; margin-top:4px; }
+    .row .secondary { flex:0 0 90px; }
+    .row .primary, .row .green { flex:1; }
+
+    /* Image placeholder for visual steps */
+    .visual { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:14px; font-size:13px; color:var(--muted); text-align:center; }
+    .visual strong { color:var(--text); display:block; margin-bottom:6px; }
+
+    /* Done */
+    .done { background:rgba(34,197,94,.1); border:1px solid var(--success); border-radius:14px; padding:28px 20px; text-align:center; }
+    .done h2 { color:var(--success); font-size:22px; margin-bottom:8px; }
+    .done p { color:var(--muted); font-size:14px; }
+    .done p strong { color:var(--text); }
+
+    /* Auth */
+    .auth { background:rgba(245,158,11,.1); border-left:3px solid #F59E0B; border-radius:6px; padding:14px; color:var(--text); font-size:14px; }
+    .auth a { color:var(--accent); }
+    .err { background:rgba(239,68,68,.1); border:1px solid #EF4444; color:#EF4444; border-radius:8px; padding:12px; font-size:13px; margin-top:12px; }
+    .hidden { display:none!important; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙️ Siri Voice Setup</h1>
+  <p class="sub">We'll build a shortcut step by step. Each step has one thing to do.</p>
+
+  <div id="auth-msg" class="auth hidden">
+    Sign in to the app first, then reload this page. <a href="/">Open app →</a>
+  </div>
+
+  <div id="wizard" class="hidden">
+    <div class="prog">
+      <span id="prog-label">Step 1 of 8</span>
+      <div class="prog-bar"><div id="prog-fill" class="prog-fill" style="width:12%"></div></div>
+    </div>
+    <div id="step-area"></div>
+  </div>
+
+  <div id="err-slot"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyA0PSZdBoVrNUrDR384m8O5PcMcbDrGGSw",
+  authDomain:"assistant-taskboard.firebaseapp.com",
+  projectId:"assistant-taskboard",
+  storageBucket:"assistant-taskboard.firebasestorage.app",
+  messagingSenderId:"1036110821826",
+  appId:"1:1036110821826:web:53c88fa09d3d24a141be5b"
+});
+const auth = firebase.auth();
+const urlToken = new URLSearchParams(location.search).get('token');
+let TOKEN = null, step = 0, steps = [];
+
+async function init() {
+  try {
+    let t = urlToken;
+    if (!t) {
+      if (!auth.currentUser) { document.getElementById('auth-msg').classList.remove('hidden'); return; }
+      const id = await auth.currentUser.getIdToken();
+      const r = await fetch('/api/generateApiToken',{method:'POST',headers:{'Authorization':'Bearer '+id}});
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      t = (await r.json()).token;
+    }
+    TOKEN = t;
+    buildSteps();
+    document.getElementById('wizard').classList.remove('hidden');
+    render();
+  } catch(e) {
+    document.getElementById('err-slot').innerHTML = '<div class="err">'+e.message+'</div>';
+  }
+}
+if (urlToken) init(); else auth.onAuthStateChanged(() => init());
+
+function buildSteps() {
+  const listUrl = `https://assistant-taskboard.firebaseapp.com/api/listProjects?token=${TOKEN}`;
+  const addUrl  = `https://assistant-taskboard.firebaseapp.com/api/addNote?token=${TOKEN}&title=`;
+
+  steps = [
+    // ── Setup ──
+    {
+      title: 'Open the Shortcuts app',
+      body: 'Open the <strong>Shortcuts</strong> app on your iPhone. Tap <strong>+</strong> in the top-right to create a new shortcut.',
+      action: 'next'
+    },
+
+    // ── Ask for Input actions ──
+    {
+      title: 'Add "Ask for Input" — title',
+      body: 'Tap <strong>Add Action</strong> → search <strong>Ask for Input</strong> → tap it. Tap the prompt text inside the action and change it to:',
+      valueLabel: 'Prompt text',
+      value: "What's the note title?",
+      action: 'copy'
+    },
+    {
+      title: 'Add "Ask for Input" — description',
+      body: 'Tap <strong>+</strong> → <strong>Ask for Input</strong>. Change the prompt to:',
+      valueLabel: 'Prompt text',
+      value: 'Description? Say skip for none.',
+      action: 'copy'
+    },
+    {
+      title: 'Add "Ask for Input" — priority',
+      body: 'Tap <strong>+</strong> → <strong>Ask for Input</strong>. Change the prompt to:',
+      valueLabel: 'Prompt text',
+      value: 'Priority? High, Medium, or Low.',
+      action: 'copy'
+    },
+    {
+      title: 'Add "Ask for Input" — due date',
+      body: 'Tap <strong>+</strong> → <strong>Ask for Input</strong>. Change the prompt to:',
+      valueLabel: 'Prompt text',
+      value: 'Due date? Say things like this Friday, tomorrow, or skip.',
+      tip: 'You can say anything natural — "this Friday", "next Monday", "in 2 weeks" — the server converts it to a real date automatically.',
+      action: 'copy'
+    },
+
+    // ── Fetch project list ──
+    {
+      title: 'Add "Get Contents of URL" — fetch your projects',
+      body: 'Tap <strong>+</strong> → <strong>Get Contents of URL</strong>. This one fetches your project list so Siri can read them aloud. Tap the URL field and paste:',
+      valueLabel: 'URL',
+      value: listUrl,
+      tip: 'Leave method as <strong>GET</strong>.',
+      action: 'copy'
+    },
+    {
+      title: 'Extract the project names',
+      body: 'Tap <strong>+</strong> → search <strong>Get Dictionary Value</strong> → tap it. Paste this as the <strong>Key</strong>:',
+      valueLabel: 'Key',
+      value: 'projectNames',
+      tip: 'The input should auto-connect to the URL result above it.',
+      action: 'copy'
+    },
+    {
+      title: 'Let Siri read your projects',
+      body: 'Tap <strong>+</strong> → search <strong>Choose from List</strong> → tap it. Tap the prompt and change it to:',
+      valueLabel: 'Prompt text',
+      value: 'Which project?',
+      tip: 'Siri will read each project name aloud and you just say the one you want.',
+      action: 'copy'
+    },
+
+    // ── Build addNote URL ──
+    {
+      title: 'Add "Get Contents of URL" — create the note',
+      body: 'Tap <strong>+</strong> → <strong>Get Contents of URL</strong>. This second one sends the note. Leave method as <strong>GET</strong>. Tap the URL field and paste:',
+      valueLabel: 'Paste into URL field',
+      value: addUrl,
+      tip: 'Cursor lands after <strong>title=</strong>. Keep the keyboard open — next step inserts your variables.',
+      action: 'copy'
+    },
+    {
+      title: 'Insert title variable',
+      body: 'Swipe the bar above the keyboard left until you see <strong>Provided Input</strong>. Tap the <strong>1st Provided Input</strong> (title pill appears). Then type:',
+      valueLabel: 'Type this right after the pill',
+      value: '&description=',
+      action: 'copy'
+    },
+    {
+      title: 'Insert description variable',
+      body: 'Swipe left → tap <strong>2nd Provided Input</strong> (description). Then type:',
+      valueLabel: 'Type this right after the pill',
+      value: '&priority=',
+      action: 'copy'
+    },
+    {
+      title: 'Insert priority variable',
+      body: 'Swipe left → tap <strong>3rd Provided Input</strong> (priority). Then type:',
+      valueLabel: 'Type this right after the pill',
+      value: '&dueDate=',
+      action: 'copy'
+    },
+    {
+      title: 'Insert due date variable',
+      body: 'Swipe left → tap <strong>4th Provided Input</strong> (due date). Then type:',
+      valueLabel: 'Type this right after the pill',
+      value: '&projectName=',
+      action: 'copy'
+    },
+    {
+      title: 'Insert project variable',
+      body: 'Swipe left and look for <strong>Chosen Item</strong> (that\'s the project you picked from the list). Tap it. Then tap <strong>X</strong> to close the keyboard.',
+      tip: 'The URL now has all 5 values filled in. You\'re done building it.',
+      action: 'next'
+    },
+
+    // ── Finish ──
+    {
+      title: 'Name it and you\'re done',
+      body: 'Tap the shortcut name at the top and rename it to <strong>Quick Note</strong>. Tap <strong>Done</strong>.',
+      tip: 'Say <strong>"Hey Siri, Quick Note"</strong> — Siri asks for title, description, priority, due date, then reads your projects aloud for you to pick. The note appears in your board instantly.',
+      action: 'finish'
+    }
+  ];
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function render() {
+  const total = steps.length;
+  const pct = Math.round(((step+1)/total)*100);
+  document.getElementById('prog-fill').style.width = pct+'%';
+  document.getElementById('prog-label').textContent = 'Step '+(step+1)+' of '+total;
+
+  if (step >= total) {
+    document.getElementById('step-area').innerHTML = `
+      <div class="done">
+        <div style="font-size:44px;margin-bottom:12px">🎉</div>
+        <h2>You're all set!</h2>
+        <p>Say <strong>"Hey Siri, Quick Note"</strong> — Siri asks for your title, description, and priority, then adds the note to your task board instantly.</p>
+        <button class="btn secondary" style="margin-top:18px" onclick="step=0;render()">Start Over</button>
+      </div>`;
+    return;
+  }
+
+  const s = steps[step];
+  let html = `<div class="card"><span class="step-badge">Step ${step+1}</span><h2>${s.title}</h2><p>${s.body}</p>`;
+  if (s.valueLabel) html += `<div class="label">${s.valueLabel}</div><div class="val" id="val-box">${esc(s.value)}</div>`;
+  if (s.tip) html += `<div class="tip">${s.tip}</div>`;
+
+  html += '<div class="row">';
+  if (step > 0) html += `<button class="btn secondary" onclick="go(-1)">Back</button>`;
+
+  if (s.action === 'copy-then-next') {
+    html += `<button class="btn primary" id="main-btn" onclick="doCopy()">📋 Copy & Continue</button>`;
+  } else if (s.action === 'finish') {
+    html += `<button class="btn green" onclick="go(1)">Done! Finish ✓</button>`;
+  } else {
+    html += `<button class="btn primary" onclick="go(1)">Done → Next</button>`;
+  }
+  html += '</div></div>';
+  document.getElementById('step-area').innerHTML = html;
+}
+
+function go(dir) { step += dir; render(); }
+
+function doCopy() {
+  const s = steps[step];
+  const btn = document.getElementById('main-btn');
+  navigator.clipboard.writeText(s.value).then(() => {
+    btn.textContent = '✓ Copied! Go paste it now';
+    btn.style.background = 'var(--success)';
+    btn.onclick = () => go(1);
+  }).catch(() => {
+    // Fallback: select text
+    const box = document.getElementById('val-box');
+    const r = document.createRange(); r.selectNodeContents(box);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    btn.textContent = 'Selected — long press to Copy, then tap here';
+    btn.onclick = () => go(1);
+  });
+}
+</script>
+</body>
+</html>

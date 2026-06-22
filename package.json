@@ -1,0 +1,48 @@
+{
+  "name": "engineering-task-board",
+  "version": "1.0.0",
+  "description": "Engineering Design Organization Task Board",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "docx": "^9.6.1",
+    "engineering-task-board": "file:",
+    "imapflow": "^1.4.1",
+    "mailparser": "^3.9.10",
+    "node-ical": "^0.26.1",
+    "nodemailer": "^9.0.1",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "firebase-tools": "^15.12.0"
+  },
+  "build": {
+    "appId": "com.engineering.taskboard",
+    "productName": "Engineering Task Board",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Engineering Task Board",
+      "allowToChangeInstallationDirectory": false
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*"
+    ]
+  }
+}

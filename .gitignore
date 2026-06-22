@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Bundled runtimes / large binaries (shipped via the installer, not source)
+nodejs/
+tools/
+
+# Build output
+dist/
+*.exe
+*.zip
+EngOrg-Setup.*
+
+# Inno Setup uninstaller artifacts
+unins000.*
+
+# Firebase local cache & agent-local settings
+.firebase/
+.claude/
+
+# User data & local runtime state (may contain personal data / credentials)
+appdata/
+
+# Logs & OS cruft
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db

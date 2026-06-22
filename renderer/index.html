@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://www.gstatic.com https://apis.google.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; font-src https://fonts.gstatic.com; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com http://192.168.0.0/8 https://*.a.run.app https://*.firebaseapp.com https://*.cloudfunctions.net; img-src 'self' file: data: blob: https://*.googleusercontent.com https://api.qrserver.com; media-src 'self' file: blob:; object-src 'self' file: blob:; frame-src 'self' file: blob: https://accounts.google.com https://*.firebaseapp.com;">
+  <title>Engineering Task Board</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Header Bar -->
+  <header id="header">
+    <div class="header-brand">&#9881; EngOrg</div>
+    <div class="header-tabs">
+      <button class="header-tab active" data-view="notes">&#128204; Notes</button>
+      <button class="header-tab" data-view="calendar">&#128197; Calendar</button>
+      <button class="header-tab" data-view="email">&#9993; Email</button>
+      <button class="header-tab" data-view="timeline">&#128200; Timeline</button>
+      <button class="header-tab" data-view="timers">&#9201; Timers</button>
+      <button class="header-tab" data-view="board">&#128203; Board</button>
+      <button class="header-tab" data-view="purchasing">&#128230; Purchases</button>
+      <button class="header-tab" data-view="stats">&#128202; Stats</button>
+      <button class="header-tab" data-view="files">&#128193; Files</button>
+      <button class="header-tab" data-view="engineering">&#128295; Engineering Utilities</button>
+      <button id="btn-tab-lock" class="tab-lock-btn" title="Lock tab order">&#128275;</button>
+    </div>
+    <button id="btn-cloud-sync" class="header-btn cloud-sync-btn" title="Sign in to sync across devices">&#9729; Sign in</button>
+    <span id="sync-status-dot" class="sync-dot disconnected"></span>
+    <button id="btn-outlook-sync" class="header-btn" title="Outlook Calendar Sync">&#128197; Outlook</button>
+    <button id="btn-add-project-header" class="header-btn">+ Project</button>
+    <button id="btn-settings-header" class="header-btn header-btn-settings" title="Settings">&#9881;</button>
+  </header>
+
+  <div id="app-body">
+    <!-- Left Sidebar -->
+    <aside id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label sidebar-collapsible" data-target="sidebar-active-section" data-default="open">
+          <span class="sidebar-collapse-arrow">&#9660;</span> PROJECTS
+        </div>
+        <div id="sidebar-active-section">
+          <button class="sidebar-item active" data-project="all">&#128450; All Projects</button>
+          <div id="sidebar-projects"></div>
+        </div>
+      </div>
+      <div class="sidebar-section" id="sidebar-archive-section-wrapper" style="display:none">
+        <div class="sidebar-label sidebar-collapsible" data-target="sidebar-archive-section" data-default="closed">
+          <span class="sidebar-collapse-arrow">&#9654;</span> ARCHIVED
+        </div>
+        <div id="sidebar-archive-section" class="sidebar-collapsed">
+          <button class="sidebar-item sidebar-archived-all-btn" data-project="all-archived">&#128451; All Archived <span id="sidebar-archive-count" style="opacity:0.6;margin-left:auto"></span></button>
+          <div id="sidebar-archived-projects"></div>
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-label">DAY</div>
+        <div id="sidebar-days"></div>
+      </div>
+      <div id="sidebar-progress" class="sidebar-progress hidden">
+        <div class="progress-label">Note progress</div>
+        <div class="progress-bar-bg">
+          <div id="progress-bar-fill" class="progress-bar-fill"></div>
+        </div>
+        <div id="progress-text" class="progress-text">0/0 done</div>
+      </div>
+      <div id="sidebar-streak" class="sidebar-streak hidden">
+        <div class="streak-icon">&#128293;</div>
+        <div class="streak-num" id="streak-count">0</div>
+        <div class="streak-label">day streak</div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main id="main-content">
+      <!-- Sub-header: day name + add button -->
+      <div id="content-header">
+        <div>
+          <h1 id="content-day-title"></h1>
+          <div id="content-project-subtitle"></div>
+        </div>
+        <button id="btn-add-main" class="btn-add-main">+ Add Note</button>
+      </div>
+
+      <!-- Quick Filters Bar -->
+      <div id="quick-filters" class="quick-filters hidden">
+        <button class="filter-chip" data-filter="priority" data-value="High">High</button>
+        <button class="filter-chip" data-filter="priority" data-value="Medium">Medium</button>
+        <button class="filter-chip" data-filter="priority" data-value="Low">Low</button>
+        <span class="filter-divider"></span>
+        <button class="filter-chip" data-filter="overdue" data-value="true">Overdue</button>
+        <span class="filter-divider"></span>
+        <span id="filter-categories"></span>
+        <span class="filter-divider"></span>
+        <select id="filter-sort" class="filter-sort-select" title="Sort notes by...">
+          <option value="priority">Sort: Priority</option>
+          <option value="created">Sort: Newest</option>
+          <option value="created-asc">Sort: Oldest</option>
+          <option value="due">Sort: Due Date</option>
+          <option value="alpha">Sort: A-Z</option>
+          <option value="color">Sort: Color</option>
+          <option value="category">Sort: Category</option>
+          <option value="project">Sort: Project</option>
+        </select>
+        <span class="filter-divider"></span>
+        <select id="filter-color-mode" class="filter-sort-select" title="Auto-color notes by...">
+          <option value="category">Color: Category</option>
+          <option value="priority">Color: Priority</option>
+          <option value="project">Color: Project</option>
+          <option value="status">Color: Status</option>
+          <option value="due">Color: Due Date</option>
+          <option value="manual">Color: Manual</option>
+        </select>
+      </div>
+
+      <!-- View containers -->
+      <div id="view-notes" class="view-panel active"></div>
+      <div id="view-calendar" class="view-panel"></div>
+      <div id="view-email" class="view-panel"></div>
+      <div id="view-timeline" class="view-panel"></div>
+      <div id="view-board" class="view-panel"></div>
+      <div id="view-purchasing" class="view-panel"></div>
+      <div id="view-stats" class="view-panel"></div>
+      <div id="view-files" class="view-panel">
+        <div class="file-viewer-layout">
+          <!-- ====== INSPECTOR COLUMN (far left, hover to reveal) ====== -->
+          <div id="fv-inspector" class="fv-inspector">
+            <div class="fv-inspector-tabs">
+              <button class="fv-inspector-tab active" data-tab="details">Details</button>
+              <button class="fv-inspector-tab" data-tab="outline">Outline</button>
+              <button class="fv-inspector-tab" data-tab="tools">Tools</button>
+            </div>
+            <div class="fv-inspector-body" data-tab="details">
+              <div id="fv-inspect-details" class="fv-inspect-content">
+                <div class="fv-inspect-empty">Select a file to inspect</div>
+              </div>
+            </div>
+            <div class="fv-inspector-body hidden" data-tab="outline">
+              <div id="fv-inspect-outline" class="fv-inspect-content">
+                <div class="fv-inspect-empty">Open a code file to see outline</div>
+              </div>
+            </div>
+            <div class="fv-inspector-body hidden" data-tab="tools">
+              <div id="fv-inspect-tools" class="fv-inspect-content">
+                <div class="fv-inspect-empty">Select a file to use tools</div>
+              </div>
+            </div>
+          </div>
+          <!-- File tree sidebar -->
+          <div class="file-viewer-sidebar">
+            <!-- Top: Browse + filter -->
+            <div class="file-viewer-sidebar-header">
+              <div class="fv-header-row">
+                <button id="file-viewer-browse" class="btn-viewer-browse">Browse Folder</button>
+                <span id="fv-git-branch" class="fv-git-branch hidden"></span>
+              </div>
+              <div class="fv-sidebar-tools">
+                <input type="text" id="fv-filter" class="fv-filter-input" placeholder="Filter files...">
+              </div>
+            </div>
+            <!-- Quick actions -->
+            <div class="fv-sidebar-actions">
+              <button id="fv-btn-new-file" class="fv-sidebar-action-btn" title="New File">+ File</button>
+              <button id="fv-btn-new-folder" class="fv-sidebar-action-btn" title="New Folder">+ Folder</button>
+              <button id="fv-btn-collapse-all" class="fv-sidebar-action-btn" title="Collapse All">Collapse</button>
+              <select id="fv-sort-tree" class="fv-sort-select" title="Sort tree by...">
+                <option value="name">Sort: Name</option>
+                <option value="type">Sort: Type</option>
+                <option value="size">Sort: Size</option>
+                <option value="modified">Sort: Date</option>
+              </select>
+            </div>
+            <!-- Bookmarks -->
+            <div id="fv-bookmarks" class="fv-bookmarks-section hidden"></div>
+            <!-- Recent files -->
+            <div id="fv-recent" class="fv-recent-section hidden"></div>
+            <!-- Search panel -->
+            <div id="fv-search-panel" class="fv-search-panel hidden">
+              <div class="fv-search-header">
+                <input type="text" id="fv-search-input" class="fv-search-input" placeholder="Search in files...">
+                <button id="fv-search-close" class="fv-search-close">&times;</button>
+              </div>
+              <div class="fv-search-options">
+                <label class="fv-search-opt"><input type="checkbox" id="fv-search-regex"> Regex</label>
+                <label class="fv-search-opt"><input type="checkbox" id="fv-search-case"> Aa</label>
+              </div>
+              <div id="fv-search-results" class="fv-search-results"></div>
+            </div>
+            <!-- File tree -->
+            <div id="file-tree" class="file-tree">
+              <div class="file-tree-empty">Select a folder to browse</div>
+            </div>
+            <!-- Footer -->
+            <div class="fv-sidebar-footer">
+              <span id="fv-file-count" class="fv-file-count"></span>
+            </div>
+          </div>
+          <!-- Resizer handle -->
+          <div class="file-viewer-resizer" id="file-viewer-resizer"></div>
+          <!-- Pane area (PaneManager builds content dynamically) -->
+          <div class="file-viewer-main">
+            <!-- Global toolbar -->
+            <div class="file-viewer-global-toolbar">
+              <button id="fv-btn-back" class="fv-toolbar-btn" title="Go up one level">&#8593;</button>
+              <button id="fv-btn-rename" class="fv-toolbar-btn" title="Batch Rename">Rename</button>
+              <button id="fv-btn-search" class="fv-toolbar-btn" title="Search in files (Ctrl+Shift+F)">Search</button>
+              <button id="fv-btn-bookmark" class="fv-toolbar-btn" title="Bookmark current folder">&#9734;</button>
+              <span class="fv-toolbar-spacer"></span>
+              <button id="fv-btn-git-commit" class="fv-toolbar-btn hidden" title="Git commit">Commit</button>
+            </div>
+            <!-- Git commit panel (hidden by default) -->
+            <div id="fv-commit-panel" class="fv-commit-panel hidden">
+              <div class="fv-commit-header">
+                <span class="fv-commit-title">Commit</span>
+                <button id="fv-commit-close" class="fv-commit-close">&times;</button>
+              </div>
+              <div class="fv-commit-body">
+                <div id="fv-commit-staged" class="fv-commit-staged"></div>
+                <textarea id="fv-commit-msg" class="fv-commit-msg" placeholder="Commit message..." rows="2"></textarea>
+                <button id="fv-commit-apply" class="btn-viewer-action" disabled>Commit</button>
+              </div>
+            </div>
+            <!-- Batch rename panel (hidden by default) -->
+            <div id="fv-rename-panel" class="fv-rename-panel hidden">
+              <div class="fv-rename-header">
+                <span class="fv-rename-title">Batch Rename</span>
+                <button id="fv-rename-close" class="fv-rename-close">&times;</button>
+              </div>
+              <div class="fv-rename-body">
+                <div class="fv-rename-row">
+                  <label>Find</label>
+                  <input type="text" id="fv-rename-find" class="fv-rename-input" placeholder="Text to find in filenames...">
+                </div>
+                <div class="fv-rename-row">
+                  <label>Replace</label>
+                  <input type="text" id="fv-rename-replace" class="fv-rename-input" placeholder="Replace with...">
+                </div>
+                <div class="fv-rename-options">
+                  <label class="fv-rename-opt"><input type="checkbox" id="fv-rename-regex"> Regex</label>
+                  <label class="fv-rename-opt"><input type="checkbox" id="fv-rename-case"> Case sensitive</label>
+                </div>
+                <div id="fv-rename-preview" class="fv-rename-preview"></div>
+                <div class="fv-rename-actions">
+                  <button id="fv-rename-apply" class="btn-viewer-action" disabled>Apply Rename</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="view-timers" class="view-panel"></div>
+      <div id="view-engineering" class="view-panel">
+        <div class="eng-utilities">
+          <div id="eng-subnav" class="eng-subnav"></div>
+          <div class="eng-content">
+            <!-- Built-in utility mount points (kept as distinct ids so existing
+                 controllers + the always-on camera bridge keep working). -->
+            <div id="eng-util-printer" class="eng-util-pane"><div id="view-printer"></div></div>
+            <div id="eng-util-slicer" class="eng-util-pane"><div id="view-slicer"></div></div>
+            <div id="eng-util-kicad-importer" class="eng-util-pane"><div id="view-kicad-importer"></div></div>
+            <div id="eng-util-wifi-checker" class="eng-util-pane"><div id="view-wifi-checker"></div></div>
+            <div id="eng-util-store" class="eng-util-pane"><div id="view-utility-store"></div></div>
+          </div>
+        </div>
+      </div>
+      <div id="view-settings" class="view-panel"></div>
+    </main>
+  </div>
+
+  <!-- Modal: Add/Edit Note -->
+  <div id="modal-add-note" class="modal hidden">
+    <div class="modal-box">
+      <h2 id="modal-note-heading">&#128204; New Note</h2>
+      <label class="field-label">Note *</label>
+      <textarea id="note-text" rows="4" placeholder="What do you need to remember?"></textarea>
+      <label class="field-label">Description</label>
+      <textarea id="note-description" rows="2" placeholder="Additional details..."></textarea>
+      <label class="field-label">Project</label>
+      <select id="note-project"></select>
+      <label class="field-label">Category</label>
+      <div class="category-select-row">
+        <select id="note-category"></select>
+        <button type="button" id="btn-new-category" class="btn-new-category" title="New Category">+</button>
+      </div>
+      <label class="field-label">Priority</label>
+      <div id="note-priority-picker" class="priority-picker-row"></div>
+      <label class="field-label">Status</label>
+      <select id="note-status">
+        <option value="backlog">Backlog</option>
+        <option value="inProgress">In Progress</option>
+        <option value="review">Review</option>
+        <option value="done">Done</option>
+      </select>
+      <div class="form-row">
+        <div class="form-col">
+          <label class="field-label">Due Date</label>
+          <input type="date" id="note-due-date">
+        </div>
+        <div class="form-col">
+          <label class="field-label">Time (optional)</label>
+          <input type="time" id="note-due-time">
+        </div>
+      </div>
+      <label class="field-label">Checklist</label>
+      <div id="note-checklist-container"></div>
+      <button type="button" id="btn-add-checklist-item" class="btn-link-add">+ Add Checklist Item</button>
+      <label class="field-label">Links / App Paths</label>
+      <div id="note-links-container"></div>
+      <button type="button" id="btn-add-link" class="btn-link-add">+ Add Link</button>
+      <label class="field-label">File Attachments</label>
+      <div id="note-attachments-container"></div>
+      <button type="button" id="btn-add-attachment" class="btn-link-add">+ Attach File</button>
+      <div class="modal-actions">
+        <button id="btn-cancel-note" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-note" class="btn-modal-primary">Add Note</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add/Edit Schedule Event -->
+  <div id="modal-add-schedule" class="modal hidden">
+    <div class="modal-box">
+      <h2>&#128197; New Event</h2>
+      <label class="field-label">Title *</label>
+      <input type="text" id="schedule-title" placeholder="Event title">
+      <label class="field-label">Description</label>
+      <input type="text" id="schedule-desc" placeholder="Optional description">
+      <div class="form-row">
+        <div class="form-col">
+          <label class="field-label">Start Time</label>
+          <input type="time" id="schedule-start" value="09:00">
+        </div>
+        <div class="form-col">
+          <label class="field-label">End Time</label>
+          <input type="time" id="schedule-end" value="10:00">
+        </div>
+      </div>
+      <label class="field-label">Project</label>
+      <select id="schedule-project"></select>
+      <label class="field-label">Day</label>
+      <select id="schedule-day"></select>
+      <label class="field-label">Specific Date (optional)</label>
+      <input type="date" id="schedule-date">
+      <small class="field-hint">If set, event appears only on this date. Otherwise repeats weekly on the selected day.</small>
+      <div class="modal-actions">
+        <button id="btn-cancel-schedule" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-schedule" class="btn-modal-primary">Add Event</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Project -->
+  <div id="modal-add-project" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2>&#128450; New Project</h2>
+      <label class="field-label">Project Name</label>
+      <input type="text" id="project-name-input" placeholder="e.g. Mechanical Systems">
+      <label class="field-label">Categories</label>
+      <div id="project-categories" class="category-checkbox-group"></div>
+      <label class="field-label">Color</label>
+      <input type="color" id="project-color-input" value="#6366F1" class="color-input-full" style="display:none;">
+      <div id="project-color-preview" class="project-color-preview"></div>
+      <small id="project-color-hint" class="project-color-hint">Auto-assigned from rainbow gradient</small>
+      <div class="modal-actions">
+        <button id="btn-cancel-project" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-project" class="btn-modal-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add/Edit Purchase -->
+  <div id="modal-purchase" class="modal hidden">
+    <div class="modal-box">
+      <h2 id="modal-purchase-title">&#128230; New Order</h2>
+      <label class="field-label">Item Description *</label>
+      <input type="text" id="purchase-item" placeholder="What are you ordering?">
+      <div class="form-row">
+        <div class="form-col">
+          <label class="field-label">Supplier</label>
+          <input type="text" id="purchase-supplier" placeholder="e.g. DigiKey">
+        </div>
+        <div class="form-col">
+          <label class="field-label">Project</label>
+          <select id="purchase-project"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-col">
+          <label class="field-label">Quantity</label>
+          <input type="number" id="purchase-quantity" value="1" min="1">
+        </div>
+        <div class="form-col">
+          <label class="field-label">Cost ($)</label>
+          <input type="number" id="purchase-cost" step="0.01" min="0" placeholder="0.00">
+        </div>
+      </div>
+      <label class="field-label">Product Link</label>
+      <input type="text" id="purchase-link" placeholder="https://www.example.com/product">
+      <label class="field-label">Tracking Number</label>
+      <input type="text" id="purchase-tracking" placeholder="Enter tracking number...">
+      <small id="carrier-detect-hint" class="carrier-hint"></small>
+      <label class="field-label">Notes</label>
+      <textarea id="purchase-notes" rows="2" placeholder="Additional notes..."></textarea>
+      <input type="hidden" id="purchase-status" value="toPlace">
+      <input type="hidden" id="purchase-edit-id" value="">
+      <div class="modal-actions">
+        <button id="btn-cancel-purchase" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-purchase" class="btn-modal-primary">Save Order</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Quick Add Tracking -->
+  <div id="modal-tracking" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2>Add Tracking Number</h2>
+      <label class="field-label">Tracking Number</label>
+      <input type="text" id="tracking-number-input" placeholder="Enter tracking number...">
+      <small id="tracking-carrier-hint" class="carrier-hint"></small>
+      <input type="hidden" id="tracking-purchase-id">
+      <div class="modal-actions">
+        <button id="btn-cancel-tracking" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-tracking" class="btn-modal-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: New Category -->
+  <div id="modal-new-category" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2>&#127912; New Category</h2>
+      <label class="field-label">Name</label>
+      <input type="text" id="new-cat-name" placeholder="e.g. Software">
+      <label class="field-label">Short Label (max 4 chars)</label>
+      <input type="text" id="new-cat-label" placeholder="e.g. SW" maxlength="4">
+      <label class="field-label">Color</label>
+      <input type="color" id="new-cat-color" value="#8B5CF6" class="color-input-full">
+      <div class="modal-actions">
+        <button id="btn-cancel-new-cat" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-new-cat" class="btn-modal-primary">Add Category</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Cloud Sign In -->
+  <div id="modal-cloud-signin" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2>&#9729; Cloud Sync</h2>
+      <div id="cloud-modal-content"></div>
+      <div class="modal-actions">
+        <button id="btn-cancel-cloud" class="btn-modal-cancel">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK (compat for script-tag usage) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+  <!-- File viewer libraries -->
+  <script src="lib/papaparse.min.js"></script>
+  <script src="lib/xlsx.full.min.js"></script>
+  <script src="lib/mammoth.browser.min.js"></script>
+  <script src="lib/jszip.min.js"></script>
+
+  <!-- Three.js for 3D model viewer -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="components/tracking-utils.js"></script>
+  <script src="data.js"></script>
+  <script src="firebase-sync.js"></script>
+  <script src="components/sticky-note.js"></script>
+  <script src="components/add-note-modal.js"></script>
+  <script src="components/project-manager.js"></script>
+  <script src="taskboard.js"></script>
+  <script src="purchasing.js"></script>
+  <script src="noteboard.js"></script>
+  <script src="cad-viewer.js"></script>
+  <script src="file-viewer.js"></script>
+  <script src="stats.js"></script>
+  <script src="printer.js"></script>
+  <script src="slicer.js"></script>
+  <script src="kicad-importer.js"></script>
+  <script src="wifi-checker.js"></script>
+  <script src="engineering.js"></script>
+  <script src="settings.js"></script>
+  <script src="timers.js"></script>
+  <script src="email.js"></script>
+  <script src="theme-fx.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

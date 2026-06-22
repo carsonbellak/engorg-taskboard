@@ -1,0 +1,5 @@
+appdata\
+EngOrg-Setup.zip
+.git\
+.firebase\
+dist\

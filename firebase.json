@@ -1,0 +1,83 @@
+{
+  "functions": {
+    "source": "functions"
+  },
+  "hosting": {
+    "public": "pwa",
+    "ignore": [
+      "serve.js",
+      "firebase.json",
+      "**/.*"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/generateApiToken",
+        "function": "generateApiToken"
+      },
+      {
+        "source": "/api/addNote",
+        "function": "addNote"
+      },
+      {
+        "source": "/api/listProjects",
+        "function": "listProjects"
+      },
+      {
+        "source": "/api/getShortcut",
+        "function": "getShortcut"
+      },
+      {
+        "source": "/api/startTimer",
+        "function": "startTimer"
+      },
+      {
+        "source": "/api/cancelTimer",
+        "function": "cancelTimer"
+      },
+      {
+        "source": "/api/dismissTimer",
+        "function": "dismissTimer"
+      },
+      {
+        "source": "/api/listTimers",
+        "function": "listTimers"
+      },
+      {
+        "source": "/api/registerPushSubscription",
+        "function": "registerPushSubscription"
+      },
+      {
+        "source": "/shortcuts-setup",
+        "destination": "/shortcuts-setup.html"
+      },
+      {
+        "source": "/timer-setup",
+        "destination": "/timer-setup.html"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "max-age=3600" }
+        ]
+      },
+      {
+        "source": "sw.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

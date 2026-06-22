@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quick Timer Setup — Engineering Task Board</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0F172A; --card: #1E293B; --card2: #283548;
+      --border: #334155; --text: #F1F5F9; --muted: #94A3B8;
+      --accent: #818CF8; --success: #22C55E;
+    }
+    @media (prefers-color-scheme: light) {
+      :root { --bg:#F8FAFC; --card:#FFFFFF; --card2:#F1F5F9; --border:#E2E8F0; --text:#0F172A; --muted:#64748B; --accent:#3B82F6; --success:#16A34A; }
+    }
+    body { font-family: system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); padding:20px 16px 60px; min-height:100vh; line-height:1.5; }
+    .wrap { max-width:480px; margin:0 auto; }
+    h1 { font-size:22px; margin-bottom:4px; }
+    .sub { color:var(--muted); font-size:14px; margin-bottom:24px; }
+
+    .prog { display:flex; align-items:center; gap:10px; margin-bottom:20px; font-size:13px; color:var(--muted); }
+    .prog-bar { flex:1; height:6px; background:var(--card2); border-radius:99px; overflow:hidden; }
+    .prog-fill { height:100%; background:var(--accent); transition:width .3s; border-radius:99px; }
+
+    .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:20px; animation:up .25s ease; }
+    @keyframes up { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    .step-badge { display:inline-block; background:var(--accent); color:#fff; border-radius:99px; padding:3px 12px; font-size:12px; font-weight:700; margin-bottom:12px; }
+    .card h2 { font-size:19px; margin-bottom:10px; }
+    .card p { color:var(--muted); font-size:15px; margin-bottom:14px; }
+    .card p strong { color:var(--text); }
+
+    .label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:700; margin-bottom:5px; }
+    .val { background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:13px; font-family:ui-monospace,'SF Mono',monospace; font-size:13px; word-break:break-all; margin-bottom:14px; line-height:1.5; }
+
+    .tip { background:rgba(129,140,248,.09); border-left:3px solid var(--accent); border-radius:6px; padding:11px 13px; font-size:13.5px; color:var(--muted); margin-bottom:14px; }
+    .tip strong { color:var(--text); }
+
+    .btn { display:block; width:100%; padding:14px; border:none; border-radius:10px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit; transition:.12s; }
+    .btn:active { transform:scale(.98); }
+    .primary { background:var(--accent); color:#fff; }
+    .secondary { background:var(--card2); color:var(--text); border:1px solid var(--border); }
+    .green { background:var(--success); color:#fff; }
+    .row { display:flex; gap:10px; margin-top:4px; }
+    .row .secondary { flex:0 0 90px; }
+    .row .primary, .row .green { flex:1; }
+
+    .done { background:rgba(34,197,94,.1); border:1px solid var(--success); border-radius:14px; padding:28px 20px; text-align:center; }
+    .done h2 { color:var(--success); font-size:22px; margin-bottom:8px; }
+    .done p { color:var(--muted); font-size:14px; }
+    .done p strong { color:var(--text); }
+
+    .auth { background:rgba(245,158,11,.1); border-left:3px solid #F59E0B; border-radius:6px; padding:14px; color:var(--text); font-size:14px; }
+    .auth a { color:var(--accent); }
+    .err { background:rgba(239,68,68,.1); border:1px solid #EF4444; color:#EF4444; border-radius:8px; padding:12px; font-size:13px; margin-top:12px; }
+    .hidden { display:none!important; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>&#9201; Quick Timer Setup</h1>
+  <p class="sub">Build a Siri shortcut step by step. Each step has one thing to do.</p>
+
+  <div id="auth-msg" class="auth hidden">
+    Sign in to the app first, then reload this page. <a href="/">Open app &rarr;</a>
+  </div>
+
+  <div id="wizard" class="hidden">
+    <div class="prog">
+      <span id="prog-label">Step 1 of 13</span>
+      <div class="prog-bar"><div id="prog-fill" class="prog-fill" style="width:8%"></div></div>
+    </div>
+    <div id="step-area"></div>
+  </div>
+
+  <div id="err-slot"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyA0PSZdBoVrNUrDR384m8O5PcMcbDrGGSw",
+  authDomain:"assistant-taskboard.firebaseapp.com",
+  projectId:"assistant-taskboard",
+  storageBucket:"assistant-taskboard.firebasestorage.app",
+  messagingSenderId:"1036110821826",
+  appId:"1:1036110821826:web:53c88fa09d3d24a141be5b"
+});
+const auth = firebase.auth();
+const urlToken = new URLSearchParams(location.search).get('token');
+let TOKEN = null, step = 0, steps = [];
+
+async function init() {
+  try {
+    let t = urlToken;
+    if (!t) {
+      if (!auth.currentUser) { document.getElementById('auth-msg').classList.remove('hidden'); return; }
+      const id = await auth.currentUser.getIdToken();
+      const r = await fetch('/api/generateApiToken', { method:'POST', headers:{'Authorization':'Bearer '+id} });
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      t = (await r.json()).token;
+    }
+    TOKEN = t;
+    buildSteps();
+    document.getElementById('wizard').classList.remove('hidden');
+    render();
+  } catch(e) {
+    document.getElementById('err-slot').innerHTML = '<div class="err">'+e.message+'</div>';
+  }
+}
+if (urlToken) init(); else auth.onAuthStateChanged(() => init());
+
+function buildSteps() {
+  const startUrl = 'https://assistant-taskboard.firebaseapp.com/api/startTimer';
+  const bearerValue = 'Bearer ' + TOKEN;
+
+  steps = [
+    {
+      title: 'Open the Shortcuts app',
+      body: 'Open <strong>Shortcuts</strong> on your iPhone. Tap <strong>+</strong> in the top-right corner to create a new shortcut.',
+      action: 'next'
+    },
+    {
+      title: 'Add "Ask for Input" — duration',
+      body: 'Tap <strong>Add Action</strong> &rarr; search <strong>Ask for Input</strong> &rarr; tap it. Tap the prompt text and change it to:',
+      valueLabel: 'Prompt text',
+      value: 'How long? Say things like 5 minutes, 90 seconds, or 1 hour.',
+      tip: 'Siri will ask this and wait for your answer. You can say anything natural — "5 minutes", "an hour and a half", "90 seconds".',
+      action: 'copy'
+    },
+    {
+      title: 'Save as variable "Duration"',
+      body: 'Tap <strong>+</strong> &rarr; search <strong>Set Variable</strong> &rarr; tap it. Set the variable name to:',
+      valueLabel: 'Variable name',
+      value: 'Duration',
+      tip: 'For the input, tap the field and select <strong>Provided Input</strong> — the answer Siri just heard.',
+      action: 'copy'
+    },
+    {
+      title: 'Add "Ask for Input" — label',
+      body: 'Tap <strong>+</strong> &rarr; <strong>Ask for Input</strong>. Change the prompt to:',
+      valueLabel: 'Prompt text',
+      value: 'Label for this timer? Say skip for none.',
+      tip: 'This names your timer. Say "Skip" and the app uses "Timer" as the default label.',
+      action: 'copy'
+    },
+    {
+      title: 'Save as variable "Label"',
+      body: 'Tap <strong>+</strong> &rarr; <strong>Set Variable</strong>. Set the variable name to:',
+      valueLabel: 'Variable name',
+      value: 'Label',
+      tip: 'Input should be the latest <strong>Provided Input</strong> — the label Siri just heard.',
+      action: 'copy'
+    },
+    {
+      title: 'Add "Get Contents of URL"',
+      body: 'Tap <strong>+</strong> &rarr; search <strong>Get Contents of URL</strong> &rarr; tap it. Tap the URL field and paste:',
+      valueLabel: 'URL',
+      value: startUrl,
+      tip: 'This sends the timer to your app. Next you\'ll set the method and body.',
+      action: 'copy'
+    },
+    {
+      title: 'Change method to POST',
+      body: 'Tap <strong>Method</strong> (shows GET) and change it to <strong>POST</strong>. Then tap <strong>Request Body</strong> and choose <strong>JSON</strong>.',
+      action: 'next'
+    },
+    {
+      title: 'Add JSON field — "duration"',
+      body: 'Tap <strong>Add new field</strong>. Set the key to:',
+      valueLabel: 'Key',
+      value: 'duration',
+      tip: 'For the value: tap the value field &rarr; tap the variable picker (the curly-brace or token icon) &rarr; choose <strong>Duration</strong>.',
+      action: 'copy'
+    },
+    {
+      title: 'Add JSON field — "label"',
+      body: 'Tap <strong>Add new field</strong> again. Set the key to:',
+      valueLabel: 'Key',
+      value: 'label',
+      tip: 'For the value: tap the variable picker &rarr; choose <strong>Label</strong>.',
+      action: 'copy'
+    },
+    {
+      title: 'Add header key — "Authorization"',
+      body: 'Scroll down in the URL action to find <strong>Headers</strong>. Tap <strong>Add new header</strong>. Set the key to:',
+      valueLabel: 'Header key',
+      value: 'Authorization',
+      action: 'copy'
+    },
+    {
+      title: 'Add header value — your token',
+      body: 'In the header value field, paste:',
+      valueLabel: 'Header value (keep this private)',
+      value: bearerValue,
+      tip: 'This authenticates you. Anyone with this token can start timers on your account — keep it private.',
+      action: 'copy'
+    },
+    {
+      title: 'Add "Show Result" — confirmation',
+      body: 'Tap <strong>+</strong> &rarr; search <strong>Show Result</strong> &rarr; tap it. In the text field, tap the variable picker and select the result of the URL action above.',
+      tip: 'The app responds with a message like "Timer \\"Lunch\\" started for 5m." — Siri will read this back to you.',
+      action: 'next'
+    },
+    {
+      title: 'Name it "Quick Timer" and add to Siri',
+      body: 'Tap the shortcut name at the top and rename it to <strong>Quick Timer</strong>. Tap <strong>Done</strong>. Then tap the shortcut &rarr; tap the <strong>info icon (i)</strong> &rarr; <strong>Add to Siri</strong> to record your phrase.',
+      tip: 'Say <strong>"Hey Siri, Quick Timer"</strong> — Siri asks how long, asks for a label, starts the timer, and reads the confirmation. You\'ll get a notification when it finishes.',
+      action: 'finish'
+    }
+  ];
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function render() {
+  const total = steps.length;
+  const pct = Math.round(((step + 1) / total) * 100);
+  document.getElementById('prog-fill').style.width = pct + '%';
+  document.getElementById('prog-label').textContent = 'Step ' + (step + 1) + ' of ' + total;
+
+  if (step >= total) {
+    document.getElementById('step-area').innerHTML = `
+      <div class="done">
+        <div style="font-size:44px;margin-bottom:12px">&#127381;</div>
+        <h2>You're all set!</h2>
+        <p>Say <strong>"Hey Siri, Quick Timer"</strong> — Siri asks how long and what to call it, starts your timer instantly, and you get a notification when time's up.</p>
+        <button class="btn secondary" style="margin-top:18px" onclick="step=0;render()">Start Over</button>
+      </div>`;
+    return;
+  }
+
+  const s = steps[step];
+  let html = `<div class="card"><span class="step-badge">Step ${step + 1}</span><h2>${s.title}</h2><p>${s.body}</p>`;
+  if (s.valueLabel) html += `<div class="label">${esc(s.valueLabel)}</div><div class="val" id="val-box">${esc(s.value)}</div>`;
+  if (s.tip) html += `<div class="tip">${s.tip}</div>`;
+
+  html += '<div class="row">';
+  if (step > 0) html += `<button class="btn secondary" onclick="go(-1)">Back</button>`;
+
+  if (s.action === 'copy') {
+    html += `<button class="btn primary" id="main-btn" onclick="doCopy()">&#128203; Copy &amp; Continue</button>`;
+  } else if (s.action === 'finish') {
+    html += `<button class="btn green" onclick="go(1)">Done! Finish &#10003;</button>`;
+  } else {
+    html += `<button class="btn primary" onclick="go(1)">Done &rarr; Next</button>`;
+  }
+  html += '</div></div>';
+  document.getElementById('step-area').innerHTML = html;
+}
+
+function go(dir) { step += dir; render(); }
+
+function doCopy() {
+  const s = steps[step];
+  const btn = document.getElementById('main-btn');
+  navigator.clipboard.writeText(s.value).then(() => {
+    btn.textContent = '✓ Copied! Go paste it now';
+    btn.style.background = 'var(--success)';
+    btn.onclick = () => go(1);
+  }).catch(() => {
+    const box = document.getElementById('val-box');
+    const r = document.createRange(); r.selectNodeContents(box);
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    btn.textContent = 'Selected — long-press to Copy, then tap here';
+    btn.onclick = () => go(1);
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each user can only read/write their own data
+    match /users/{userId}/data/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Calendar tokens — only accessible by Cloud Functions (admin SDK), never from clients
+    match /calendarTokens/{token} {
+      allow read, write: if false;
+    }
+
+    // API tokens for Shortcuts — only accessible by Cloud Functions (admin SDK)
+    match /apiTokens/{token} {
+      allow read, write: if false;
+    }
+
+    // Timers — users can read/write their own
+    match /timers/{timerId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow create: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      allow update: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // Push subscriptions — Cloud Functions only
+    match /pushSubscriptions/{doc} {
+      allow read, write: if false;
+    }
+  }
+}

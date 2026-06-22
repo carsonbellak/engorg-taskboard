@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>EngOrg Calendar Feed</title></head>
+<body>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
+import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAKEsm3mMBIEyn9QqLDz1kjiG4ySXEwnHo",
+  authDomain: "assistant-taskboard.firebaseapp.com",
+  projectId: "assistant-taskboard",
+  storageBucket: "assistant-taskboard.firebasestorage.app",
+  messagingSenderId: "695901238856",
+  appId: "1:695901238856:web:c79c1e58b1f7dd85e41886"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+const params = new URLSearchParams(window.location.search);
+const uid = params.get('uid');
+
+if (!uid) {
+  document.body.textContent = 'Missing uid parameter. Use: ?uid=YOUR_USER_ID';
+} else {
+  generateICS(uid);
+}
+
+async function generateICS(uid) {
+  try {
+    const scheduleDoc = await getDoc(doc(db, 'users', uid, 'data', 'schedule'));
+    if (!scheduleDoc.exists()) {
+      document.body.textContent = 'No schedule data found for this user.';
+      return;
+    }
+
+    const data = scheduleDoc.data();
+    const events = data.items || [];
+    const now = new Date();
+    const icsLines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//EngOrg//Engineering Task Board//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'X-WR-CALNAME:EngOrg Schedule',
+      'X-WR-TIMEZONE:America/New_York',
+    ];
+
+    for (const evt of events) {
+      if (!evt.date || !evt.title) continue;
+
+      // Parse date
+      const dateParts = evt.date.split('-');
+      const dateStr = dateParts.join('');
+
+      // Parse times
+      let dtStart, dtEnd;
+      if (evt.startTime) {
+        const st = evt.startTime.replace(':', '');
+        dtStart = `${dateStr}T${st}00`;
+      } else {
+        dtStart = `${dateStr}`;
+      }
+      if (evt.endTime) {
+        const et = evt.endTime.replace(':', '');
+        dtEnd = `${dateStr}T${et}00`;
+      } else if (evt.startTime) {
+        // Default 1 hour duration
+        const [h, m] = evt.startTime.split(':').map(Number);
+        const endH = String(h + 1).padStart(2, '0');
+        dtEnd = `${dateStr}T${endH}${String(m).padStart(2, '0')}00`;
+      } else {
+        dtEnd = dtStart;
+      }
+
+      const uid_evt = evt.id || `engorg-${dateStr}-${Math.random().toString(36).slice(2, 8)}`;
+      const created = evt.createdAt ? new Date(evt.createdAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '') : now.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+
+      icsLines.push('BEGIN:VEVENT');
+      if (evt.startTime) {
+        icsLines.push(`DTSTART:${dtStart}`);
+        icsLines.push(`DTEND:${dtEnd}`);
+      } else {
+        icsLines.push(`DTSTART;VALUE=DATE:${dtStart}`);
+        icsLines.push(`DTEND;VALUE=DATE:${dtEnd}`);
+      }
+      icsLines.push(`DTSTAMP:${created}`);
+      icsLines.push(`UID:${uid_evt}@engorg`);
+      icsLines.push(`SUMMARY:${escapeICS(evt.title)}`);
+      if (evt.description) {
+        icsLines.push(`DESCRIPTION:${escapeICS(evt.description)}`);
+      }
+      if (evt.completed) {
+        icsLines.push('STATUS:COMPLETED');
+      } else {
+        icsLines.push('STATUS:CONFIRMED');
+      }
+      // Add a 15-minute reminder
+      icsLines.push('BEGIN:VALARM');
+      icsLines.push('TRIGGER:-PT15M');
+      icsLines.push('ACTION:DISPLAY');
+      icsLines.push(`DESCRIPTION:${escapeICS(evt.title)}`);
+      icsLines.push('END:VALARM');
+      icsLines.push('END:VEVENT');
+    }
+
+    icsLines.push('END:VCALENDAR');
+    const icsContent = icsLines.join('\r\n');
+
+    // Trigger download as .ics file
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'engorg-schedule.ics';
+    a.click();
+
+    document.body.innerHTML = '<h2 style="font-family:sans-serif;padding:20px">Calendar file downloaded! Import it into Apple Calendar.</h2>' +
+      '<p style="font-family:sans-serif;padding:0 20px">Events: ' + events.length + '</p>' +
+      '<p style="font-family:sans-serif;padding:0 20px;color:#666">Bookmark this page and revisit to get an updated calendar file.</p>';
+  } catch (err) {
+    document.body.textContent = 'Error: ' + err.message;
+  }
+}
+
+function escapeICS(text) {
+  return text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+}
+</script>
+</body>
+</html>

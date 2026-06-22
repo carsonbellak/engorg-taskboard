@@ -1,0 +1,22 @@
+{
+  "name": "EngOrg Task Board",
+  "short_name": "EngOrg",
+  "description": "Engineering Task Board - Mobile Companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F172A",
+  "theme_color": "#818CF8",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

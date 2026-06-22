@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#818CF8">
+  <title>EngOrg</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- iOS "Add to Home Screen" install banner (shown only on iOS Safari, not when already installed) -->
+  <div id="ios-install-banner" class="ios-install-banner hidden">
+    <button id="ios-install-dismiss" class="ios-install-close" aria-label="Dismiss">&times;</button>
+    <div class="ios-install-icon">&#9881;</div>
+    <div class="ios-install-body">
+      <div class="ios-install-title">Install EngOrg</div>
+      <div class="ios-install-text">
+        Tap <span class="ios-install-share" aria-hidden="true">
+          <svg width="14" height="18" viewBox="0 0 14 18" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:-3px">
+            <path d="M7 1v11M3 5l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M1 8v8h12V8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span> then <strong>Add to Home Screen</strong> for the full app experience.
+      </div>
+    </div>
+  </div>
+
+  <!-- Login Screen -->
+  <div id="screen-login" class="screen active">
+    <div class="login-container">
+      <div class="login-logo">&#9881;</div>
+      <h1 class="login-title">EngOrg</h1>
+      <p class="login-subtitle">Engineering Task Board</p>
+      <div class="login-form">
+        <button id="btn-google-login" class="btn-google">
+          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+          Sign in with Google
+        </button>
+        <div class="login-divider"><span>or</span></div>
+        <input type="email" id="login-email" class="login-input" placeholder="Email" autocomplete="email">
+        <input type="password" id="login-password" class="login-input" placeholder="Password" autocomplete="current-password">
+        <button id="btn-email-login" class="btn-primary-full">Sign In</button>
+        <div id="login-error" class="login-error hidden"></div>
+        <p class="login-hint">New? Enter any email &amp; password to create an account.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="screen-app" class="screen">
+    <!-- Top Bar -->
+    <header id="app-header">
+      <div class="app-header-left">
+        <span class="app-logo">&#9881;</span>
+        <select id="project-selector" class="project-select">
+          <option value="all">All Projects</option>
+        </select>
+        <button id="btn-new-project" class="btn-new-proj" title="New project">+</button>
+      </div>
+      <div class="app-header-right">
+        <button id="btn-user-menu" class="btn-icon" title="Account">&#128100;</button>
+      </div>
+    </header>
+
+    <!-- Filter Bar (notes/board views) -->
+    <div id="filter-bar" class="filter-bar hidden">
+      <select id="filter-priority" class="filter-select">
+        <option value="">All Priorities</option>
+        <option value="High">High</option>
+        <option value="Medium">Medium</option>
+        <option value="Low">Low</option>
+      </select>
+      <select id="filter-category" class="filter-select"></select>
+      <button id="filter-overdue" class="filter-chip">Overdue</button>
+      <select id="filter-sort" class="filter-select">
+        <option value="priority">Sort: Priority</option>
+        <option value="created">Sort: Newest</option>
+        <option value="created-asc">Sort: Oldest</option>
+        <option value="due">Sort: Due Date</option>
+        <option value="alpha">Sort: A-Z</option>
+        <option value="category">Sort: Category</option>
+        <option value="project">Sort: Project</option>
+      </select>
+      <select id="filter-color" class="filter-select">
+        <option value="category">Color: Category</option>
+        <option value="priority">Color: Priority</option>
+        <option value="project">Color: Project</option>
+        <option value="status">Color: Status</option>
+        <option value="due">Color: Due Date</option>
+      </select>
+    </div>
+
+    <!-- Content -->
+    <main id="app-content"></main>
+
+    <!-- Floating Add Button -->
+    <button id="fab-add" class="fab">+</button>
+
+    <!-- Bottom Navigation -->
+    <nav id="bottom-nav">
+      <button class="nav-item active" data-view="notes">
+        <span class="nav-icon">&#128204;</span>
+        <span class="nav-label">Notes</span>
+      </button>
+      <button class="nav-item" data-view="board">
+        <span class="nav-icon">&#128203;</span>
+        <span class="nav-label">Board</span>
+      </button>
+      <button class="nav-item" data-view="timeline">
+        <span class="nav-icon">&#128197;</span>
+        <span class="nav-label">Timeline</span>
+      </button>
+      <button class="nav-item" data-view="calendar">
+        <span class="nav-icon">&#128198;</span>
+        <span class="nav-label">Calendar</span>
+      </button>
+      <button class="nav-item" data-view="purchases">
+        <span class="nav-icon">&#128230;</span>
+        <span class="nav-label">Orders</span>
+      </button>
+      <button class="nav-item" data-view="stats">
+        <span class="nav-icon">&#128202;</span>
+        <span class="nav-label">Stats</span>
+      </button>
+      <button class="nav-item" data-view="timers">
+        <span class="nav-icon">&#9201;</span>
+        <span class="nav-label">Timers</span>
+      </button>
+      <button class="nav-item" data-view="printer">
+        <span class="nav-icon">&#127912;</span>
+        <span class="nav-label">Printer</span>
+      </button>
+    </nav>
+
+    <!-- New Project Overlay -->
+    <div id="new-project-overlay" class="overlay hidden">
+      <div class="overlay-sheet">
+        <h2>New Project</h2>
+        <label>Name *</label>
+        <input type="text" id="new-proj-name" class="form-input" placeholder="e.g. Mechanical Systems" maxlength="60">
+        <label>Color</label>
+        <div id="new-proj-colors" class="proj-color-swatches"></div>
+        <div class="sheet-actions">
+          <button id="btn-cancel-new-proj" class="btn-secondary">Cancel</button>
+          <button id="btn-save-new-proj" class="btn-primary">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- User Menu Overlay -->
+    <div id="user-menu-overlay" class="overlay hidden">
+      <div class="overlay-sheet">
+        <div id="user-info" class="user-info"></div>
+        <a href="/shortcuts-setup" class="btn-secondary-full" style="display:block;text-align:center;text-decoration:none;margin:12px 0 8px;">Set up Siri Shortcut</a>
+        <a href="/timer-setup" class="btn-secondary-full" style="display:block;text-align:center;text-decoration:none;margin:0 0 8px;">Set up Siri Quick Timer</a>
+        <button id="btn-signout" class="btn-danger-full">Sign Out</button>
+        <button id="btn-close-menu" class="btn-secondary-full">Close</button>
+      </div>
+    </div>
+
+    <!-- Add/Edit Note Sheet -->
+    <div id="add-note-overlay" class="overlay hidden">
+      <div class="overlay-sheet overlay-sheet-tall">
+        <h2 id="add-note-heading">New Note</h2>
+        <div class="form-scroll">
+          <label>Title *</label>
+          <input type="text" id="add-title" class="form-input" placeholder="What needs to be done?">
+          <label>Description</label>
+          <textarea id="add-desc" class="form-input form-textarea" placeholder="Details..." rows="2"></textarea>
+          <label>Project</label>
+          <select id="add-project" class="form-input"></select>
+          <label>Priority</label>
+          <div class="priority-row">
+            <button class="priority-btn" data-p="High">High</button>
+            <button class="priority-btn active" data-p="Medium">Medium</button>
+            <button class="priority-btn" data-p="Low">Low</button>
+          </div>
+          <label>Status</label>
+          <select id="add-status" class="form-input">
+            <option value="backlog">Backlog</option>
+            <option value="inProgress">In Progress</option>
+            <option value="review">Review</option>
+            <option value="done">Done</option>
+          </select>
+          <label>Category</label>
+          <select id="add-category" class="form-input"></select>
+          <label>Due Date</label>
+          <input type="date" id="add-due" class="form-input">
+        </div>
+        <div class="sheet-actions">
+          <button id="btn-cancel-add" class="btn-secondary">Cancel</button>
+          <button id="btn-save-add" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Note Detail Sheet -->
+    <div id="note-detail-overlay" class="overlay hidden">
+      <div class="overlay-sheet overlay-sheet-tall">
+        <div id="note-detail-content"></div>
+        <div class="sheet-actions">
+          <button id="btn-delete-detail" class="btn-danger-sm">Delete</button>
+          <button id="btn-close-detail" class="btn-secondary">Close</button>
+          <button id="btn-edit-detail" class="btn-primary">Edit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add/Edit Schedule Event Sheet -->
+    <div id="add-schedule-overlay" class="overlay hidden">
+      <div class="overlay-sheet overlay-sheet-tall">
+        <h2 id="add-schedule-heading">New Event</h2>
+        <div class="form-scroll">
+          <label>Title *</label>
+          <input type="text" id="sched-title" class="form-input" placeholder="Event title">
+          <label>Date</label>
+          <input type="date" id="sched-date" class="form-input">
+          <label>Recurring Day (leave blank for one-time)</label>
+          <select id="sched-day" class="form-input">
+            <option value="">Not recurring</option>
+            <option value="Monday">Monday</option>
+            <option value="Tuesday">Tuesday</option>
+            <option value="Wednesday">Wednesday</option>
+            <option value="Thursday">Thursday</option>
+            <option value="Friday">Friday</option>
+            <option value="Saturday">Saturday</option>
+            <option value="Sunday">Sunday</option>
+          </select>
+          <label>Start Time</label>
+          <input type="time" id="sched-start" class="form-input">
+          <label>End Time</label>
+          <input type="time" id="sched-end" class="form-input">
+          <label>Project</label>
+          <select id="sched-project" class="form-input"></select>
+        </div>
+        <div class="sheet-actions sheet-actions-3">
+          <button id="btn-delete-sched" class="btn-danger-sm" style="display:none">Delete</button>
+          <button id="btn-cancel-sched" class="btn-secondary">Cancel</button>
+          <button id="btn-save-sched" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add/Edit Purchase Sheet -->
+    <div id="add-purchase-overlay" class="overlay hidden">
+      <div class="overlay-sheet overlay-sheet-tall">
+        <h2 id="add-purchase-heading">New Order</h2>
+        <div class="form-scroll">
+          <label>Item Description *</label>
+          <input type="text" id="purch-item" class="form-input" placeholder="What are you ordering?">
+          <label>Supplier</label>
+          <input type="text" id="purch-supplier" class="form-input" placeholder="Where from?">
+          <label>Cost</label>
+          <input type="number" id="purch-cost" class="form-input" placeholder="0.00" step="0.01" min="0">
+          <label>Quantity</label>
+          <input type="number" id="purch-qty" class="form-input" placeholder="1" min="1" value="1">
+          <label>Status</label>
+          <select id="purch-status" class="form-input">
+            <option value="toPlace">To Order</option>
+            <option value="placed">Ordered</option>
+            <option value="shipped">Shipped</option>
+            <option value="delivered">Delivered</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <label>Order URL</label>
+          <input type="url" id="purch-url" class="form-input" placeholder="https://...">
+          <label>Project</label>
+          <select id="purch-project" class="form-input"></select>
+        </div>
+        <div class="sheet-actions sheet-actions-3">
+          <button id="btn-delete-purch" class="btn-danger-sm" style="display:none">Delete</button>
+          <button id="btn-cancel-purch" class="btn-secondary">Cancel</button>
+          <button id="btn-save-purch" class="btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
