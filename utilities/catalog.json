@@ -1,0 +1,12 @@
+{
+  "utilities": [
+    {
+      "id": "resistor-calc",
+      "name": "Resistor Calculator",
+      "icon": "🎛️",
+      "description": "4-band resistor color-code calculator — pick the bands to read resistance and tolerance.",
+      "version": "1.0.0",
+      "entry": "https://raw.githubusercontent.com/carsonbellak/engorg-taskboard/main/utilities/resistor-calc/index.html"
+    }
+  ]
+}

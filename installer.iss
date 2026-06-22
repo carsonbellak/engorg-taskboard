@@ -9,8 +9,8 @@
 #define MyAppExeName "launch.vbs"
 ; Engineering Utilities — the Utility Store pulls its catalog from this GitHub repo.
 ; Keep in sync with UTILITY_STORE_CATALOG_URL in config.js.
-#define MyUtilitiesRepoURL "https://github.com/carsonbellak/engorg-utilities"
-#define MyUtilitiesCatalogURL "https://raw.githubusercontent.com/carsonbellak/engorg-utilities/main/catalog.json"
+#define MyUtilitiesRepoURL "https://github.com/carsonbellak/engorg-taskboard/tree/main/utilities"
+#define MyUtilitiesCatalogURL "https://raw.githubusercontent.com/carsonbellak/engorg-taskboard/main/utilities/catalog.json"
 
 [Setup]
 AppId={{E4A3D2B1-7F6C-4D8E-9A5B-1C2D3E4F5A6B}

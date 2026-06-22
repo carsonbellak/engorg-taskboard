@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resistor Calculator</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px;
+    font-family: "Segoe UI", system-ui, Arial, sans-serif;
+    background: #f4f6f8; color: #1e293b;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1e2228; color: #e6e9ee; }
+    .card { background: #262b33 !important; border-color: #3a414b !important; }
+    select { background: #1e2228 !important; color: #e6e9ee !important; border-color: #3a414b !important; }
+    .result { background: #1b2a1b !important; }
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 13px; opacity: 0.7; margin: 0 0 18px; }
+  .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 18px; max-width: 640px; }
+  .resistor { display: flex; align-items: center; justify-content: center; gap: 4px; height: 70px; margin: 6px 0 18px; }
+  .body { position: relative; display: flex; align-items: center; gap: 10px;
+    background: #d8b88a; border-radius: 10px; padding: 0 22px; height: 46px; }
+  .lead { width: 36px; height: 4px; background: #9aa3ad; }
+  .band { width: 10px; height: 46px; border-radius: 2px; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  label { display: block; font-size: 12px; font-weight: 600; opacity: 0.75; margin-bottom: 5px; }
+  select { width: 100%; padding: 7px 8px; border-radius: 7px; border: 1px solid #cbd5e1; background: #fff; color: #1e293b; font-size: 13px; }
+  .result { margin-top: 18px; background: #eef7ee; border-radius: 10px; padding: 14px 16px; }
+  .ohms { font-size: 26px; font-weight: 800; }
+  .tol { font-size: 13px; opacity: 0.8; margin-top: 2px; }
+</style>
+</head>
+<body>
+  <h1>🎛️ Resistor Calculator</h1>
+  <p class="sub">4-band color code → resistance &amp; tolerance.</p>
+  <div class="card">
+    <div class="resistor">
+      <div class="lead"></div>
+      <div class="body">
+        <div class="band" id="b1"></div>
+        <div class="band" id="b2"></div>
+        <div class="band" id="b3"></div>
+        <div class="band" id="b4"></div>
+      </div>
+      <div class="lead"></div>
+    </div>
+    <div class="grid">
+      <div><label>Band 1</label><select id="s1" data-kind="digit"></select></div>
+      <div><label>Band 2</label><select id="s2" data-kind="digit"></select></div>
+      <div><label>Multiplier</label><select id="s3" data-kind="mult"></select></div>
+      <div><label>Tolerance</label><select id="s4" data-kind="tol"></select></div>
+    </div>
+    <div class="result">
+      <div class="ohms" id="ohms">—</div>
+      <div class="tol" id="tolerance"></div>
+    </div>
+  </div>
+
+<script>
+  // [name, hex, digit, multiplier, tolerance%] — null where not applicable
+  var COLORS = [
+    ["Black",   "#222222", 0,  1,        null],
+    ["Brown",   "#7a4a23", 1,  10,       1],
+    ["Red",     "#c0392b", 2,  100,      2],
+    ["Orange",  "#e67e22", 3,  1e3,      null],
+    ["Yellow",  "#f1c40f", 4,  1e4,      null],
+    ["Green",   "#27ae60", 5,  1e5,      0.5],
+    ["Blue",    "#2980b9", 6,  1e6,      0.25],
+    ["Violet",  "#8e44ad", 7,  1e7,      0.1],
+    ["Grey",    "#7f8c8d", 8,  1e8,      0.05],
+    ["White",   "#ecf0f1", 9,  1e9,      null],
+    ["Gold",    "#c9a227", null, 0.1,    5],
+    ["Silver",  "#bdc3c7", null, 0.01,   10]
+  ];
+
+  function fill(sel, kind) {
+    COLORS.forEach(function (c, i) {
+      var valid = kind === "digit" ? c[2] !== null
+                : kind === "mult"  ? c[3] !== null
+                : c[4] !== null;
+      if (!valid) return;
+      var o = document.createElement("option");
+      o.value = i;
+      o.textContent = c[0] + (kind === "tol" ? " (±" + c[4] + "%)" : "");
+      sel.appendChild(o);
+    });
+  }
+
+  function fmt(ohms) {
+    if (ohms >= 1e6) return (ohms / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " MΩ";
+    if (ohms >= 1e3) return (ohms / 1e3).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " kΩ";
+    return ohms.toLocaleString(undefined, { maximumFractionDigits: 2 }) + " Ω";
+  }
+
+  var selects = [document.getElementById("s1"), document.getElementById("s2"),
+                 document.getElementById("s3"), document.getElementById("s4")];
+  var bands = [document.getElementById("b1"), document.getElementById("b2"),
+               document.getElementById("b3"), document.getElementById("b4")];
+
+  selects.forEach(function (s) { fill(s, s.dataset.kind); s.addEventListener("change", update); });
+  // sensible defaults: Brown, Black, Red, Gold = 1 0 ×100 ±5% = 1 kΩ
+  selects[0].value = 1; selects[1].value = 0; selects[2].value = 2; selects[3].value = 10;
+
+  function update() {
+    selects.forEach(function (s, i) { bands[i].style.background = COLORS[s.value][1]; });
+    var d1 = COLORS[selects[0].value][2];
+    var d2 = COLORS[selects[1].value][2];
+    var mult = COLORS[selects[2].value][3];
+    var tol = COLORS[selects[3].value][4];
+    var ohms = (d1 * 10 + d2) * mult;
+    document.getElementById("ohms").textContent = fmt(ohms);
+    document.getElementById("tolerance").textContent = "Tolerance: ±" + tol + "%";
+  }
+  update();
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@ module.exports = {
   // Utility Store — GitHub-hosted catalog of installable utilities. Point this at a
   // raw.githubusercontent.com URL for a JSON file shaped like { "utilities": [ ... ] }.
   // Each remote utility entry: { id, name, icon, description, version, entry: <raw HTML url> }.
-  UTILITY_STORE_CATALOG_URL: 'https://raw.githubusercontent.com/carsonbellak/engorg-utilities/main/catalog.json',
+  UTILITY_STORE_CATALOG_URL: 'https://raw.githubusercontent.com/carsonbellak/engorg-taskboard/main/utilities/catalog.json',
 
   // Contribute — the canonical app repo users submit changes to (Settings > Contribute).
   // The "Submit Changes" button forks this repo to the submitter's account and opens a PR.
