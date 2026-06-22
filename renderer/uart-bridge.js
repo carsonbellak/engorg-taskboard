@@ -35,6 +35,14 @@ const uartBridge = (() => {
   }
   const toHex = (bytes) => Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join(' ');
   const toAscii = (bytes) => Array.from(bytes).map((b) => (b >= 32 && b < 127) ? String.fromCharCode(b) : '·').join('');
+  function lineEndingBytes(dev) {
+    return { lf: [0x0a], crlf: [0x0d, 0x0a], cr: [0x0d] }[dev.lineEnding] || [];
+  }
+  function concatBytes(a, b) { const out = new Uint8Array(a.length + b.length); out.set(a, 0); out.set(b, a.length); return out; }
+  function updateStats(dev) {
+    const el = document.getElementById('stats-' + dev.id);
+    if (el) el.textContent = `TX ${dev.txCount} B · RX ${dev.rxCount} B`;
+  }
 
   // ---- monitor log ---------------------------------------------------------
   function log(devName, dir, bytes, note) {
@@ -60,8 +68,8 @@ const uartBridge = (() => {
       port, info, connected: false, reader: null, writer: null,
       x: 40 + (devices.length % 3) * 300, y: 40 + Math.floor(devices.length / 3) * 200,
       baud: 9600, dataBits: 8, parity: 'none', stopBits: 1,
-      sendMode: 'hex', sendText: '', repeat: false, interval: 1000, repTimer: null,
-      dtr: false, rts: false,
+      sendMode: 'hex', sendText: '', lineEnding: 'none', repeat: false, interval: 1000, repTimer: null,
+      dtr: false, rts: false, txCount: 0, rxCount: 0,
     };
   }
   function newFtdi(index, serial) {
@@ -71,7 +79,8 @@ const uartBridge = (() => {
       connected: false,
       x: 40 + (devices.length % 3) * 300, y: 40 + Math.floor(devices.length / 3) * 200,
       mask: 0x01, baud: 9600,
-      sendMode: 'hex', sendText: '01', repeat: false, interval: 1000, repTimer: null, pulseState: 0,
+      sendMode: 'hex', sendText: '01', lineEnding: 'none', repeat: false, interval: 1000, repTimer: null, pulseState: 0,
+      txCount: 0, rxCount: 0,
     };
   }
 
@@ -171,6 +180,7 @@ const uartBridge = (() => {
 
   // Data received on dev → log + forward along wires where dev is the source (TX).
   function handleIncoming(dev, bytes) {
+    dev.rxCount += bytes.length; updateStats(dev);
     log(dev.name, 'rx', bytes);
     forward(dev, bytes);
   }
@@ -187,6 +197,7 @@ const uartBridge = (() => {
     try {
       if (dev.type === 'uart') { await dev.writer.write(bytes); }
       else { await window.api.ftdi.write(dev.ftdiIndex, Array.from(bytes)); }
+      dev.txCount += bytes.length; updateStats(dev);
       log(dev.name, 'tx', bytes, bridged ? 'bridged' : null);
     } catch (e) { log(dev.name, 'sys', null, 'write error: ' + e.message); }
   }
@@ -205,7 +216,11 @@ const uartBridge = (() => {
       await writeOut(dev, new Uint8Array([dev.pulseState]), false);
       return;
     }
-    const bytes = parseInput(dev.sendMode, dev.sendText);
+    let bytes = parseInput(dev.sendMode, dev.sendText);
+    if (dev.type === 'uart' && (dev.sendMode === 'hex' || dev.sendMode === 'ascii')) {
+      const le = lineEndingBytes(dev);
+      if (le.length) bytes = concatBytes(bytes, new Uint8Array(le));
+    }
     if (!bytes.length) return;
     await writeOut(dev, bytes, false);
     forward(dev, bytes); // also push manual sends downstream
@@ -233,7 +248,11 @@ const uartBridge = (() => {
           <div id="uart-nodes"></div>
         </div>
         <div class="uart-monitor-wrap">
-          <div class="uart-monitor-head"><span>Monitor</span><button id="uart-clear-mon" class="kicad-btn kicad-btn-outline">Clear log</button></div>
+          <div class="uart-monitor-head"><span>Monitor</span>
+            <span style="margin-left:auto;display:flex;gap:6px">
+              <button id="uart-save-mon" class="kicad-btn kicad-btn-outline">Save log</button>
+              <button id="uart-clear-mon" class="kicad-btn kicad-btn-outline">Clear log</button>
+            </span></div>
           <div id="uart-monitor" class="uart-monitor"></div>
         </div>
       </div>`;
@@ -241,6 +260,7 @@ const uartBridge = (() => {
     document.getElementById('uart-add-ftdi').addEventListener('click', addFtdi);
     document.getElementById('uart-clear').addEventListener('click', clearAll);
     document.getElementById('uart-clear-mon').addEventListener('click', () => { const m = document.getElementById('uart-monitor'); if (m) m.innerHTML = ''; });
+    document.getElementById('uart-save-mon').addEventListener('click', saveLog);
     const canvas = document.getElementById('uart-canvas');
     canvas.addEventListener('mousemove', onCanvasMove);
     canvas.addEventListener('mouseup', onCanvasUp);
@@ -264,7 +284,13 @@ const uartBridge = (() => {
           <option value="ascii"${dev.sendMode === 'ascii' ? ' selected' : ''}>ASCII</option>
           <option value="line"${dev.sendMode === 'line' ? ' selected' : ''}>Line (DTR)</option>
         </select>
-        <input data-f="sendText" class="kicad-input" value="${esc(dev.sendText)}" placeholder="${dev.sendMode === 'ascii' ? 'text…' : '01 FF A0'}">
+        <input data-f="sendText" class="kicad-input" value="${esc(dev.sendText)}" placeholder="${dev.sendMode === 'ascii' ? 'text… (Enter to send)' : '01 FF A0'}">
+        <select data-f="lineEnding" class="kicad-input uart-le" title="Appended to each send">
+          <option value="none"${dev.lineEnding === 'none' ? ' selected' : ''}>—</option>
+          <option value="lf"${dev.lineEnding === 'lf' ? ' selected' : ''}>\\n</option>
+          <option value="crlf"${dev.lineEnding === 'crlf' ? ' selected' : ''}>\\r\\n</option>
+          <option value="cr"${dev.lineEnding === 'cr' ? ' selected' : ''}>\\r</option>
+        </select>
       </div>`;
     } else {
       cfg = `<div class="uart-cfg">
@@ -286,8 +312,10 @@ const uartBridge = (() => {
           <span class="uart-node-type">${dev.type === 'uart' ? 'UART' : 'FTDI'}</span>
           <button class="uart-node-x" data-remove="${dev.id}" title="Remove">&times;</button>
         </div>
-        <div class="uart-term uart-term-rx" data-term="rx" data-dev="${dev.id}" title="RX (in)"></div>
-        <div class="uart-term uart-term-tx" data-term="tx" data-dev="${dev.id}" title="TX (out)"></div>
+        <div class="uart-term uart-term-rx" data-term="rx" data-dev="${dev.id}" title="RX — data written into this port (wire sink)"></div>
+        <div class="uart-term uart-term-tx" data-term="tx" data-dev="${dev.id}" title="TX — data this port emits (wire source)"></div>
+        <span class="uart-term-label uart-tl-rx">RX</span>
+        <span class="uart-term-label uart-tl-tx">TX</span>
         <div class="uart-node-body">
           ${cfg}
           ${send}
@@ -296,6 +324,7 @@ const uartBridge = (() => {
             <input data-f="interval" class="kicad-input uart-int" value="${dev.interval}" title="ms"> ms
             <button class="uart-send-btn kicad-btn kicad-btn-start" data-send="${dev.id}">Send</button>
           </div>
+          <div class="uart-stats" id="stats-${dev.id}">TX ${dev.txCount} B · RX ${dev.rxCount} B</div>
           <button class="kicad-btn ${dev.connected ? 'kicad-btn-outline' : ''} uart-conn" data-conn="${dev.id}">${dev.connected ? 'Disconnect' : 'Connect'}</button>
         </div>
       </div>`;
@@ -330,6 +359,9 @@ const uartBridge = (() => {
         if (f === 'sendMode') renderNodes();
       });
     });
+    // Enter in the send field = Send
+    const sendInput = node.querySelector('[data-f="sendText"]');
+    if (sendInput) sendInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); manualSend(dev); } });
     // terminals: start a wire from TX, accept on RX
     const tx = node.querySelector('[data-term="tx"]');
     const rx = node.querySelector('[data-term="rx"]');
@@ -406,6 +438,18 @@ const uartBridge = (() => {
     if (devices.length && !confirm('Disconnect and remove all devices and wires?')) return;
     for (const d of devices.slice()) { if (d.connected) await disconnect(d); }
     devices = []; wires = []; renderNodes();
+  }
+
+  function saveLog() {
+    const m = document.getElementById('uart-monitor');
+    if (!m || !m.textContent.trim()) { alert('Monitor is empty.'); return; }
+    const text = Array.from(m.children).map((c) => c.textContent).join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'uart-log-' + new Date().toISOString().replace(/[:.]/g, '-') + '.txt';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   // ---- modal helper --------------------------------------------------------

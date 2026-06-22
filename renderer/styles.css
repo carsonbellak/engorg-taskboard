@@ -10354,6 +10354,11 @@ body.theme-light .syn-builtin { color: #059669; }
 .uart-term-rx { left: -8px; top: 27px; background: #f59e0b; }
 .uart-term-tx { right: -8px; top: 27px; background: #3b82f6; }
 .uart-term:hover { transform: scale(1.25); }
+.uart-term-label { position: absolute; top: 24px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; pointer-events: none; }
+.uart-tl-rx { left: 9px; color: #f59e0b; }
+.uart-tl-tx { right: 9px; color: #3b82f6; }
+.uart-le { width: 64px !important; flex-shrink: 0; padding: 5px 4px !important; font-size: 12px; }
+.uart-stats { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, Consolas, monospace; }
 
 /* monitor */
 .uart-monitor-wrap { flex-shrink: 0; height: 200px; display: flex; flex-direction: column; border-top: 1px solid var(--border-color); }
