@@ -58,6 +58,14 @@ contextBridge.exposeInMainWorld('api', {
     setTemp: (opts) => ipcRenderer.invoke('wifi:setTemp', opts),
     writeFile: (opts) => ipcRenderer.invoke('wifi:writeFile', opts)
   },
+  // Contribute — submit local changes to the canonical repo as a GitHub PR
+  contribute: {
+    getChanges: () => ipcRenderer.invoke('contribute:getChanges'),
+    hasToken: () => ipcRenderer.invoke('contribute:hasToken'),
+    saveToken: (token) => ipcRenderer.invoke('contribute:saveToken', token),
+    clearToken: () => ipcRenderer.invoke('contribute:clearToken'),
+    submit: (opts) => ipcRenderer.invoke('contribute:submit', opts)
+  },
   // Utility store (GitHub-backed)
   store: {
     fetchCatalog: (url) => ipcRenderer.invoke('store:fetchCatalog', url),

@@ -1026,6 +1026,13 @@ function renderSettings() {
         <button id="settings-build-installer" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Build Installer</button>
         <span id="settings-installer-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
       </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">Contribute</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Improved the app? Submit your local changes as a Pull Request for the owner to review and merge. Requires a GitHub <a href="#" id="settings-contrib-tokenhelp" style="color:var(--accent)">Personal Access Token</a> with <b>repo</b> scope.</p>
+        <button id="settings-contrib-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Submit Changes…</button>
+        <a href="#" id="settings-contrib-repo" style="margin-left:12px;font-size:13px;color:var(--accent)">View repository</a>
+      </div>
     </div>
   `;
 
@@ -1302,6 +1309,94 @@ function renderSettings() {
     }
     btn.disabled = false;
     btn.textContent = 'Build Installer';
+  });
+
+  // ── Contribute (submit local changes as a GitHub PR) ──
+  bindContribute();
+}
+
+function bindContribute() {
+  const openBtn = document.getElementById('settings-contrib-open');
+  const repoLink = document.getElementById('settings-contrib-repo');
+  const tokenHelp = document.getElementById('settings-contrib-tokenhelp');
+  if (repoLink) repoLink.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://github.com/carsonbellak/engorg-taskboard'); });
+  if (tokenHelp) tokenHelp.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://github.com/settings/tokens/new?scopes=repo&description=EngOrg'); });
+  if (!openBtn) return;
+  openBtn.addEventListener('click', openContributeModal);
+}
+
+async function openContributeModal() {
+  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  const ov = document.createElement('div');
+  ov.className = 'wifi-modal-overlay';
+  ov.innerHTML = `
+    <div class="wifi-modal" style="max-width:680px">
+      <div class="wifi-modal-title">Submit Changes</div>
+      <div class="wifi-modal-section">
+        <label>Changed files (vs upstream <code>main</code>)</label>
+        <div id="contrib-files" class="wifi-meter-list" style="max-height:240px">Scanning…</div>
+      </div>
+      <div class="wifi-modal-section">
+        <label>Pull request title</label>
+        <input id="contrib-title" class="kicad-input" placeholder="Short summary of your changes">
+        <label>Description</label>
+        <textarea id="contrib-body" class="kicad-input" rows="3" placeholder="What did you change and why?"></textarea>
+      </div>
+      <div class="wifi-modal-section">
+        <label>GitHub Personal Access Token (<b>repo</b> scope)</label>
+        <input id="contrib-token" class="kicad-input" type="password" placeholder="ghp_… (leave blank if previously saved)">
+        <label class="wifi-cb"><input type="checkbox" id="contrib-remember"> Remember this token on this device (encrypted)</label>
+      </div>
+      <div id="contrib-status" class="settings-section-desc"></div>
+      <div class="wifi-modal-actions">
+        <button id="contrib-cancel" class="kicad-btn kicad-btn-outline">Cancel</button>
+        <button id="contrib-submit" class="kicad-btn kicad-btn-start">Open Pull Request</button>
+      </div>
+    </div>`;
+  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+
+  const filesEl = ov.querySelector('#contrib-files');
+  const statusEl = ov.querySelector('#contrib-status');
+  ov.querySelector('#contrib-cancel').addEventListener('click', () => ov.remove());
+
+  // saved-token hint
+  try { const t = await window.api.contribute.hasToken(); if (t.hasToken) ov.querySelector('#contrib-token').placeholder = 'Using saved token (type to override)'; } catch {}
+
+  // load changes
+  let changes = [];
+  try {
+    const res = await window.api.contribute.getChanges();
+    if (res.error) { filesEl.innerHTML = `<div class="kicad-empty">${esc(res.error)}</div>`; }
+    else {
+      changes = res.changes || [];
+      if (!changes.length) filesEl.innerHTML = '<div class="kicad-empty">No differences from upstream — nothing to submit.</div>';
+      else filesEl.innerHTML = changes.map((c, i) => `
+        <label class="wifi-meter-row"><input type="checkbox" data-i="${i}" checked>
+          <span><b style="color:var(--${c.status === 'added' ? 'success' : c.status === 'deleted' ? 'danger' : 'accent'})">${c.status[0].toUpperCase()}</b> ${esc(c.path)}</span></label>`).join('');
+    }
+  } catch (e) { filesEl.innerHTML = `<div class="kicad-empty">${esc(e.message)}</div>`; }
+
+  ov.querySelector('#contrib-submit').addEventListener('click', async () => {
+    const picked = [...filesEl.querySelectorAll('input:checked')].map((c) => changes[+c.dataset.i]);
+    const title = ov.querySelector('#contrib-title').value.trim();
+    const body = ov.querySelector('#contrib-body').value.trim();
+    const token = ov.querySelector('#contrib-token').value.trim();
+    const saveToken = ov.querySelector('#contrib-remember').checked;
+    if (!picked.length) { statusEl.textContent = 'Select at least one file.'; statusEl.style.color = 'var(--danger)'; return; }
+    if (!title) { statusEl.textContent = 'Enter a PR title.'; statusEl.style.color = 'var(--danger)'; return; }
+    const btn = ov.querySelector('#contrib-submit');
+    btn.disabled = true; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = 'Forking, committing, and opening PR… (this can take a few seconds)';
+    try {
+      const res = await window.api.contribute.submit({ token: token || undefined, title, body, files: picked, saveToken });
+      if (res.error) { statusEl.textContent = 'Error: ' + res.error; statusEl.style.color = 'var(--danger)'; btn.disabled = false; return; }
+      statusEl.innerHTML = `✓ Pull request #${res.number} opened. <a href="#" id="contrib-prlink" style="color:var(--accent)">View it on GitHub</a>`;
+      statusEl.style.color = 'var(--success)';
+      const link = ov.querySelector('#contrib-prlink');
+      if (link) link.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(res.url); });
+    } catch (e) {
+      statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = 'var(--danger)'; btn.disabled = false;
+    }
   });
 }
 

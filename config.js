@@ -19,6 +19,14 @@ module.exports = {
   // Each remote utility entry: { id, name, icon, description, version, entry: <raw HTML url> }.
   UTILITY_STORE_CATALOG_URL: 'https://raw.githubusercontent.com/carsonbellak/engorg-utilities/main/catalog.json',
 
+  // Contribute — the canonical app repo users submit changes to (Settings > Contribute).
+  // The "Submit Changes" button forks this repo to the submitter's account and opens a PR.
+  // owner/repo here is the authoritative upstream; the owner (you) reviews + merges PRs.
+  CONTRIB_REPO: { owner: 'carsonbellak', repo: 'engorg-taskboard', branch: 'main' },
+  CONTRIB_REPO_URL: 'https://github.com/carsonbellak/engorg-taskboard',
+  // Files/dirs never included in a contribution PR (mirrors .gitignore + safety).
+  CONTRIB_IGNORE: ['.git', 'node_modules', 'nodejs', 'tools', 'dist', 'appdata', '.firebase', '.claude'],
+
   // Email hub — encrypted account store (app passwords encrypted via safeStorage)
   EMAIL_ACCOUNTS_FILE: path.join('C:\\Assistant\\appdata', 'email_accounts.json'),
   EMAIL_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'email_attachments'),

@@ -18,6 +18,7 @@ const registerCalendar = require('./ipc/calendar');
 const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
 const registerWifiChecker   = require('./ipc/wifi-checker');
+const registerContribute    = require('./ipc/contribute');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -92,6 +93,7 @@ app.whenReady().then(() => {
   registerKicadImporter(getMainWindow);
   registerUtilityStore();
   registerWifiChecker(getMainWindow);
+  registerContribute();
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
