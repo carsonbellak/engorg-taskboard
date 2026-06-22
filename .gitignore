@@ -21,6 +21,10 @@ unins000.*
 # User data & local runtime state (may contain personal data / credentials)
 appdata/
 
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Logs & OS cruft
 *.log
 npm-debug.log*
