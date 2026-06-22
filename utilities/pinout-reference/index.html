@@ -6,65 +6,56 @@
 <title>Pinout Reference</title>
 <style>
   :root { color-scheme: light dark;
-    --bg:#f4f6f8; --panel:#fff; --bd:#e2e8f0; --tx:#1e293b; --mut:#64748b; --hover:#eef2f7; }
+    --bg:#f4f6f8; --panel:#fff; --bd:#e2e8f0; --tx:#1e293b; --mut:#64748b; --hover:#eef2f7; --board:#1f6f43; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#1e2228; --panel:#262b33; --bd:#3a414b; --tx:#e6e9ee; --mut:#9aa3ad; --hover:#2f3540; }
+    :root { --bg:#1e2228; --panel:#262b33; --bd:#3a414b; --tx:#e6e9ee; --mut:#9aa3ad; --hover:#2f3540; --board:#15663c; }
   }
-  * { box-sizing: border-box; }
+  * { box-sizing:border-box; }
   body { margin:0; font-family:"Segoe UI",system-ui,Arial,sans-serif; background:var(--bg); color:var(--tx); }
   .wrap { display:flex; height:100vh; }
-  .side { width:200px; flex-shrink:0; border-right:1px solid var(--bd); overflow-y:auto; padding:12px 8px; background:var(--panel); }
+  .side { width:210px; flex-shrink:0; border-right:1px solid var(--bd); overflow-y:auto; padding:12px 8px; background:var(--panel); }
   .side h1 { font-size:14px; margin:4px 8px 12px; }
   .board-btn { display:block; width:100%; text-align:left; padding:9px 10px; margin-bottom:4px; border:1px solid transparent;
     border-radius:8px; background:transparent; color:var(--tx); cursor:pointer; font-size:13px; }
   .board-btn:hover { background:var(--hover); }
   .board-btn.active { background:var(--hover); border-color:var(--bd); font-weight:700; }
-  .main { flex:1; overflow-y:auto; padding:18px 22px; }
-  .head { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:4px; }
+  .main { flex:1; overflow:auto; padding:18px 22px; }
   h2 { font-size:20px; margin:0; }
-  .note { font-size:12px; color:var(--mut); margin:4px 0 14px; max-width:760px; }
-  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
-  input[type=search]{ padding:7px 10px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); color:var(--tx); font-size:13px; min-width:200px; }
-  .legend { display:flex; flex-wrap:wrap; gap:6px 12px; font-size:11px; color:var(--mut); }
+  .note { font-size:12px; color:var(--mut); margin:5px 0 12px; max-width:820px; }
+  .toolbar { display:flex; gap:12px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  input[type=search]{ padding:7px 10px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); color:var(--tx); font-size:13px; min-width:220px; }
+  .legend { display:flex; flex-wrap:wrap; gap:5px 12px; font-size:11px; color:var(--mut); }
   .legend span { display:inline-flex; align-items:center; gap:5px; }
-  .dot { width:11px; height:11px; border-radius:3px; display:inline-block; }
-
-  /* header (two physical columns with pin numbers) */
-  .hdr { display:grid; grid-template-columns:1fr 40px 1fr; gap:6px 10px; max-width:760px; align-items:center; }
-  .pin { display:flex; align-items:center; gap:8px; padding:6px 9px; border:1px solid var(--bd); border-radius:8px; background:var(--panel); cursor:pointer; }
-  .pin.r { flex-direction:row-reverse; text-align:right; }
-  .pin:hover { border-color:var(--mut); }
-  .pin.dim { opacity:.25; }
-  .pin .nm { font-weight:700; font-size:13px; }
-  .pin .sb { font-size:11px; color:var(--mut); }
-  .pn { text-align:center; font-size:11px; color:var(--mut); font-family:ui-monospace,Consolas,monospace; }
-  .pinwrap { display:flex; flex-direction:column; }
-
-  /* table (functional) */
-  table { border-collapse:collapse; width:100%; max-width:860px; font-size:13px; }
-  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--bd); }
-  th { color:var(--mut); font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
-  tr.dim { display:none; }
-  .tag { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; font-weight:700; color:#fff; }
-
-  /* two-col function lists (Arduino) */
-  .cols { display:flex; gap:24px; flex-wrap:wrap; }
-  .col { min-width:240px; }
-  .col h3 { font-size:13px; color:var(--mut); margin:0 0 8px; }
-  .grid { display:flex; flex-direction:column; gap:5px; }
+  .ldot { width:11px; height:11px; border-radius:3px; display:inline-block; }
+  .stage { background:var(--panel); border:1px solid var(--bd); border-radius:12px; padding:14px; overflow:auto; }
+  svg { width:100%; height:auto; display:block; }
+  .pg { cursor:pointer; }
+  .pg text { font-family:ui-monospace,Consolas,monospace; }
+  .pg .nm { font-weight:700; font-size:12px; fill:var(--tx); }
+  .pg .sb { font-size:10px; fill:var(--mut); }
+  .pg .num { font-size:9px; fill:var(--mut); }
+  .pg.hide { opacity:.12; }
+  .pg.sel .dot { stroke:var(--tx); stroke-width:2.5; }
+  .pg.sel .nm { text-decoration:underline; }
+  .board-rect { fill:var(--board); }
+  .silk { fill:none; stroke:rgba(255,255,255,.25); }
+  .silktx { fill:rgba(255,255,255,.7); font-size:11px; font-family:ui-monospace,Consolas,monospace; }
+  .deco { fill:#9aa3ad; }
+  .detail { margin-top:12px; font-size:13px; color:var(--mut); min-height:20px; }
+  .detail b { color:var(--tx); }
+  .foot { font-size:11px; color:var(--mut); margin-top:10px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="side"><h1>🔌 Pinouts</h1><div id="boardlist"></div></div>
   <div class="main">
-    <div class="head"><h2 id="title"></h2></div>
+    <h2 id="title"></h2>
     <div class="note" id="note"></div>
-    <div class="toolbar">
-      <input type="search" id="search" placeholder="Filter pins (e.g. SDA, GPIO18, PWM)…">
-      <div class="legend" id="legend"></div>
-    </div>
-    <div id="view"></div>
+    <div class="toolbar"><input type="search" id="search" placeholder="Filter pins (SDA, GPIO18, PWM…)"><div class="legend" id="legend"></div></div>
+    <div class="stage"><div id="view"></div></div>
+    <div class="detail" id="detail">Click a pin for details.</div>
+    <div class="foot">Simplified vector layouts (not photos) — pin order matches the named board variant; always verify orientation against your board's silkscreen / datasheet.</div>
   </div>
 </div>
 
@@ -75,35 +66,19 @@ const CATS = {
   spi:["SPI","#16a085"], pwm:["PWM","#d63384"], ctrl:["Control","#f59e0b"], other:["Other","#7f8c8d"]
 };
 const col = c => (CATS[c]||CATS.other)[1];
-
-// pin helper: [name, sub, cat]
-const p = (n,s,c)=>({n,s,c});
+const p = (n,s,c)=>({n,s:s||"",c:c||"other"});
 
 const BOARDS = {
-  "arduino-uno": { name:"Arduino Uno R3", kind:"cols",
-    note:"ATmega328P, 5V logic. UART on D0/D1, I²C on A4/A5, SPI on D10–D13. ~ = PWM. Onboard LED on D13.",
-    cols:[
-      {h:"Power / Analog", pins:[
-        p("RESET","active-low","ctrl"),p("3V3","50 mA max","power"),p("5V","","power"),
-        p("GND","","gnd"),p("GND","","gnd"),p("VIN","7–12V in","power"),
-        p("A0","ADC","analog"),p("A1","ADC","analog"),p("A2","ADC","analog"),
-        p("A3","ADC","analog"),p("A4","ADC / SDA","i2c"),p("A5","ADC / SCL","i2c")]},
-      {h:"Digital", pins:[
-        p("D0","RX","uart"),p("D1","TX","uart"),p("D2","INT0","gpio"),p("D3","~ INT1","pwm"),
-        p("D4","","gpio"),p("D5","~","pwm"),p("D6","~","pwm"),p("D7","","gpio"),p("D8","","gpio"),
-        p("D9","~","pwm"),p("D10","~ SS","pwm"),p("D11","~ MOSI","spi"),p("D12","MISO","spi"),
-        p("D13","SCK / LED","spi"),p("AREF","analog ref","ctrl"),p("GND","","gnd")]}
-    ]},
-
-  "raspberry-pi": { name:"Raspberry Pi (40-pin J8)", kind:"header",
-    note:"Standard 40-pin GPIO header (Pi 2/3/4/Zero/5). BCM numbering shown. 3V3 logic — never feed 5V into a GPIO. Default: UART TXD=GPIO14, RXD=GPIO15; I²C SDA=GPIO2, SCL=GPIO3; SPI0 MOSI=10, MISO=9, SCLK=11, CE0=8, CE1=7.",
-    header:[
+  "raspberry-pi": { name:"Raspberry Pi (40-pin J8)", w:640, h:560,
+    note:"Standard 40-pin GPIO header (Pi 2/3/4/5/Zero). BCM numbering. 3.3V logic — never put 5V on a GPIO. Pin 1 (3V3) is top-left, marked on the board.",
+    body:{x:250,y:24,w:140,h:512,label:"40-PIN HEADER"},
+    header:{kind:"dual", x:280, y:54, gap:80, pitch:24, num:true, pins:[
       p("3V3","","power"),p("5V","","power"),
       p("GPIO2","SDA1","i2c"),p("5V","","power"),
       p("GPIO3","SCL1","i2c"),p("GND","","gnd"),
       p("GPIO4","GPCLK0","gpio"),p("GPIO14","TXD0","uart"),
       p("GND","","gnd"),p("GPIO15","RXD0","uart"),
-      p("GPIO17","","gpio"),p("GPIO18","PCM_CLK / PWM0","pwm"),
+      p("GPIO17","","gpio"),p("GPIO18","PWM0","pwm"),
       p("GPIO27","","gpio"),p("GND","","gnd"),
       p("GPIO22","","gpio"),p("GPIO23","","gpio"),
       p("3V3","","power"),p("GPIO24","","gpio"),
@@ -116,121 +91,186 @@ const BOARDS = {
       p("GPIO6","","gpio"),p("GPIO12","PWM0","pwm"),
       p("GPIO13","PWM1","pwm"),p("GND","","gnd"),
       p("GPIO19","PCM_FS","gpio"),p("GPIO16","","gpio"),
-      p("GPIO26","","gpio"),p("GPIO20","PCM_DIN","gpio"),
-      p("GND","","gnd"),p("GPIO21","PCM_DOUT","gpio")
+      p("GPIO26","","gpio"),p("GPIO20","","gpio"),
+      p("GND","","gnd"),p("GPIO21","","gpio")
+    ]}},
+
+  "arduino-uno": { name:"Arduino Uno R3", w:760, h:420,
+    note:"ATmega328P, 5V logic. Viewed with the USB/power jacks on the left. Top edge = digital header (~ = PWM), bottom edge = power + analog. UART D0/D1, I²C A4/A5, SPI D10–D13, LED D13.",
+    body:{x:70,y:150,w:620,h:150,label:"ARDUINO UNO"},
+    deco:[{x:34,y:175,w:46,h:42},{x:40,y:235,w:40,h:40}],
+    headers:[
+      {kind:"h", x:110, y:150, pitch:31, dir:"up", pins:[
+        p("SCL","","i2c"),p("SDA","","i2c"),p("AREF","","ctrl"),p("GND","","gnd"),
+        p("D13","SCK·LED","spi"),p("D12","MISO","spi"),p("D11","~MOSI","pwm"),p("D10","~SS","pwm"),
+        p("D9","~","pwm"),p("D8","","gpio"),p("D7","","gpio"),p("D6","~","pwm"),
+        p("D5","~","pwm"),p("D4","","gpio"),p("D3","~INT1","pwm"),p("D2","INT0","gpio"),
+        p("D1","TX","uart"),p("D0","RX","uart")]},
+      {kind:"h", x:150, y:300, pitch:34, dir:"down", pins:[
+        p("IOREF","","ctrl"),p("RESET","","ctrl"),p("3V3","","power"),p("5V","","power"),
+        p("GND","","gnd"),p("GND","","gnd"),p("VIN","","power"),
+        p("A0","ADC","analog"),p("A1","ADC","analog"),p("A2","ADC","analog"),
+        p("A3","ADC","analog"),p("A4","SDA","i2c"),p("A5","SCL","analog")]}
     ]},
 
-  "esp32": { name:"ESP32 (WROOM-32 / DevKitC)", kind:"table",
-    note:"3.3V logic. Physical pin order varies by board (DevKitC, DOIT, WROVER…) — this is the functional GPIO map; verify positions against your board's silkscreen. ⚠ GPIO6–11 connect to flash (do not use). GPIO34–39 are input-only (no pull-ups, no output). Strapping pins: 0,2,5,12,15.",
-    rows:[
-      ["GPIO0","Boot strap, ADC2_1, touch1","ctrl"],
-      ["GPIO1","TX0 (UART0)","uart"],["GPIO3","RX0 (UART0)","uart"],
-      ["GPIO21","SDA (default I²C)","i2c"],["GPIO22","SCL (default I²C)","i2c"],
-      ["GPIO23","MOSI (VSPI)","spi"],["GPIO19","MISO (VSPI)","spi"],
-      ["GPIO18","SCK (VSPI)","spi"],["GPIO5","CS (VSPI), strap","spi"],
-      ["GPIO25","DAC1, ADC2_8","analog"],["GPIO26","DAC2, ADC2_9","analog"],
-      ["GPIO32","ADC1_4, touch9","analog"],["GPIO33","ADC1_5, touch8","analog"],
-      ["GPIO34","ADC1_6 (input only)","analog"],["GPIO35","ADC1_7 (input only)","analog"],
-      ["GPIO36","VP, ADC1_0 (input only)","analog"],["GPIO39","VN, ADC1_3 (input only)","analog"],
-      ["GPIO2","Onboard LED, strap, ADC2_2","gpio"],["GPIO4","ADC2_0, touch0","gpio"],
-      ["GPIO13","ADC2_4, touch4","gpio"],["GPIO12","ADC2_5, strap (input low at boot)","ctrl"],
-      ["GPIO14","ADC2_6, touch6","gpio"],["GPIO15","ADC2_3, strap, touch3","gpio"],
-      ["GPIO16 / 17","free GPIO (UART2 on many boards)","gpio"],
-      ["EN","Chip enable / reset (active high)","ctrl"],
-      ["3V3 / GND / VIN(5V)","Power rails","power"]
+  "esp32-devkit": { name:"ESP32 DevKit V1 (DOIT, 30-pin)", w:660, h:560,
+    note:"3.3V logic, USB at the bottom. This is the common DOIT/HiLetgo 30-pin DevKit order — 36/38-pin modules differ, so verify against your board. ⚠ GPIO6–11 are flash (omitted). GPIO34–39 input-only. Strapping: 0,2,5,12,15.",
+    body:{x:250,y:30,w:160,h:470,label:"ESP32",usb:"bottom"},
+    headers:[
+      {kind:"v", x:250, y:60, pitch:30, dir:"left", pins:[
+        p("EN","reset","ctrl"),p("GPIO36","VP·ADC1_0·in","analog"),p("GPIO39","VN·ADC1_3·in","analog"),
+        p("GPIO34","ADC1_6·in","analog"),p("GPIO35","ADC1_7·in","analog"),p("GPIO32","ADC1_4·touch","analog"),
+        p("GPIO33","ADC1_5·touch","analog"),p("GPIO25","DAC1","analog"),p("GPIO26","DAC2","analog"),
+        p("GPIO27","touch7","gpio"),p("GPIO14","touch6","gpio"),p("GPIO12","strap·touch5","ctrl"),
+        p("GPIO13","touch4","gpio"),p("GND","","gnd"),p("VIN","5V in","power")]},
+      {kind:"v", x:410, y:60, pitch:30, dir:"right", pins:[
+        p("GPIO23","MOSI","spi"),p("GPIO22","SCL","i2c"),p("GPIO1","TX0","uart"),p("GPIO3","RX0","uart"),
+        p("GPIO21","SDA","i2c"),p("GPIO19","MISO","spi"),p("GPIO18","SCK","spi"),p("GPIO5","CS·strap","spi"),
+        p("GPIO17","TX2","uart"),p("GPIO16","RX2","uart"),p("GPIO4","ADC2·touch0","gpio"),
+        p("GPIO0","strap·boot","ctrl"),p("GPIO2","LED·strap","ctrl"),p("GPIO15","strap","gpio"),p("3V3","","power")]}
     ]},
 
-  "esp8266-nodemcu": { name:"ESP8266 NodeMCU (ESP-12E)", kind:"table",
-    note:"3.3V logic. Dx silkscreen labels → GPIO mapping (Amica/LoLin). Avoid GPIO6–11 (flash). GPIO0/2/15 are boot-strapping pins. Only one ADC (A0, 0–1.0V; NodeMCU adds a divider for 0–3.3V).",
-    rows:[
-      ["D0","GPIO16 — no PWM/I²C, wake from deep sleep","gpio"],
-      ["D1","GPIO5 — default SCL","i2c"],["D2","GPIO4 — default SDA","i2c"],
-      ["D3","GPIO0 — strap (flash button), pull-up","ctrl"],
-      ["D4","GPIO2 — onboard LED, strap, TX1","ctrl"],
-      ["D5","GPIO14 — SCK (SPI)","spi"],["D6","GPIO12 — MISO (SPI)","spi"],
-      ["D7","GPIO13 — MOSI (SPI), RX2","spi"],["D8","GPIO15 — CS (SPI), strap (pull-down)","ctrl"],
-      ["RX","GPIO3 — UART0 RX","uart"],["TX","GPIO1 — UART0 TX","uart"],
-      ["A0","ADC0 — analog in (0–1.0V core)","analog"],
-      ["3V3 / GND / VIN","Power rails","power"],["EN/RST","Enable / reset","ctrl"]
+  "esp8266-nodemcu": { name:"ESP8266 NodeMCU (Amica)", w:640, h:560,
+    note:"3.3V logic, USB at the bottom. Dx silkscreen → GPIO. Avoid SD/CLK pins (flash). GPIO0/2/15 are boot-strapping. One ADC (A0).",
+    body:{x:240,y:30,w:160,h:470,label:"NodeMCU",usb:"bottom"},
+    headers:[
+      {kind:"v", x:240, y:60, pitch:30, dir:"left", pins:[
+        p("A0","ADC0","analog"),p("RSV","reserved","other"),p("RSV","reserved","other"),
+        p("SD3","GPIO10","other"),p("SD2","GPIO9","other"),p("SD1","flash","other"),
+        p("CMD","flash","other"),p("SD0","flash","other"),p("CLK","flash","other"),
+        p("GND","","gnd"),p("3V3","","power"),p("EN","enable","ctrl"),
+        p("RST","reset","ctrl"),p("GND","","gnd"),p("VIN","5V in","power")]},
+      {kind:"v", x:400, y:60, pitch:30, dir:"right", pins:[
+        p("D0","GPIO16","gpio"),p("D1","GPIO5·SCL","i2c"),p("D2","GPIO4·SDA","i2c"),
+        p("D3","GPIO0·strap","ctrl"),p("D4","GPIO2·LED","ctrl"),p("3V3","","power"),
+        p("GND","","gnd"),p("D5","GPIO14·SCK","spi"),p("D6","GPIO12·MISO","spi"),
+        p("D7","GPIO13·MOSI","spi"),p("D8","GPIO15·CS","ctrl"),p("RX","GPIO3","uart"),
+        p("TX","GPIO1","uart"),p("GND","","gnd"),p("3V3","","power")]}
     ]},
 
-  "ftdi-232": { name:"FTDI Basic / FT232 6-pin Header", kind:"list",
-    note:"The de-facto 6-pin serial header (SparkFun FTDI Basic, many Pro Mini programmers). Pin 1 = GND end (often marked with a square pad / silkscreen). Set the breakout jumper to 3V3 or 5V to match your target. TX→RX and RX→TX when wiring to a target.",
-    list:[
-      p("GND","Ground","gnd"),p("CTS","Clear to send (in)","ctrl"),
-      p("VCC","3V3 or 5V (jumper-selected)","power"),p("TXO","Transmit out → target RX","uart"),
-      p("RXI","Receive in ← target TX","uart"),p("DTR","Reset (to target DTR/RST)","ctrl")
-    ]},
+  "ftdi-232": { name:"FTDI Basic / FT232 (6-pin)", w:540, h:340,
+    note:"The standard 6-pin serial header (SparkFun FTDI Basic, Pro Mini programmers). Pin 1 = GND (square pad). Set the VCC jumper to 3V3 or 5V to match the target. TX→target RX, RX←target TX.",
+    body:{x:150,y:70,w:150,h:200,label:"FTDI",usb:"left"},
+    headers:[{kind:"v", x:300, y:100, pitch:30, dir:"right", num:true, pins:[
+      p("GND","ground","gnd"),p("CTS","clear-to-send","ctrl"),p("VCC","3V3 / 5V","power"),
+      p("TXO","→ target RX","uart"),p("RXI","← target TX","uart"),p("DTR","reset","ctrl")]}]},
 
-  "msp430-launchpad": { name:"TI MSP430G2 LaunchPad (MSP-EXP430G2)", kind:"table",
-    note:"20-pin DIP socket for MSP430G2553 (J1 left / J2 right). 3.6V max logic. Pin functions are multiplexed — exact peripheral depends on the device variant; verify against the MSP430G2553 datasheet. Onboard LEDs: P1.0 (red), P1.6 (green). Button: P1.3.",
-    rows:[
-      ["P1.0","ADC A0 — red LED","gpio"],["P1.1","UART RXD (UCA0)","uart"],
-      ["P1.2","UART TXD (UCA0)","uart"],["P1.3","Button S2, ADC A3","ctrl"],
-      ["P1.4","ADC A4, SPI STE / SMCLK","analog"],["P1.5","SPI SCLK (UCB0), ADC A5","spi"],
-      ["P1.6","I²C SCL / SPI MISO, green LED","i2c"],["P1.7","I²C SDA / SPI MOSI","i2c"],
-      ["P2.0–P2.5","GPIO / Timer (TA1) capture-compare","gpio"],
-      ["P2.6 / P2.7","XIN / XOUT (crystal) or GPIO","gpio"],
-      ["RST","Reset / SBWTDIO (Spy-Bi-Wire)","ctrl"],["TEST","SBWTCK (Spy-Bi-Wire)","ctrl"],
-      ["VCC / GND","Power (3.3V from emulator)","power"]
+  "msp430-launchpad": { name:"TI MSP430G2 LaunchPad", w:660, h:560,
+    note:"MSP-EXP430G2 with MSP430G2553 (J1 left / J2 right, 10 pins each). 3.6V max. Functions are multiplexed — verify against the G2553 datasheet. LEDs: P1.0 red, P1.6 green. Button: P1.3. Emulator/USB at top.",
+    body:{x:250,y:30,w:160,h:470,label:"LaunchPad",usb:"top"},
+    headers:[
+      {kind:"v", x:250, y:70, pitch:42, dir:"left", pins:[
+        p("VCC","3.3V","power"),p("P1.0","A0·red LED","gpio"),p("P1.1","UART RXD","uart"),
+        p("P1.2","UART TXD","uart"),p("P1.3","button·A3","ctrl"),p("P1.4","A4·SMCLK","analog"),
+        p("P1.5","A5·SCLK","spi"),p("P2.0","TA1.0","gpio"),p("P2.1","TA1.1","gpio"),p("P2.2","TA1.1","gpio")]},
+      {kind:"v", x:410, y:70, pitch:42, dir:"right", pins:[
+        p("GND","","gnd"),p("P2.6","XIN·TA0.1","gpio"),p("P2.7","XOUT","gpio"),p("TEST","SBWTCK","ctrl"),
+        p("RST","SBWTDIO","ctrl"),p("P1.7","SDA·MOSI","i2c"),p("P1.6","SCL·MISO·green","i2c"),
+        p("P2.5","TA1.2","gpio"),p("P2.4","TA1.2","gpio"),p("P2.3","TA1.0","gpio")]}
     ]}
 };
 
-let current = "arduino-uno";
-let query = "";
+let current = "raspberry-pi", query = "";
+let pinSeq = 0;
+const pinData = {};   // id -> {n,s,c}
 
-function legend() {
-  document.getElementById("legend").innerHTML = Object.entries(CATS)
-    .map(([k,v])=>`<span><span class="dot" style="background:${v[1]}"></span>${v[0]}</span>`).join("");
-}
-
-function boardList() {
+function legend(){ document.getElementById("legend").innerHTML = Object.values(CATS)
+  .map(v=>`<span><span class="ldot" style="background:${v[1]}"></span>${v[0]}</span>`).join(""); }
+function boardList(){
   document.getElementById("boardlist").innerHTML = Object.entries(BOARDS)
     .map(([id,b])=>`<button class="board-btn ${id===current?'active':''}" data-id="${id}">${b.name}</button>`).join("");
-  document.querySelectorAll(".board-btn").forEach(b=>b.addEventListener("click",()=>{current=b.dataset.id;query="";document.getElementById("search").value="";render();}));
+  document.querySelectorAll(".board-btn").forEach(b=>b.addEventListener("click",()=>{current=b.dataset.id;query="";document.getElementById("search").value="";document.getElementById("detail").textContent="Click a pin for details.";render();}));
 }
 
-function match(text){ return !query || text.toLowerCase().includes(query); }
+const escx = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
 
-function pinCard(pin, reversed){
-  const dim = match(pin.n+" "+pin.s) ? "" : " dim";
-  return `<div class="pin${reversed?' r':''}${dim}" title="${pin.s||''}">
-    <span class="dot" style="background:${col(pin.c)}"></span>
-    <span class="pinwrap"><span class="nm">${pin.n}</span>${pin.s?`<span class="sb">${pin.s}</span>`:''}</span></div>`;
+// one pin: dot + label, returns svg string; registers pinData
+function pinSVG(pin, x, y, dir, num){
+  const id = "p"+(pinSeq++);
+  pinData[id] = pin; pinData[id].cat = pin.c;
+  const c = col(pin.c);
+  let label="", lead="", numt="";
+  const off = 14, txo = 22;
+  if (dir==="left"){
+    lead=`<line x1="${x-6}" y1="${y}" x2="${x-off}" y2="${y}" stroke="${c}" stroke-width="2"/>`;
+    label=`<text x="${x-txo}" y="${y}" text-anchor="end" dominant-baseline="middle"><tspan class="nm">${escx(pin.n)}</tspan>${pin.s?`<tspan class="sb" dx="6">${escx(pin.s)}</tspan>`:""}</text>`;
+  } else if (dir==="right"){
+    lead=`<line x1="${x+6}" y1="${y}" x2="${x+off}" y2="${y}" stroke="${c}" stroke-width="2"/>`;
+    label=`<text x="${x+txo}" y="${y}" text-anchor="start" dominant-baseline="middle"><tspan class="nm">${escx(pin.n)}</tspan>${pin.s?`<tspan class="sb" dx="6">${escx(pin.s)}</tspan>`:""}</text>`;
+  } else if (dir==="up"){
+    lead=`<line x1="${x}" y1="${y-6}" x2="${x}" y2="${y-off}" stroke="${c}" stroke-width="2"/>`;
+    label=`<g transform="translate(${x},${y-txo}) rotate(-90)"><text x="0" y="0" text-anchor="start" dominant-baseline="middle"><tspan class="nm">${escx(pin.n)}</tspan>${pin.s?`<tspan class="sb" dx="6">${escx(pin.s)}</tspan>`:""}</text></g>`;
+  } else { // down
+    lead=`<line x1="${x}" y1="${y+6}" x2="${x}" y2="${y+off}" stroke="${c}" stroke-width="2"/>`;
+    label=`<g transform="translate(${x},${y+txo}) rotate(90)"><text x="0" y="0" text-anchor="start" dominant-baseline="middle"><tspan class="nm">${escx(pin.n)}</tspan>${pin.s?`<tspan class="sb" dx="6">${escx(pin.s)}</tspan>`:""}</text></g>`;
+  }
+  if (num) numt=`<text class="num" x="${x}" y="${y-9}" text-anchor="middle">${num}</text>`;
+  return `<g class="pg" data-id="${id}" data-s="${escx((pin.n+" "+pin.s).toLowerCase())}">
+    ${lead}<circle class="dot" cx="${x}" cy="${y}" r="6" fill="${c}"/>${numt}${label}</g>`;
+}
+
+function header(h){
+  let s="";
+  if (h.kind==="dual"){
+    const xl=h.x, xr=h.x+h.gap;
+    for (let i=0;i<h.pins.length;i+=2){
+      const y=h.y+(i/2)*h.pitch;
+      s+=pinSVG(h.pins[i], xl, y, "left", h.num?i+1:0);
+      if (h.pins[i+1]) s+=pinSVG(h.pins[i+1], xr, y, "right", h.num?i+2:0);
+    }
+  } else if (h.kind==="v"){
+    h.pins.forEach((pn,i)=>{ s+=pinSVG(pn, h.x, h.y+i*h.pitch, h.dir, h.num?i+1:0); });
+  } else { // h
+    h.pins.forEach((pn,i)=>{ s+=pinSVG(pn, h.x+i*h.pitch, h.y, h.dir, h.num?i+1:0); });
+  }
+  return s;
 }
 
 function render(){
   const b = BOARDS[current];
-  document.getElementById("title").textContent = b.name;
-  document.getElementById("note").textContent = b.note || "";
+  pinSeq=0; for (const k in pinData) delete pinData[k];
+  document.getElementById("title").textContent=b.name;
+  document.getElementById("note").textContent=b.note||"";
   document.querySelectorAll(".board-btn").forEach(x=>x.classList.toggle("active",x.dataset.id===current));
-  const view = document.getElementById("view");
 
-  if (b.kind === "header") {
-    let rows = "";
-    for (let i=0;i<b.header.length;i+=2){
-      const L=b.header[i], R=b.header[i+1];
-      rows += `<div>${pinCard(L,true)}</div><div class="pn">${i+1}·${i+2}</div><div>${pinCard(R,false)}</div>`;
-    }
-    view.innerHTML = `<div class="hdr">${rows}</div>`;
-  } else if (b.kind === "list") {
-    view.innerHTML = `<div class="grid" style="max-width:360px">${b.list.map((pin,i)=>
-      `<div style="display:flex;align-items:center;gap:10px">
-        <span class="pn">${i+1}</span>${pinCard(pin,false)}</div>`).join("")}</div>`;
-  } else if (b.kind === "cols") {
-    view.innerHTML = `<div class="cols">${b.cols.map(c=>
-      `<div class="col"><h3>${c.h}</h3><div class="grid">${c.pins.map(pn=>pinCard(pn,false)).join("")}</div></div>`).join("")}</div>`;
-  } else { // table
-    view.innerHTML = `<table><thead><tr><th>Pin</th><th>Function</th><th>Type</th></tr></thead><tbody>${
-      b.rows.map(r=>{
-        const dim = match(r[0]+" "+r[1]) ? "" : " dim";
-        return `<tr class="${dim}"><td><b>${r[0]}</b></td><td>${r[1]}</td>
-          <td><span class="tag" style="background:${col(r[2])}">${(CATS[r[2]]||CATS.other)[0]}</span></td></tr>`;
-      }).join("")}</tbody></table>`;
+  let body="";
+  if (b.body){
+    const bd=b.body;
+    body+=`<rect class="board-rect" x="${bd.x}" y="${bd.y}" width="${bd.w}" height="${bd.h}" rx="10"/>`;
+    body+=`<text class="silktx" x="${bd.x+bd.w/2}" y="${bd.y+bd.h/2}" text-anchor="middle" transform="rotate(90 ${bd.x+bd.w/2} ${bd.y+bd.h/2})">${escx(bd.label||"")}</text>`;
+    if (bd.usb==="bottom") body+=`<rect class="deco" x="${bd.x+bd.w/2-18}" y="${bd.y+bd.h-6}" width="36" height="16" rx="2"/>`;
+    if (bd.usb==="top") body+=`<rect class="deco" x="${bd.x+bd.w/2-18}" y="${bd.y-10}" width="36" height="16" rx="2"/>`;
+    if (bd.usb==="left") body+=`<rect class="deco" x="${bd.x-12}" y="${bd.y+bd.h/2-12}" width="18" height="24" rx="2"/>`;
   }
+  (b.deco||[]).forEach(d=>{ body+=`<rect class="deco" x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" rx="3"/>`; });
+
+  let pins="";
+  if (b.header) pins+=header(b.header);
+  (b.headers||[]).forEach(h=>pins+=header(h));
+
+  document.getElementById("view").innerHTML =
+    `<svg viewBox="0 0 ${b.w} ${b.h}" style="max-width:${b.w}px">${body}${pins}</svg>`;
+  attach();
+  applyFilter();
 }
 
-document.getElementById("search").addEventListener("input",e=>{query=e.target.value.trim().toLowerCase();render();});
+function attach(){
+  document.querySelectorAll(".pg").forEach(g=>{
+    g.addEventListener("click",()=>{
+      document.querySelectorAll(".pg.sel").forEach(x=>x.classList.remove("sel"));
+      g.classList.add("sel");
+      const d=pinData[g.dataset.id];
+      document.getElementById("detail").innerHTML =
+        `<b>${escx(d.n)}</b>${d.s?" — "+escx(d.s):""} · <span style="color:${col(d.cat)}">${(CATS[d.cat]||CATS.other)[0]}</span>`;
+    });
+  });
+}
+function applyFilter(){
+  document.querySelectorAll(".pg").forEach(g=>{
+    g.classList.toggle("hide", !!query && !g.dataset.s.includes(query));
+  });
+}
+document.getElementById("search").addEventListener("input",e=>{query=e.target.value.trim().toLowerCase();applyFilter();});
 legend(); boardList(); render();
 </script>
 </body>
