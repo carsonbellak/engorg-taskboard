@@ -7,6 +7,14 @@
       "description": "4-band resistor color-code calculator — pick the bands to read resistance and tolerance.",
       "version": "1.0.0",
       "entry": "https://raw.githubusercontent.com/carsonbellak/engorg-taskboard/main/utilities/resistor-calc/index.html"
+    },
+    {
+      "id": "pinout-reference",
+      "name": "Pinout Reference",
+      "icon": "🔌",
+      "description": "Wiring pinouts for common boards — Arduino, Raspberry Pi, ESP32/ESP8266, FTDI, TI MSP430. Searchable, color-coded by function.",
+      "version": "1.0.0",
+      "entry": "https://raw.githubusercontent.com/carsonbellak/engorg-taskboard/main/utilities/pinout-reference/index.html"
     }
   ]
 }
