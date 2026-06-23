@@ -74,3 +74,6 @@ jobs:
           fi
           gh release upload latest EngOrg-Setup.exe -R "$REPO" --clobber
           gh release edit latest -R "$REPO" --title "EngOrg v$APP_VERSION (latest build)" --notes "$NOTES"
+          # Move the rolling "latest" tag to this commit so the release page shows
+          # it as current (not "N commits since this release").
+          gh api -X PATCH "repos/$REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null || true
