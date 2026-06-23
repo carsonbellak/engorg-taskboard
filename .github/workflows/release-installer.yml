@@ -55,11 +55,12 @@ jobs:
         run: choco install innosetup -y --no-progress
 
       - name: Build installer
-        shell: bash
+        shell: pwsh   # PowerShell passes the /D switch verbatim (bash/MSYS mangles it)
         run: |
-          echo "Building EngOrg v$APP_VERSION"
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DMyAppVersion=$APP_VERSION" installer.iss
-          ls -la EngOrg-Setup.exe
+          Write-Host "Building EngOrg v$env:APP_VERSION"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DBuildNumber=$env:GITHUB_RUN_NUMBER" "installer.iss"
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed ($LASTEXITCODE)" }
+          Get-Item EngOrg-Setup.exe | Select-Object Name, Length
 
       - name: Publish to "latest" release
         shell: bash
