@@ -71,6 +71,14 @@ contextBridge.exposeInMainWorld('api', {
     write: (index, bytes) => ipcRenderer.invoke('ftdi:write', index, bytes),
     close: (index) => ipcRenderer.invoke('ftdi:close', index)
   },
+  uartProg: {
+    list: () => ipcRenderer.invoke('uartprog:list'),
+    save: (name, data) => ipcRenderer.invoke('uartprog:save', { name, data }),
+    load: (name) => ipcRenderer.invoke('uartprog:load', name),
+    remove: (name) => ipcRenderer.invoke('uartprog:delete', name),
+    exportPython: (opts) => ipcRenderer.invoke('uartprog:exportPython', opts),
+    importPython: () => ipcRenderer.invoke('uartprog:importPython')
+  },
   // Contribute — submit local changes to the canonical repo as a GitHub PR
   contribute: {
     getChanges: () => ipcRenderer.invoke('contribute:getChanges'),

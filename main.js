@@ -20,6 +20,7 @@ const registerUtilityStore  = require('./ipc/utility-store');
 const registerWifiChecker   = require('./ipc/wifi-checker');
 const registerContribute    = require('./ipc/contribute');
 const registerFtdi          = require('./ipc/ftdi');
+const registerUartPrograms  = require('./ipc/uart-programs');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -115,6 +116,7 @@ app.whenReady().then(() => {
   registerWifiChecker(getMainWindow);
   registerContribute();
   registerFtdi();
+  registerUartPrograms(getMainWindow);
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
