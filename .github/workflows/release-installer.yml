@@ -22,6 +22,9 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # Auto-incrementing version: 1.0.<build number>, bumps on every run.
+      APP_VERSION: 1.0.${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,7 +57,8 @@ jobs:
       - name: Build installer
         shell: bash
         run: |
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" installer.iss
+          echo "Building EngOrg v$APP_VERSION"
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" "/DMyAppVersion=$APP_VERSION" installer.iss
           ls -la EngOrg-Setup.exe
 
       - name: Publish to "latest" release
@@ -63,9 +67,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           REPO="$GITHUB_REPOSITORY"
-          NOTES="Automated installer build from commit ${GITHUB_SHA} ($(date -u +%Y-%m-%dT%H:%MZ))."
+          NOTES="EngOrg v$APP_VERSION — automated build from commit ${GITHUB_SHA} ($(date -u +%Y-%m-%dT%H:%MZ))."
           if ! gh release view latest -R "$REPO" >/dev/null 2>&1; then
-            gh release create latest -R "$REPO" --title "EngOrg (latest build)" --notes "$NOTES" --latest
+            gh release create latest -R "$REPO" --title "EngOrg v$APP_VERSION (latest build)" --notes "$NOTES" --latest
           fi
           gh release upload latest EngOrg-Setup.exe -R "$REPO" --clobber
-          gh release edit latest -R "$REPO" --notes "$NOTES"
+          gh release edit latest -R "$REPO" --title "EngOrg v$APP_VERSION (latest build)" --notes "$NOTES"

@@ -2,7 +2,11 @@
 ; Classic Windows installer with component selection
 
 #define MyAppName "EngOrg"
-#define MyAppVersion "1.0"
+; CI overrides this with /DMyAppVersion=1.0.<run_number> (see the release workflow);
+; local builds fall back to the default below.
+#ifndef MyAppVersion
+  #define MyAppVersion "1.0"
+#endif
 #define MyAppPublisher "EngOrg"
 #define MyAppURL "https://assistant-taskboard.web.app"
 ; launch.vbs runs the app with no visible console window (see View > Show Console in-app)
