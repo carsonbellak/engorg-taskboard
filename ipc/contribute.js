@@ -3,11 +3,14 @@
 //
 // No local git required: we diff the install against the upstream tree by computing
 // git blob SHAs locally and comparing to the repo's tree (GitHub API). Submission
-// uses the GitHub low-level git data API with the submitter's Personal Access Token
-// to: fork the repo, build one commit with the changed files, and open a PR.
-// The PAT is encrypted at rest via Electron safeStorage and only used in main.
+// uses the GitHub low-level git data API to: fork the repo, build one commit with
+// the changed files, and open a PR.
+//
+// Auth is "Sign in with GitHub" via GitHub's OAuth Device Flow — the user authorizes
+// in their browser and we receive an access token; no Personal Access Token to create
+// or paste. The token is encrypted at rest via Electron safeStorage, used only in main.
 
-const { ipcMain, safeStorage } = require('electron');
+const { ipcMain, safeStorage, shell } = require('electron');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
@@ -16,8 +19,35 @@ const config = require('../config');
 
 const APP_ROOT = path.join(__dirname, '..');
 const TOKEN_FILE = path.join(config.DATA_DIR, 'contrib_token.bin');
+const SETTINGS_FILE = path.join(config.DATA_DIR, 'settings.json');
 const GH = 'https://api.github.com';
+const DEVICE_CODE_URL = 'https://github.com/login/device/code';
+const OAUTH_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+const OAUTH_SCOPE = 'public_repo'; // enough to fork + open a PR on a public repo
 const IGNORE = new Set(config.CONTRIB_IGNORE || ['.git', 'node_modules', 'appdata']);
+
+// OAuth App client ID (public, not a secret). settings.json override → config default.
+function clientId() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      if (s && s.githubOAuthClientId) return String(s.githubOAuthClientId).trim();
+    }
+  } catch {}
+  return (config.GITHUB_OAUTH_CLIENT_ID || '').trim();
+}
+
+// POST a form-encoded body to GitHub's OAuth endpoints (they want JSON back).
+async function ghForm(url, params) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params).toString(),
+    cache: 'no-store',
+  });
+  let data = null; try { data = await r.json(); } catch {}
+  return { ok: r.ok, status: r.status, data: data || {} };
+}
 
 // git blob sha1: sha1("blob <bytelen>\0" + content)
 function blobSha(buf) {
@@ -94,31 +124,70 @@ module.exports = function registerContribute() {
     }
   });
 
-  ipcMain.handle('contribute:hasToken', async () => ({ hasToken: !!getToken() }));
-  ipcMain.handle('contribute:saveToken', async (e, token) => {
-    try {
-      const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(token) : Buffer.from(token, 'utf-8');
-      await fsp.mkdir(config.DATA_DIR, { recursive: true });
-      await fsp.writeFile(TOKEN_FILE, buf);
-      return { ok: true };
-    } catch (err) { return { error: err.message }; }
+  // Current sign-in state — used by the UI to show "Signed in as @x" vs a button.
+  ipcMain.handle('contribute:status', async () => {
+    const configured = !!clientId();
+    const token = getToken();
+    if (!token) return { signedIn: false, configured };
+    const me = await gh(token, '/user');
+    if (!me.ok) return { signedIn: false, configured }; // token revoked/expired
+    return { signedIn: true, login: me.data.login, configured: true };
   });
-  ipcMain.handle('contribute:clearToken', async () => {
+
+  // Step 1 of the OAuth Device Flow: get a user code + verification URL and open it.
+  ipcMain.handle('contribute:signInStart', async () => {
+    const cid = clientId();
+    if (!cid) return { error: 'GitHub sign-in isn’t configured yet. The app owner must set a GitHub OAuth App client ID (config.GITHUB_OAUTH_CLIENT_ID or settings.json → githubOAuthClientId) with Device Flow enabled.' };
+    const r = await ghForm(DEVICE_CODE_URL, { client_id: cid, scope: OAUTH_SCOPE });
+    if (!r.ok || !r.data.device_code) return { error: `Could not start GitHub sign-in (${r.status}).` };
+    try { await shell.openExternal(r.data.verification_uri); } catch {}
+    return {
+      userCode: r.data.user_code,
+      verificationUri: r.data.verification_uri,
+      deviceCode: r.data.device_code,
+      interval: r.data.interval || 5,
+      expiresIn: r.data.expires_in || 900,
+    };
+  });
+
+  // Step 2: poll until the user authorizes (or the code expires). Stores the token.
+  ipcMain.handle('contribute:signInPoll', async (e, deviceCode) => {
+    const cid = clientId();
+    if (!cid) return { error: 'Not configured.' };
+    const r = await ghForm(OAUTH_TOKEN_URL, { client_id: cid, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' });
+    const d = r.data;
+    if (d.access_token) {
+      try {
+        const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(d.access_token) : Buffer.from(d.access_token, 'utf-8');
+        await fsp.mkdir(config.DATA_DIR, { recursive: true });
+        await fsp.writeFile(TOKEN_FILE, buf);
+      } catch (err) { return { error: 'Signed in but could not store the token: ' + err.message }; }
+      const me = await gh(d.access_token, '/user');
+      return { ok: true, login: me.ok ? me.data.login : null };
+    }
+    if (d.error === 'authorization_pending') return { pending: true };
+    if (d.error === 'slow_down') return { pending: true, interval: d.interval || 5 };
+    if (d.error === 'expired_token') return { error: 'The sign-in code expired — start again.' };
+    if (d.error === 'access_denied') return { error: 'Sign-in was cancelled.' };
+    return { error: d.error_description || d.error || 'Sign-in failed.' };
+  });
+
+  ipcMain.handle('contribute:signOut', async () => {
     try { if (fs.existsSync(TOKEN_FILE)) await fsp.unlink(TOKEN_FILE); return { ok: true }; }
     catch (err) { return { error: err.message }; }
   });
 
-  // Open a PR with the selected files. token optional (falls back to saved one).
-  ipcMain.handle('contribute:submit', async (e, { token, title, body, files, saveToken }) => {
+  // Open a PR with the selected files, using the signed-in user's token.
+  ipcMain.handle('contribute:submit', async (e, { title, body, files }) => {
     const { owner, repo, branch } = config.CONTRIB_REPO;
-    token = token || getToken();
-    if (!token) return { error: 'A GitHub Personal Access Token is required.' };
+    const token = getToken();
+    if (!token) return { error: 'Sign in with GitHub first.' };
     if (!files || !files.length) return { error: 'No files selected to submit.' };
 
     try {
       // who am I
       const me = await gh(token, '/user');
-      if (!me.ok) return { error: `GitHub auth failed (${me.status}). Check your token.` };
+      if (!me.ok) return { error: `GitHub sign-in expired (${me.status}). Sign in again.` };
       const login = me.data.login;
 
       // ensure fork exists (forking is async — poll briefly)
@@ -164,12 +233,6 @@ module.exports = function registerContribute() {
       });
       if (!pr.ok) return { error: `Failed to open PR (${pr.status}): ${pr.data && pr.data.message || ''}` };
 
-      if (saveToken) {
-        try {
-          const buf = safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(token) : Buffer.from(token, 'utf-8');
-          await fsp.writeFile(TOKEN_FILE, buf);
-        } catch {}
-      }
       return { url: pr.data.html_url, number: pr.data.number };
     } catch (err) {
       return { error: err.message };

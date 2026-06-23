@@ -101,9 +101,10 @@ contextBridge.exposeInMainWorld('api', {
   // Contribute — submit local changes to the canonical repo as a GitHub PR
   contribute: {
     getChanges: () => ipcRenderer.invoke('contribute:getChanges'),
-    hasToken: () => ipcRenderer.invoke('contribute:hasToken'),
-    saveToken: (token) => ipcRenderer.invoke('contribute:saveToken', token),
-    clearToken: () => ipcRenderer.invoke('contribute:clearToken'),
+    status: () => ipcRenderer.invoke('contribute:status'),
+    signInStart: () => ipcRenderer.invoke('contribute:signInStart'),
+    signInPoll: (deviceCode) => ipcRenderer.invoke('contribute:signInPoll', deviceCode),
+    signOut: () => ipcRenderer.invoke('contribute:signOut'),
     submit: (opts) => ipcRenderer.invoke('contribute:submit', opts)
   },
   // Utility store (GitHub-backed)

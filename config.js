@@ -24,6 +24,12 @@ module.exports = {
   // owner/repo here is the authoritative upstream; the owner (you) reviews + merges PRs.
   CONTRIB_REPO: { owner: 'carsonbellak', repo: 'engorg-taskboard', branch: 'main' },
   CONTRIB_REPO_URL: 'https://github.com/carsonbellak/engorg-taskboard',
+  // "Sign in with GitHub" for Submit Changes uses GitHub's OAuth Device Flow so
+  // users never paste a Personal Access Token. Set this to a GitHub OAuth App
+  // client ID (https://github.com/settings/developers → New OAuth App, then enable
+  // "Device Flow"). The client ID is public (not a secret); it can also be set per
+  // machine via settings.json → "githubOAuthClientId".
+  GITHUB_OAUTH_CLIENT_ID: 'Ov23li96Mzewh6RckDT4',
   // Files/dirs never included in a contribution PR (mirrors .gitignore + safety).
   CONTRIB_IGNORE: ['.git', 'node_modules', 'nodejs', 'tools', 'dist', 'appdata', '.firebase', '.claude'],
 

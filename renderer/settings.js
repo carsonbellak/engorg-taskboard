@@ -1090,7 +1090,7 @@ function renderSettings() {
 
       <div class="settings-section">
         <h3 class="settings-section-title">Contribute</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">Improved the app? Submit your local changes as a Pull Request for the owner to review and merge. Requires a GitHub <a href="#" id="settings-contrib-tokenhelp" style="color:var(--accent)">Personal Access Token</a> with <b>repo</b> scope.</p>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Improved the app? Submit your local changes as a Pull Request for the owner to review and merge. Just <b>sign in with GitHub</b> in your browser — no access token needed.</p>
         <button id="settings-contrib-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Submit Changes…</button>
         <a href="#" id="settings-contrib-repo" style="margin-left:12px;font-size:13px;color:var(--accent)">View repository</a>
       </div>
@@ -1382,9 +1382,7 @@ function renderSettings() {
 function bindContribute() {
   const openBtn = document.getElementById('settings-contrib-open');
   const repoLink = document.getElementById('settings-contrib-repo');
-  const tokenHelp = document.getElementById('settings-contrib-tokenhelp');
   if (repoLink) repoLink.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://github.com/carsonbellak/engorg-taskboard'); });
-  if (tokenHelp) tokenHelp.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://github.com/settings/tokens/new?scopes=repo&description=EngOrg'); });
   if (!openBtn) return;
   openBtn.addEventListener('click', openContributeModal);
 }
@@ -1407,25 +1405,69 @@ async function openContributeModal() {
         <textarea id="contrib-body" class="kicad-input" rows="3" placeholder="What did you change and why?"></textarea>
       </div>
       <div class="wifi-modal-section">
-        <label>GitHub Personal Access Token (<b>repo</b> scope)</label>
-        <input id="contrib-token" class="kicad-input" type="password" placeholder="ghp_… (leave blank if previously saved)">
-        <label class="wifi-cb"><input type="checkbox" id="contrib-remember"> Remember this token on this device (encrypted)</label>
+        <label>GitHub account</label>
+        <div id="contrib-auth" class="settings-section-desc">Checking sign-in…</div>
       </div>
       <div id="contrib-status" class="settings-section-desc"></div>
       <div class="wifi-modal-actions">
         <button id="contrib-cancel" class="kicad-btn kicad-btn-outline">Cancel</button>
-        <button id="contrib-submit" class="kicad-btn kicad-btn-start">Open Pull Request</button>
+        <button id="contrib-submit" class="kicad-btn kicad-btn-start" disabled>Open Pull Request</button>
       </div>
     </div>`;
-  ov.addEventListener('click', (e) => { if (e.target === ov) ov.remove(); });
+  // ── GitHub sign-in (OAuth Device Flow — no token to paste) ──
+  let pollTimer = null;
+  const stopPoll = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
+  const closeModal = () => { stopPoll(); ov.remove(); };
+
+  ov.addEventListener('click', (e) => { if (e.target === ov) closeModal(); });
   document.body.appendChild(ov);
 
   const filesEl = ov.querySelector('#contrib-files');
   const statusEl = ov.querySelector('#contrib-status');
-  ov.querySelector('#contrib-cancel').addEventListener('click', () => ov.remove());
+  const authEl = ov.querySelector('#contrib-auth');
+  const submitBtn = ov.querySelector('#contrib-submit');
+  ov.querySelector('#contrib-cancel').addEventListener('click', closeModal);
 
-  // saved-token hint
-  try { const t = await window.api.contribute.hasToken(); if (t.hasToken) ov.querySelector('#contrib-token').placeholder = 'Using saved token (type to override)'; } catch {}
+  function renderSignedIn(login) {
+    stopPoll();
+    submitBtn.disabled = false;
+    authEl.innerHTML = `<span style="color:var(--success)">✓ Signed in${login ? ' as <b>@' + esc(login) + '</b>' : ''}</span> · <a href="#" id="contrib-signout" style="color:var(--accent)">Sign out</a>`;
+    authEl.querySelector('#contrib-signout').addEventListener('click', async (e) => {
+      e.preventDefault(); await window.api.contribute.signOut(); renderSignedOut();
+    });
+  }
+  function renderSignedOut(msg) {
+    submitBtn.disabled = true;
+    authEl.innerHTML = `${msg ? `<div style="color:var(--danger);margin-bottom:6px">${esc(msg)}</div>` : ''}<button id="contrib-signin" class="kicad-btn kicad-btn-start">Sign in with GitHub</button>`;
+    authEl.querySelector('#contrib-signin').addEventListener('click', startSignIn);
+  }
+  async function startSignIn() {
+    authEl.innerHTML = 'Starting GitHub sign-in…';
+    const r = await window.api.contribute.signInStart();
+    if (r.error) { renderSignedOut(r.error); return; }
+    authEl.innerHTML = `Your browser is opening GitHub. Enter this code to authorize:
+      <div style="font:700 22px/1.4 ui-monospace,Consolas,monospace;letter-spacing:3px;margin:6px 0;color:var(--text-primary)">${esc(r.userCode)}</div>
+      <a href="#" id="contrib-openverify" style="color:var(--accent)">Open ${esc(r.verificationUri)}</a> · waiting for authorization…`;
+    authEl.querySelector('#contrib-openverify').addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(r.verificationUri); });
+    const deadline = Date.now() + (r.expiresIn || 900) * 1000;
+    let interval = (r.interval || 5) * 1000;
+    const poll = async () => {
+      if (Date.now() > deadline) { renderSignedOut('Sign-in timed out — try again.'); return; }
+      const p = await window.api.contribute.signInPoll(r.deviceCode);
+      if (p.ok) { renderSignedIn(p.login); return; }
+      if (p.error) { renderSignedOut(p.error); return; }
+      if (p.interval) interval = p.interval * 1000; // honor slow_down
+      pollTimer = setTimeout(poll, interval);
+    };
+    pollTimer = setTimeout(poll, interval);
+  }
+
+  try {
+    const st = await window.api.contribute.status();
+    if (st.signedIn) renderSignedIn(st.login);
+    else if (!st.configured) authEl.innerHTML = `<span style="color:var(--danger)">GitHub sign-in isn’t configured on this build. Set a GitHub OAuth App client ID (Device Flow) in <code>config.GITHUB_OAUTH_CLIENT_ID</code> or <code>settings.json → githubOAuthClientId</code>.</span>`;
+    else renderSignedOut();
+  } catch (e) { renderSignedOut(e.message); }
 
   // load changes
   let changes = [];
@@ -1441,18 +1483,16 @@ async function openContributeModal() {
     }
   } catch (e) { filesEl.innerHTML = `<div class="kicad-empty">${esc(e.message)}</div>`; }
 
-  ov.querySelector('#contrib-submit').addEventListener('click', async () => {
+  submitBtn.addEventListener('click', async () => {
     const picked = [...filesEl.querySelectorAll('input:checked')].map((c) => changes[+c.dataset.i]);
     const title = ov.querySelector('#contrib-title').value.trim();
     const body = ov.querySelector('#contrib-body').value.trim();
-    const token = ov.querySelector('#contrib-token').value.trim();
-    const saveToken = ov.querySelector('#contrib-remember').checked;
     if (!picked.length) { statusEl.textContent = 'Select at least one file.'; statusEl.style.color = 'var(--danger)'; return; }
     if (!title) { statusEl.textContent = 'Enter a PR title.'; statusEl.style.color = 'var(--danger)'; return; }
-    const btn = ov.querySelector('#contrib-submit');
+    const btn = submitBtn;
     btn.disabled = true; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = 'Forking, committing, and opening PR… (this can take a few seconds)';
     try {
-      const res = await window.api.contribute.submit({ token: token || undefined, title, body, files: picked, saveToken });
+      const res = await window.api.contribute.submit({ title, body, files: picked });
       if (res.error) { statusEl.textContent = 'Error: ' + res.error; statusEl.style.color = 'var(--danger)'; btn.disabled = false; return; }
       statusEl.innerHTML = `✓ Pull request #${res.number} opened. <a href="#" id="contrib-prlink" style="color:var(--accent)">View it on GitHub</a>`;
       statusEl.style.color = 'var(--success)';
