@@ -469,6 +469,17 @@
     </div>
   </div>
 
+  <!-- Mandatory sign-in gate: blocks the app until signed into cloud sync.
+       Visible by default; app.js hides it once a session resolves. -->
+  <div id="auth-gate" class="auth-gate">
+    <div class="auth-gate-card">
+      <div class="auth-gate-brand">&#9881; EngOrg</div>
+      <div id="auth-gate-body" class="auth-gate-body">
+        <div class="auth-gate-loading">Checking sign-in…</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Firebase SDK (compat for script-tag usage) -->
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>

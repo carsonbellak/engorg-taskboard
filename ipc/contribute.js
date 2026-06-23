@@ -177,6 +177,26 @@ module.exports = function registerContribute() {
     catch (err) { return { error: err.message }; }
   });
 
+  // Feature request — opens a GitHub issue on the canonical repo (label: enhancement).
+  ipcMain.handle('contribute:submitFeature', async (e, { title, body }) => {
+    const token = getToken();
+    if (!token) return { error: 'Sign in with GitHub first.' };
+    if (!title || !title.trim()) return { error: 'Enter a short title for your request.' };
+    const { owner, repo } = config.CONTRIB_REPO;
+    try {
+      const me = await gh(token, '/user');
+      if (!me.ok) return { error: `GitHub sign-in expired (${me.status}). Sign in again.` };
+      const login = me.data.login;
+      const issueBody = (body || '').trim() + `\n\n— requested from EngOrg by @${login}`;
+      const r = await gh(token, `/repos/${owner}/${repo}/issues`, {
+        method: 'POST',
+        body: { title: title.trim(), body: issueBody, labels: ['enhancement'] },
+      });
+      if (!r.ok) return { error: `Could not open the request (${r.status}): ${(r.data && r.data.message) || ''}` };
+      return { url: r.data.html_url, number: r.data.number };
+    } catch (err) { return { error: err.message }; }
+  });
+
   // Open a PR with the selected files, using the signed-in user's token.
   ipcMain.handle('contribute:submit', async (e, { title, body, files }) => {
     const { owner, repo, branch } = config.CONTRIB_REPO;

@@ -100,11 +100,13 @@
             document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
             document.getElementById('view-notes').classList.add('active');
           } else {
-            // Selecting a specific project switches to notes view for that project
+            // Selecting a specific project just re-filters the CURRENT tab
+            // (calendar stays calendar, board stays board, etc.). Only the
+            // "All Projects" overview drills into that project's notes.
             viewRenderer.selectedProject = btn.dataset.project;
             if (viewRenderer.currentView === 'projects') {
               viewRenderer.currentView = 'notes';
-              // Reactivate the Notes header tab
+              dataManager.updateSettings({ activeView: 'notes' });
               document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
               const notesTab = document.querySelector('.header-tab[data-view="notes"]');
               if (notesTab) notesTab.classList.add('active');
@@ -371,78 +373,95 @@
       });
     });
 
-    // ============ HEADER TAB DRAG-TO-REORDER + LOCK ============
-    try { (function setupTabDrag() {
+    // ============ HOTBAR: show/hide tabs, promoted utilities, drag-reorder, lock ============
+    // Open an engineering utility that's been promoted to its own top-bar tab.
+    function openHotbarUtility(id, btn) {
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      viewRenderer.currentView = 'engineering';
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('view-engineering').classList.add('active');
+      document.getElementById('quick-filters').classList.add('hidden');
+      updateContentHeader();
+      engineeringUtilities.select(id);
+      dataManager.updateSettings({ activeView: 'engineering' });
+    }
+
+    let applyHotbar = () => {};
+    try {
       const tabContainer = document.querySelector('.header-tabs');
       const lockBtn = document.getElementById('btn-tab-lock');
       let dragTab = null;
       let locked = !!dataManager.settings?.tabsLocked;
+      const tabKey = (t) => t.dataset.view || ('util:' + t.dataset.util);
 
-      // Reflect the lock state: toggle draggability + the button icon/title.
       function applyLockUI() {
         tabContainer.classList.toggle('tabs-locked', locked);
         tabContainer.querySelectorAll('.header-tab').forEach(t => { t.draggable = !locked; });
         if (lockBtn) {
-          lockBtn.innerHTML = locked ? '&#128274;' : '&#128275;'; // 🔒 locked / 🔓 unlocked
+          lockBtn.innerHTML = locked ? '&#128274;' : '&#128275;'; // 🔒 / 🔓
           lockBtn.title = locked ? 'Tab order locked — click to unlock and reorder' : 'Drag tabs to reorder · click to lock';
           lockBtn.classList.toggle('locked', locked);
         }
       }
-
-      tabContainer.querySelectorAll('.header-tab').forEach(tab => {
-        tab.addEventListener('dragstart', (e) => {
-          if (locked) { e.preventDefault(); return; }
-          dragTab = tab;
-          tab.classList.add('tab-drag-active');
-          e.dataTransfer.effectAllowed = 'move';
-        });
-        tab.addEventListener('dragend', () => {
-          tab.classList.remove('tab-drag-active');
-          tabContainer.querySelectorAll('.header-tab').forEach(t => t.classList.remove('tab-drag-over'));
-          dragTab = null;
-        });
-        tab.addEventListener('dragover', (e) => {
-          if (locked || !dragTab) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          if (tab !== dragTab) {
-            tabContainer.querySelectorAll('.header-tab').forEach(t => t.classList.remove('tab-drag-over'));
-            tab.classList.add('tab-drag-over');
-          }
-        });
-        tab.addEventListener('dragleave', () => tab.classList.remove('tab-drag-over'));
-        tab.addEventListener('drop', (e) => {
-          e.preventDefault();
-          tab.classList.remove('tab-drag-over');
-          if (!dragTab || tab === dragTab) return;
-          const tabs = [...tabContainer.querySelectorAll('.header-tab')];
-          const fromIdx = tabs.indexOf(dragTab);
-          const toIdx = tabs.indexOf(tab);
-          if (fromIdx < toIdx) tab.after(dragTab);
-          else tab.before(dragTab);
-          const order = [...tabContainer.querySelectorAll('.header-tab')].map(t => t.dataset.view);
-          dataManager.updateSettings({ tabOrder: order });
-        });
-      });
-
-      // Restore saved tab order, then keep the lock button pinned to the far right.
-      const saved = dataManager.settings?.tabOrder;
-      if (saved && Array.isArray(saved)) {
-        saved.forEach(view => {
-          const tab = tabContainer.querySelector(`.header-tab[data-view="${view}"]`);
-          if (tab) tabContainer.appendChild(tab);
-        });
+      function saveOrder() {
+        dataManager.updateSettings({ tabOrder: [...tabContainer.querySelectorAll('.header-tab')].map(tabKey) });
       }
-      if (lockBtn) tabContainer.appendChild(lockBtn);
+      function bindTabDrag(tab) {
+        tab.addEventListener('dragstart', (e) => { if (locked) { e.preventDefault(); return; } dragTab = tab; tab.classList.add('tab-drag-active'); e.dataTransfer.effectAllowed = 'move'; });
+        tab.addEventListener('dragend', () => { tab.classList.remove('tab-drag-active'); tabContainer.querySelectorAll('.header-tab').forEach(t => t.classList.remove('tab-drag-over')); dragTab = null; });
+        tab.addEventListener('dragover', (e) => { if (locked || !dragTab) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (tab !== dragTab) { tabContainer.querySelectorAll('.header-tab').forEach(t => t.classList.remove('tab-drag-over')); tab.classList.add('tab-drag-over'); } });
+        tab.addEventListener('dragleave', () => tab.classList.remove('tab-drag-over'));
+        tab.addEventListener('drop', (e) => { e.preventDefault(); tab.classList.remove('tab-drag-over'); if (!dragTab || tab === dragTab) return; const tabs = [...tabContainer.querySelectorAll('.header-tab')]; const fromIdx = tabs.indexOf(dragTab), toIdx = tabs.indexOf(tab); if (fromIdx < toIdx) tab.after(dragTab); else tab.before(dragTab); saveOrder(); });
+      }
 
-      if (lockBtn) lockBtn.addEventListener('click', () => {
-        locked = !locked;
-        dataManager.updateSettings({ tabsLocked: locked });
+      // Bind the built-in (data-view) tabs once.
+      tabContainer.querySelectorAll('.header-tab[data-view]').forEach(bindTabDrag);
+
+      applyHotbar = function () {
+        const hidden = dataManager.settings?.hiddenTabs || [];
+        const promoted = dataManager.settings?.hotbarUtilities || [];
+
+        // Show/hide built-in tabs.
+        tabContainer.querySelectorAll('.header-tab[data-view]').forEach(t => {
+          t.style.display = hidden.includes(t.dataset.view) ? 'none' : '';
+        });
+
+        // Rebuild promoted-utility tabs.
+        tabContainer.querySelectorAll('.header-tab[data-util]').forEach(t => t.remove());
+        promoted.forEach(id => {
+          const m = engineeringUtilities.meta && engineeringUtilities.meta(id);
+          if (!m) return;
+          const btn = document.createElement('button');
+          btn.className = 'header-tab header-tab-util';
+          btn.dataset.util = id;
+          btn.innerHTML = `${m.icon || '🧩'} ${escapeHtml(m.name)}`;
+          btn.addEventListener('click', () => openHotbarUtility(id, btn));
+          bindTabDrag(btn);
+          tabContainer.appendChild(btn);
+        });
+
+        // Apply saved order (keys: view name, or 'util:<id>').
+        const order = dataManager.settings?.tabOrder;
+        if (Array.isArray(order)) {
+          order.forEach(key => {
+            const el = String(key).startsWith('util:')
+              ? tabContainer.querySelector(`.header-tab[data-util="${String(key).slice(5)}"]`)
+              : tabContainer.querySelector(`.header-tab[data-view="${key}"]`);
+            if (el) tabContainer.appendChild(el);
+          });
+        }
+        if (lockBtn) tabContainer.appendChild(lockBtn);
         applyLockUI();
-      });
+        if (engineeringUtilities.refresh) engineeringUtilities.refresh();
+      };
 
-      applyLockUI();
-    })(); } catch(e) { console.warn('Tab drag setup failed:', e); }
+      if (lockBtn) lockBtn.addEventListener('click', () => { locked = !locked; dataManager.updateSettings({ tabsLocked: locked }); applyLockUI(); });
+
+      applyHotbar();
+    } catch (e) { console.warn('Hotbar setup failed:', e); }
+    // Let the Settings editor re-apply after toggling tabs/utilities.
+    window.applyHotbar = () => applyHotbar();
 
     // ============ ADD BUTTON ============
     document.getElementById('btn-add-main').addEventListener('click', () => {
@@ -788,6 +807,55 @@
 
     // ============ CLOUD SYNC ============
     firebaseSync.init();
+
+    // ---- Mandatory sign-in gate: block the app until a session resolves ----
+    (function setupAuthGate() {
+      const gate = document.getElementById('auth-gate');
+      const body = document.getElementById('auth-gate-body');
+      if (!gate || !body) return;
+
+      function renderForm() {
+        body.innerHTML = `
+          <p class="auth-gate-desc">Sign in to load your board. Your data lives in the cloud, so the app needs you signed in.</p>
+          <button id="auth-gate-google" class="btn-google-signin">
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            Sign in with Google
+          </button>
+          <div class="cloud-signin-divider"><span>or</span></div>
+          <input type="email" id="auth-gate-email" class="cloud-input" placeholder="Email" autocomplete="email" />
+          <input type="password" id="auth-gate-password" class="cloud-input" placeholder="Password" autocomplete="current-password" />
+          <button id="auth-gate-email-btn" class="btn-modal-primary" style="width:100%">Sign in with Email</button>
+          <div id="auth-gate-error" class="cloud-error hidden"></div>
+          <p class="cloud-signin-hint">New here? Enter an email and password — an account is created automatically.</p>`;
+        const showErr = (m) => { const el = document.getElementById('auth-gate-error'); el.textContent = m; el.classList.remove('hidden'); };
+        document.getElementById('auth-gate-google').addEventListener('click', async () => {
+          try { await firebaseSync.signInWithGoogle(); } catch (e) { showErr(e.message || 'Sign-in failed.'); }
+        });
+        const doEmail = async () => {
+          const email = document.getElementById('auth-gate-email').value.trim();
+          const pw = document.getElementById('auth-gate-password').value;
+          if (!email || !pw) return;
+          try { await firebaseSync.signInWithEmail(email, pw); } catch (e) { showErr(e.message || 'Sign-in failed.'); }
+        };
+        document.getElementById('auth-gate-email-btn').addEventListener('click', doEmail);
+        document.getElementById('auth-gate-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doEmail(); });
+      }
+
+      let resolved = false;
+      window.addEventListener('auth-changed', (e) => {
+        resolved = true;
+        if (e.detail.signedIn) {
+          gate.classList.add('hidden');
+        } else {
+          if (!body.querySelector('#auth-gate-google')) renderForm();
+          gate.classList.remove('hidden');
+        }
+      });
+      // Safety net: if auth never resolves (e.g. Firebase failed to load), still
+      // show the sign-in form instead of leaving the user stuck on "Checking…".
+      setTimeout(() => { if (!resolved && !body.querySelector('#auth-gate-google')) renderForm(); }, 6000);
+    })();
+
     document.getElementById('btn-cloud-sync').addEventListener('click', () => {
       firebaseSync.showSignInModal();
     });

@@ -107,11 +107,20 @@ const engineeringUtilities = (() => {
   }
 
   // ---- Sub-nav ------------------------------------------------------------
+  // Utilities promoted to their own top-bar (hotbar) tab — hidden from this sub-nav.
+  function getHotbar() { const l = dataManager.settings.hotbarUtilities; return Array.isArray(l) ? l : []; }
+  function metaOf(id) {
+    if (BUILTIN[id]) return { id, name: BUILTIN[id].name, icon: BUILTIN[id].icon };
+    const m = getRemoteMeta()[id];
+    return { id, name: (m && m.name) || id, icon: (m && m.icon) || '🧩' };
+  }
+
   function installedUtilityList() {
     const installed = getInstalled();
-    const builtins = BUILTIN_ORDER.filter(id => installed.includes(id)).map(id => BUILTIN[id]);
+    const promoted = getHotbar();
+    const builtins = BUILTIN_ORDER.filter(id => installed.includes(id) && !promoted.includes(id)).map(id => BUILTIN[id]);
     const meta = getRemoteMeta();
-    const remotes = installed.filter(isRemote).map(id => ({
+    const remotes = installed.filter(id => isRemote(id) && !promoted.includes(id)).map(id => ({
       id, name: (meta[id] && meta[id].name) || id, icon: (meta[id] && meta[id].icon) || '🧩', remote: true,
     }));
     return [...builtins, ...remotes];
@@ -286,5 +295,10 @@ const engineeringUtilities = (() => {
     deactivate() {
       if (currentId && BUILTIN[currentId]) BUILTIN[currentId].deactivate();
     },
+    // ---- Hotbar integration -------------------------------------------------
+    select(id) { return select(id); },           // open a utility directly (from a hotbar tab)
+    meta(id) { return metaOf(id); },              // { id, name, icon } for building a tab
+    listInstalled() { return getInstalled().map(metaOf); }, // for the hotbar editor
+    refresh() { renderSubnav(); },                // re-render sub-nav after promote/demote
   };
 })();

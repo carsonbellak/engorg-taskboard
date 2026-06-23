@@ -105,7 +105,8 @@ contextBridge.exposeInMainWorld('api', {
     signInStart: () => ipcRenderer.invoke('contribute:signInStart'),
     signInPoll: (deviceCode) => ipcRenderer.invoke('contribute:signInPoll', deviceCode),
     signOut: () => ipcRenderer.invoke('contribute:signOut'),
-    submit: (opts) => ipcRenderer.invoke('contribute:submit', opts)
+    submit: (opts) => ipcRenderer.invoke('contribute:submit', opts),
+    submitFeature: (opts) => ipcRenderer.invoke('contribute:submitFeature', opts)
   },
   // Utility store (GitHub-backed)
   store: {

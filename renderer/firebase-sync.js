@@ -32,6 +32,9 @@ class FirebaseSync {
         this.user = user;
         this.enabled = !!user;
         this._updateUI();
+        // Drive the mandatory sign-in gate (see app.js). Fires on the initial
+        // resolve too, so the gate knows whether a persisted session exists.
+        window.dispatchEvent(new CustomEvent('auth-changed', { detail: { signedIn: !!user } }));
 
         if (user) {
           console.log('Firebase: Signed in as', user.email || user.displayName);

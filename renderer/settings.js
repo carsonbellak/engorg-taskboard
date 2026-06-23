@@ -1089,6 +1089,21 @@ function renderSettings() {
       </div>
 
       <div class="settings-section">
+        <h3 class="settings-section-title">Hotbar</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:10px">Choose which tabs show in the top bar. Drag tabs in the bar to reorder. Promote an engineering utility to give it its own top-bar tab.</p>
+        <div style="font-weight:600;font-size:13px;margin:6px 0;color:var(--text-secondary)">Tabs</div>
+        <div id="hotbar-tabs" class="hotbar-edit-grid"></div>
+        <div style="font-weight:600;font-size:13px;margin:14px 0 6px;color:var(--text-secondary)">Engineering utilities in the hotbar</div>
+        <div id="hotbar-utils" class="hotbar-edit-grid"></div>
+      </div>
+
+      <div class="settings-section">
+        <h3 class="settings-section-title">Request a Feature</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Have an idea? Send a feature request straight to the developer. It opens a GitHub issue on the project for tracking. <b>Sign in with GitHub</b> in your browser — no access token needed.</p>
+        <button id="settings-feature-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Request a Feature…</button>
+      </div>
+
+      <div class="settings-section">
         <h3 class="settings-section-title">Contribute</h3>
         <p class="settings-toggle-desc" style="margin-bottom:12px">Improved the app? Submit your local changes as a Pull Request for the owner to review and merge. Just <b>sign in with GitHub</b> in your browser — no access token needed.</p>
         <button id="settings-contrib-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Submit Changes…</button>
@@ -1377,14 +1392,161 @@ function renderSettings() {
 
   // ── Contribute (submit local changes as a GitHub PR) ──
   bindContribute();
+  bindHotbarEditor();
+}
+
+// Hotbar editor — toggle which tabs show, and promote/demote engineering utilities.
+function bindHotbarEditor() {
+  const MAIN_TABS = [
+    { view: 'notes', label: 'Notes' }, { view: 'calendar', label: 'Calendar' },
+    { view: 'email', label: 'Email' }, { view: 'timeline', label: 'Timeline' },
+    { view: 'timers', label: 'Timers' }, { view: 'board', label: 'Board' },
+    { view: 'purchasing', label: 'Purchases' }, { view: 'stats', label: 'Stats' },
+    { view: 'files', label: 'Files' }, { view: 'engineering', label: 'Engineering Utilities' },
+  ];
+  const tabsEl = document.getElementById('hotbar-tabs');
+  const utilsEl = document.getElementById('hotbar-utils');
+  if (!tabsEl || !utilsEl) return;
+  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  const row = (checked, label, sub) => `<label class="hotbar-edit-row"><input type="checkbox" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${sub ? `<span class="hotbar-edit-sub">${esc(sub)}</span>` : ''}</label>`;
+
+  function renderTabs() {
+    const hidden = dataManager.settings.hiddenTabs || [];
+    tabsEl.innerHTML = MAIN_TABS.map(t => row(!hidden.includes(t.view), t.label)).join('');
+    tabsEl.querySelectorAll('.hotbar-edit-row input').forEach((cb, i) => {
+      cb.addEventListener('change', () => {
+        let h = (dataManager.settings.hiddenTabs || []).slice();
+        const v = MAIN_TABS[i].view;
+        if (cb.checked) h = h.filter(x => x !== v); else if (!h.includes(v)) h.push(v);
+        dataManager.updateSettings({ hiddenTabs: h });
+        if (window.applyHotbar) window.applyHotbar();
+      });
+    });
+  }
+  function renderUtils() {
+    const promoted = dataManager.settings.hotbarUtilities || [];
+    const metas = (typeof engineeringUtilities !== 'undefined' && engineeringUtilities.listInstalled)
+      ? engineeringUtilities.listInstalled() : [];
+    if (!metas.length) { utilsEl.innerHTML = '<div class="settings-toggle-desc">No utilities installed yet — add some from the Utility Store.</div>'; return; }
+    utilsEl.innerHTML = metas.map(m => row(promoted.includes(m.id), (m.icon ? m.icon + ' ' : '') + m.name, promoted.includes(m.id) ? 'in hotbar' : 'in Engineering')).join('');
+    utilsEl.querySelectorAll('.hotbar-edit-row input').forEach((cb, i) => {
+      cb.addEventListener('change', () => {
+        let p = (dataManager.settings.hotbarUtilities || []).slice();
+        const id = metas[i].id;
+        if (cb.checked) { if (!p.includes(id)) p.push(id); } else p = p.filter(x => x !== id);
+        dataManager.updateSettings({ hotbarUtilities: p });
+        if (window.applyHotbar) window.applyHotbar();
+        renderUtils();
+      });
+    });
+  }
+  renderTabs();
+  renderUtils();
 }
 
 function bindContribute() {
   const openBtn = document.getElementById('settings-contrib-open');
   const repoLink = document.getElementById('settings-contrib-repo');
+  const featureBtn = document.getElementById('settings-feature-open');
   if (repoLink) repoLink.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal('https://github.com/carsonbellak/engorg-taskboard'); });
-  if (!openBtn) return;
-  openBtn.addEventListener('click', openContributeModal);
+  if (featureBtn) featureBtn.addEventListener('click', openFeatureModal);
+  if (openBtn) openBtn.addEventListener('click', openContributeModal);
+}
+
+// Reusable GitHub Device-Flow sign-in widget. Renders the current sign-in state
+// into `authEl` and calls onChange(signedIn) whenever it changes. Returns { stop }
+// to cancel any pending poll when the host modal closes.
+function githubAuthWidget(authEl, esc, onChange) {
+  let pollTimer = null;
+  const stop = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
+  function signedIn(login) {
+    stop(); onChange(true);
+    authEl.innerHTML = `<span style="color:var(--success)">✓ Signed in${login ? ' as <b>@' + esc(login) + '</b>' : ''}</span> · <a href="#" data-act="signout" style="color:var(--accent)">Sign out</a>`;
+    authEl.querySelector('[data-act="signout"]').addEventListener('click', async (e) => { e.preventDefault(); await window.api.contribute.signOut(); signedOut(); });
+  }
+  function signedOut(msg) {
+    onChange(false);
+    authEl.innerHTML = `${msg ? `<div style="color:var(--danger);margin-bottom:6px">${esc(msg)}</div>` : ''}<button data-act="signin" class="kicad-btn kicad-btn-start">Sign in with GitHub</button>`;
+    authEl.querySelector('[data-act="signin"]').addEventListener('click', start);
+  }
+  async function start() {
+    authEl.innerHTML = 'Starting GitHub sign-in…';
+    const r = await window.api.contribute.signInStart();
+    if (r.error) { signedOut(r.error); return; }
+    authEl.innerHTML = `Your browser is opening GitHub. Enter this code to authorize:
+      <div style="font:700 22px/1.4 ui-monospace,Consolas,monospace;letter-spacing:3px;margin:6px 0;color:var(--text-primary)">${esc(r.userCode)}</div>
+      <a href="#" data-act="openverify" style="color:var(--accent)">Open ${esc(r.verificationUri)}</a> · waiting for authorization…`;
+    authEl.querySelector('[data-act="openverify"]').addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(r.verificationUri); });
+    const deadline = Date.now() + (r.expiresIn || 900) * 1000;
+    let interval = (r.interval || 5) * 1000;
+    const poll = async () => {
+      if (Date.now() > deadline) { signedOut('Sign-in timed out — try again.'); return; }
+      const p = await window.api.contribute.signInPoll(r.deviceCode);
+      if (p.ok) { signedIn(p.login); return; }
+      if (p.error) { signedOut(p.error); return; }
+      if (p.interval) interval = p.interval * 1000; // honor slow_down
+      pollTimer = setTimeout(poll, interval);
+    };
+    pollTimer = setTimeout(poll, interval);
+  }
+  (async () => {
+    try {
+      const st = await window.api.contribute.status();
+      if (st.signedIn) signedIn(st.login);
+      else if (!st.configured) { onChange(false); authEl.innerHTML = `<span style="color:var(--danger)">GitHub sign-in isn’t configured on this build. Set a GitHub OAuth App client ID (Device Flow) in <code>config.GITHUB_OAUTH_CLIENT_ID</code> or <code>settings.json → githubOAuthClientId</code>.</span>`; }
+      else signedOut();
+    } catch (e) { signedOut(e.message); }
+  })();
+  return { stop };
+}
+
+// Feature request → opens a GitHub issue (label: enhancement) via the shared sign-in.
+function openFeatureModal() {
+  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  const ov = document.createElement('div');
+  ov.className = 'wifi-modal-overlay';
+  ov.innerHTML = `
+    <div class="wifi-modal" style="max-width:560px">
+      <div class="wifi-modal-title">Request a Feature</div>
+      <div class="wifi-modal-section">
+        <label>Title</label>
+        <input id="feat-title" class="kicad-input" placeholder="Short summary of the feature">
+        <label>Details</label>
+        <textarea id="feat-body" class="kicad-input" rows="5" placeholder="What should it do? Why is it useful?"></textarea>
+      </div>
+      <div class="wifi-modal-section">
+        <label>GitHub account</label>
+        <div id="feat-auth" class="settings-section-desc">Checking sign-in…</div>
+      </div>
+      <div id="feat-status" class="settings-section-desc"></div>
+      <div class="wifi-modal-actions">
+        <button id="feat-cancel" class="kicad-btn kicad-btn-outline">Cancel</button>
+        <button id="feat-submit" class="kicad-btn kicad-btn-start" disabled>Send Request</button>
+      </div>
+    </div>`;
+  let auth = null;
+  const close = () => { if (auth) auth.stop(); ov.remove(); };
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  document.body.appendChild(ov);
+
+  const statusEl = ov.querySelector('#feat-status');
+  const submitBtn = ov.querySelector('#feat-submit');
+  ov.querySelector('#feat-cancel').addEventListener('click', close);
+  auth = githubAuthWidget(ov.querySelector('#feat-auth'), esc, (signedIn) => { submitBtn.disabled = !signedIn; });
+
+  submitBtn.addEventListener('click', async () => {
+    const title = ov.querySelector('#feat-title').value.trim();
+    const body = ov.querySelector('#feat-body').value.trim();
+    if (!title) { statusEl.textContent = 'Enter a title.'; statusEl.style.color = 'var(--danger)'; return; }
+    submitBtn.disabled = true; statusEl.style.color = 'var(--text-muted)'; statusEl.textContent = 'Sending…';
+    try {
+      const res = await window.api.contribute.submitFeature({ title, body });
+      if (res.error) { statusEl.textContent = 'Error: ' + res.error; statusEl.style.color = 'var(--danger)'; submitBtn.disabled = false; return; }
+      statusEl.innerHTML = `✓ Request #${res.number} sent. <a href="#" id="feat-link" style="color:var(--accent)">View on GitHub</a>`;
+      statusEl.style.color = 'var(--success)';
+      ov.querySelector('#feat-link').addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(res.url); });
+    } catch (e) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = 'var(--danger)'; submitBtn.disabled = false; }
+  });
 }
 
 async function openContributeModal() {
@@ -1414,10 +1576,9 @@ async function openContributeModal() {
         <button id="contrib-submit" class="kicad-btn kicad-btn-start" disabled>Open Pull Request</button>
       </div>
     </div>`;
-  // ── GitHub sign-in (OAuth Device Flow — no token to paste) ──
-  let pollTimer = null;
-  const stopPoll = () => { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } };
-  const closeModal = () => { stopPoll(); ov.remove(); };
+  // ── GitHub sign-in (OAuth Device Flow — shared helper, no token to paste) ──
+  let auth = null;
+  const closeModal = () => { if (auth) auth.stop(); ov.remove(); };
 
   ov.addEventListener('click', (e) => { if (e.target === ov) closeModal(); });
   document.body.appendChild(ov);
@@ -1428,46 +1589,7 @@ async function openContributeModal() {
   const submitBtn = ov.querySelector('#contrib-submit');
   ov.querySelector('#contrib-cancel').addEventListener('click', closeModal);
 
-  function renderSignedIn(login) {
-    stopPoll();
-    submitBtn.disabled = false;
-    authEl.innerHTML = `<span style="color:var(--success)">✓ Signed in${login ? ' as <b>@' + esc(login) + '</b>' : ''}</span> · <a href="#" id="contrib-signout" style="color:var(--accent)">Sign out</a>`;
-    authEl.querySelector('#contrib-signout').addEventListener('click', async (e) => {
-      e.preventDefault(); await window.api.contribute.signOut(); renderSignedOut();
-    });
-  }
-  function renderSignedOut(msg) {
-    submitBtn.disabled = true;
-    authEl.innerHTML = `${msg ? `<div style="color:var(--danger);margin-bottom:6px">${esc(msg)}</div>` : ''}<button id="contrib-signin" class="kicad-btn kicad-btn-start">Sign in with GitHub</button>`;
-    authEl.querySelector('#contrib-signin').addEventListener('click', startSignIn);
-  }
-  async function startSignIn() {
-    authEl.innerHTML = 'Starting GitHub sign-in…';
-    const r = await window.api.contribute.signInStart();
-    if (r.error) { renderSignedOut(r.error); return; }
-    authEl.innerHTML = `Your browser is opening GitHub. Enter this code to authorize:
-      <div style="font:700 22px/1.4 ui-monospace,Consolas,monospace;letter-spacing:3px;margin:6px 0;color:var(--text-primary)">${esc(r.userCode)}</div>
-      <a href="#" id="contrib-openverify" style="color:var(--accent)">Open ${esc(r.verificationUri)}</a> · waiting for authorization…`;
-    authEl.querySelector('#contrib-openverify').addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(r.verificationUri); });
-    const deadline = Date.now() + (r.expiresIn || 900) * 1000;
-    let interval = (r.interval || 5) * 1000;
-    const poll = async () => {
-      if (Date.now() > deadline) { renderSignedOut('Sign-in timed out — try again.'); return; }
-      const p = await window.api.contribute.signInPoll(r.deviceCode);
-      if (p.ok) { renderSignedIn(p.login); return; }
-      if (p.error) { renderSignedOut(p.error); return; }
-      if (p.interval) interval = p.interval * 1000; // honor slow_down
-      pollTimer = setTimeout(poll, interval);
-    };
-    pollTimer = setTimeout(poll, interval);
-  }
-
-  try {
-    const st = await window.api.contribute.status();
-    if (st.signedIn) renderSignedIn(st.login);
-    else if (!st.configured) authEl.innerHTML = `<span style="color:var(--danger)">GitHub sign-in isn’t configured on this build. Set a GitHub OAuth App client ID (Device Flow) in <code>config.GITHUB_OAUTH_CLIENT_ID</code> or <code>settings.json → githubOAuthClientId</code>.</span>`;
-    else renderSignedOut();
-  } catch (e) { renderSignedOut(e.message); }
+  auth = githubAuthWidget(authEl, esc, (signedIn) => { submitBtn.disabled = !signedIn; });
 
   // load changes
   let changes = [];
