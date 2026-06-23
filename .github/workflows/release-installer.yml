@@ -1,0 +1,71 @@
+name: Build & Release Installer
+
+# Rebuilds EngOrg-Setup.exe with Inno Setup on every push to main and publishes
+# it to the rolling "latest" GitHub Release. The large bundled runtimes
+# (nodejs/ + tools/) are not in the repo — they're restored from the one-time
+# "build-deps" prerelease asset and cached between runs.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+concurrency:
+  group: release-installer
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore bundled runtimes (nodejs + tools)
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            nodejs
+            tools
+          # Bump this suffix whenever the build-deps archive is re-uploaded.
+          key: engorg-deps-v1
+
+      - name: Download build-deps if not cached
+        if: steps.deps.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download build-deps -R "$GITHUB_REPOSITORY" -p deps.tar.gz
+          tar -xzf deps.tar.gz
+          rm -f deps.tar.gz
+          test -f nodejs/npm.cmd && test -d tools || { echo "deps layout looks wrong"; exit 1; }
+
+      - name: Install Inno Setup
+        shell: bash
+        run: choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: bash
+        run: |
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" installer.iss
+          ls -la EngOrg-Setup.exe
+
+      - name: Publish to "latest" release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="$GITHUB_REPOSITORY"
+          NOTES="Automated installer build from commit ${GITHUB_SHA} ($(date -u +%Y-%m-%dT%H:%MZ))."
+          if ! gh release view latest -R "$REPO" >/dev/null 2>&1; then
+            gh release create latest -R "$REPO" --title "EngOrg (latest build)" --notes "$NOTES" --latest
+          fi
+          gh release upload latest EngOrg-Setup.exe -R "$REPO" --clobber
+          gh release edit latest -R "$REPO" --notes "$NOTES"

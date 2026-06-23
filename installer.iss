@@ -20,9 +20,13 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 DefaultDirName=C:\Assistant
 DefaultGroupName={#MyAppName}
-OutputDir=C:\Assistant
+; Relative paths below resolve against this script's folder (Inno's default
+; SourceDir), so the installer builds from C:\Assistant locally and from a CI
+; checkout dir without edits. DefaultDirName stays absolute — that's the
+; end-user install target, not a build path.
+OutputDir=.
 OutputBaseFilename=EngOrg-Setup
-SetupIconFile=C:\Assistant\assets\icon.ico
+SetupIconFile=assets\icon.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -47,38 +51,38 @@ Name: "tools"; Description: "3D Printer Tools (OrcaSlicer + Fluidd)"; Types: ful
 
 [Files]
 ; Core app files
-Source: "C:\Assistant\main.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\preload.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\package.json"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\package-lock.json"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\start.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\launch.vbs"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\Install-EngOrg.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\build-installer.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\build-icon.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\installer.iss"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\config.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\state.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\moonraker.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
-Source: "C:\Assistant\fluidd-server.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "main.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "preload.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "package.json"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "package-lock.json"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "start.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "launch.vbs"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "Install-EngOrg.bat"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "build-installer.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "build-icon.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "installer.iss"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "config.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "state.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "moonraker.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+Source: "fluidd-server.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 
 ; IPC modules
-Source: "C:\Assistant\ipc\*"; DestDir: "{app}\ipc"; Components: core; Flags: ignoreversion recursesubdirs
+Source: "ipc\*"; DestDir: "{app}\ipc"; Components: core; Flags: ignoreversion recursesubdirs
 
 ; Assets
-Source: "C:\Assistant\assets\*"; DestDir: "{app}\assets"; Components: core; Flags: ignoreversion recursesubdirs
+Source: "assets\*"; DestDir: "{app}\assets"; Components: core; Flags: ignoreversion recursesubdirs
 
 ; Renderer (UI)
-Source: "C:\Assistant\renderer\*"; DestDir: "{app}\renderer"; Components: core; Flags: ignoreversion recursesubdirs
+Source: "renderer\*"; DestDir: "{app}\renderer"; Components: core; Flags: ignoreversion recursesubdirs
 
 ; PWA
-Source: "C:\Assistant\pwa\*"; DestDir: "{app}\pwa"; Components: core; Flags: ignoreversion recursesubdirs
+Source: "pwa\*"; DestDir: "{app}\pwa"; Components: core; Flags: ignoreversion recursesubdirs
 
 ; Node.js runtime
-Source: "C:\Assistant\nodejs\*"; DestDir: "{app}\nodejs"; Components: nodejs; Flags: ignoreversion recursesubdirs
+Source: "nodejs\*"; DestDir: "{app}\nodejs"; Components: nodejs; Flags: ignoreversion recursesubdirs
 
 ; 3D Printer Tools (optional)
-Source: "C:\Assistant\tools\*"; DestDir: "{app}\tools"; Components: tools; Flags: ignoreversion recursesubdirs
+Source: "tools\*"; DestDir: "{app}\tools"; Components: tools; Flags: ignoreversion recursesubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\assets\icon.ico"; WorkingDir: "{app}"

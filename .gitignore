@@ -9,6 +9,7 @@ tools/
 dist/
 *.exe
 *.zip
+*.tar.gz
 EngOrg-Setup.*
 
 # Inno Setup uninstaller artifacts
