@@ -5,10 +5,18 @@
 (function () {
   'use strict';
 
-  let _layer    = null;
-  let _active   = null;
-  let _ivals    = [];   // setInterval ids
-  let _rafs     = [];   // cancelAnimationFrame tokens (via wrapper)
+  let _layer      = null;
+  let _frontLayer = null;
+  let _active     = null;
+  let _ivals      = [];   // setInterval ids
+  let _rafs       = [];   // cancelAnimationFrame tokens (via wrapper)
+
+  // Per-particle chance of being promoted *in front* of the UI instead of behind
+  // it. Scaled by how dense the effect is so the absolute number of particles
+  // ever covering content stays tiny: ~1 in 20 for sparse decorations, ~1 in 100
+  // for dense particle streams (leaves, petals, snow).
+  const FRONT_SPARSE = 1 / 20;
+  const FRONT_DENSE  = 1 / 100;
 
   // ── helpers ────────────────────────────────────────────────────────────
 
@@ -82,12 +90,27 @@
     return _layer;
   }
 
+  function getFrontLayer() {
+    if (!_frontLayer) {
+      _frontLayer = div('theme-fx-layer-front');
+      document.body.appendChild(_frontLayer);
+    }
+    return _frontLayer;
+  }
+
+  // Returns the front layer with probability `frontProb`, otherwise the back
+  // layer. Use for top-level decorative elements so most stay behind the UI.
+  function pickLayer(frontProb) {
+    return (frontProb && Math.random() < frontProb) ? getFrontLayer() : getLayer();
+  }
+
   function destroyFx() {
     _rafs.forEach(cancel => cancel());
     _rafs = [];
     _ivals.forEach(clearInterval);
     _ivals = [];
     if (_layer) _layer.innerHTML = '';
+    if (_frontLayer) _frontLayer.innerHTML = '';
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -168,7 +191,7 @@
         points: '8,1 10,5 15,5 11,9 13,15 8,11 3,15 5,9 1,5 6,5',
         fill: '#9C7D50',
       }));
-      layer.appendChild(bolt);
+      pickLayer(FRONT_SPARSE).appendChild(bolt);
     });
 
     // Rust streak overlay
@@ -281,7 +304,7 @@
       x1: '0', y1: '0', x2: '0', y2: '6',
       stroke: '#5D4037', 'stroke-width': '1.5', 'stroke-linecap': 'round',
     }));
-    layer.appendChild(svg);
+    pickLayer(FRONT_DENSE).appendChild(svg);
 
     const t0   = performance.now() + (instant ? -Math.random() * dur * 1000 : 0);
     const drift = (Math.random() - 0.5) * 250;
@@ -372,7 +395,7 @@
     const svg = svgNS('svg', { width: size, height: size * 1.6, viewBox: '-24 -56 48 58' });
     svg.style.cssText = `position:fixed;left:${sx}px;top:${sy}px;pointer-events:none;z-index:0;`;
     svg.appendChild(svgNS('path', { d: petalPath(), fill: col }));
-    layer.appendChild(svg);
+    pickLayer(FRONT_DENSE).appendChild(svg);
 
     const t0    = performance.now() + (instant ? -Math.random() * dur * 1000 : 0);
     const sway  = (Math.random() - 0.5) * 180;
@@ -476,7 +499,7 @@
     }
     g.appendChild(svgNS('circle', { r: 1.5, fill: '#ECEFF4', stroke: 'none' }));
     svg.appendChild(g);
-    layer.appendChild(svg);
+    pickLayer(FRONT_DENSE).appendChild(svg);
 
     const t0   = performance.now() + (instant ? -Math.random() * dur * 1000 : 0);
     const sw   = Math.sin(Math.random() * Math.PI) * 30;
@@ -560,20 +583,23 @@
   // ══════════════════════════════════════════════════════════════════════
   //  GLASS — Floating Bubbles
   // ══════════════════════════════════════════════════════════════════════
+  // LIQUID GLASS — a few large, soft, slowly-drifting colour blobs that the
+  // frosted (backdrop-blurred) panels refract. Stays on the back layer so it
+  // always reads as the light behind the glass, never floating over content.
   function initGlass(layer) {
-    for (let i = 0; i < 9; i++) {
-      const size = 24 + Math.random() * 70;
-      const d    = div('theme-glass-bubble');
-      d.style.cssText = `
-        width:${size}px;height:${size}px;
-        left:${Math.random()*100}%;top:${Math.random()*100}%;
-        animation-delay:${Math.random()*8}s;
-        animation-duration:${10+Math.random()*10}s;
-      `;
+    const blobs = [
+      { c: 'var(--glass-c1)', size: 640, x: '14%', y: '20%', dur: 26 },
+      { c: 'var(--glass-c2)', size: 560, x: '80%', y: '32%', dur: 32 },
+      { c: 'var(--glass-c3)', size: 720, x: '52%', y: '90%', dur: 38 },
+      { c: 'var(--glass-c1)', size: 420, x: '88%', y: '82%', dur: 30 },
+    ];
+    blobs.forEach((b, i) => {
+      const d = div('glass-blob');
+      d.style.cssText = `width:${b.size}px;height:${b.size}px;left:${b.x};top:${b.y};`
+        + `background:radial-gradient(circle at 50% 50%, ${b.c}, transparent 68%);`
+        + `animation:glass-blob-drift ${b.dur}s ease-in-out ${i * -7}s infinite alternate;`;
       layer.appendChild(d);
-    }
-    // Light beam
-    layer.appendChild(div('theme-glass-beam', ''));
+    });
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -584,7 +610,7 @@
       const d = div('theme-cloud-wisp');
       d.style.cssText = `top:${8 + i*20}%;opacity:${0.35 + i*0.08};
         animation-delay:${i*7}s;animation-duration:${35+i*12}s;width:${300+i*100}px;`;
-      layer.appendChild(d);
+      pickLayer(FRONT_SPARSE).appendChild(d);
     }
   }
 
@@ -642,7 +668,8 @@
         case 'nord':     initNord(layer);     break;
         case 'hacker':   initHacker(layer);   break;
         case 'neon':     initNeon(layer);     break;
-        case 'glass':    initGlass(layer);    break;
+        case 'glassLight':
+        case 'glassDark': initGlass(layer);   break;
         case 'gradient': initGradient(layer); break;
         case 'sand':     initSand(layer);     break;
       }

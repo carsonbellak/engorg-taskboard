@@ -21,7 +21,13 @@ const uartBridge = (() => {
   let portPickCb = null;    // pending Web Serial port-list resolver
   let pendingPortName = null; // OS COM name of the port being added (for codegen)
   let program = { name: 'untitled', steps: [] };
+  let savedName = null;     // filename the current program was last saved under (null = never saved)
   let running = false;      // program run state
+  // ---- canvas view (zoom / pan / selection) --------------------------------
+  let zoom = 1, panX = 0, panY = 0;
+  let selected = new Set(); // selected device ids (highlighted "blocks")
+  let pan = null;           // background-pan state
+  let keyBound = false;     // global key handler bound once
 
   const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
   const byId = (id) => devices.find((d) => d.id === id);
@@ -246,23 +252,33 @@ const uartBridge = (() => {
         <div class="uart-toolbar">
           <button id="uart-add-uart" class="kicad-btn kicad-btn-start">+ COM / UART Device</button>
           <button id="uart-add-ftdi" class="kicad-btn">+ FTDI Bit-bang</button>
-          <span class="uart-hint">Drag a node to move it • drag from a <b>TX</b> dot to an <b>RX</b> dot to bridge</span>
-          <button id="uart-clear" class="kicad-btn kicad-btn-outline" style="margin-left:auto">Clear All</button>
+          <span class="uart-hint">Drag a block to move • empty space to pan • scroll / Ctrl +/− to zoom • click to select, Ctrl+A all, Del to remove</span>
+          <div class="uart-zoomctl">
+            <button id="uart-zoom-out" class="kicad-btn kicad-btn-outline" title="Zoom out (Ctrl −)">−</button>
+            <span id="uart-zoom-ind" class="uart-zoom-ind" title="Reset (Ctrl 0)">100%</span>
+            <button id="uart-zoom-in" class="kicad-btn kicad-btn-outline" title="Zoom in (Ctrl +)">+</button>
+            <button id="uart-zoom-fit" class="kicad-btn kicad-btn-outline" title="Fit all blocks">Fit</button>
+          </div>
+          <button id="uart-clear" class="kicad-btn kicad-btn-outline">Clear All</button>
         </div>
         <div class="uart-mid">
           <div id="uart-canvas" class="uart-canvas">
-            <svg id="uart-wires" class="uart-wires"></svg>
-            <div id="uart-nodes"></div>
+            <div id="uart-zoom" class="uart-zoom">
+              <svg id="uart-wires" class="uart-wires"></svg>
+              <div id="uart-nodes"></div>
+            </div>
           </div>
-          <div id="uart-program" class="uart-program"></div>
-        </div>
-        <div class="uart-monitor-wrap">
-          <div class="uart-monitor-head"><span>Monitor</span>
-            <span style="margin-left:auto;display:flex;gap:6px">
-              <button id="uart-save-mon" class="kicad-btn kicad-btn-outline">Save log</button>
-              <button id="uart-clear-mon" class="kicad-btn kicad-btn-outline">Clear log</button>
-            </span></div>
-          <div id="uart-monitor" class="uart-monitor"></div>
+          <div class="uart-right">
+            <div id="uart-program" class="uart-program"></div>
+            <div class="uart-monitor-wrap">
+              <div class="uart-monitor-head"><span>Monitor</span>
+                <span style="margin-left:auto;display:flex;gap:6px">
+                  <button id="uart-save-mon" class="kicad-btn kicad-btn-outline">Save log</button>
+                  <button id="uart-clear-mon" class="kicad-btn kicad-btn-outline">Clear log</button>
+                </span></div>
+              <div id="uart-monitor" class="uart-monitor"></div>
+            </div>
+          </div>
         </div>
       </div>`;
     document.getElementById('uart-add-uart').addEventListener('click', addUart);
@@ -270,10 +286,88 @@ const uartBridge = (() => {
     document.getElementById('uart-clear').addEventListener('click', clearAll);
     document.getElementById('uart-clear-mon').addEventListener('click', () => { const m = document.getElementById('uart-monitor'); if (m) m.innerHTML = ''; });
     document.getElementById('uart-save-mon').addEventListener('click', saveLog);
+    document.getElementById('uart-zoom-in').addEventListener('click', () => zoomBy(1.15));
+    document.getElementById('uart-zoom-out').addEventListener('click', () => zoomBy(1 / 1.15));
+    document.getElementById('uart-zoom-fit').addEventListener('click', fitView);
     const canvas = document.getElementById('uart-canvas');
-    canvas.addEventListener('mousemove', onCanvasMove);
-    canvas.addEventListener('mouseup', onCanvasUp);
+    // Background mousedown (not on a node/terminal/wire) starts a pan.
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.uart-node') || e.target.closest('[data-term]') || e.target.tagName === 'path') return;
+      pan = { cx: e.clientX, cy: e.clientY, px0: panX, py0: panY, moved: false };
+    });
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+    // Move/up bound at document level so drags/pans survive the pointer leaving the canvas.
+    document.addEventListener('mousemove', onCanvasMove);
+    document.addEventListener('mouseup', onCanvasUp);
+    if (!keyBound) { document.addEventListener('keydown', onKey); keyBound = true; }
+    applyZoom();
     renderNodes();
+  }
+
+  // ---- canvas zoom / pan ---------------------------------------------------
+  function applyZoom() {
+    const z = document.getElementById('uart-zoom');
+    if (z) z.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    const ind = document.getElementById('uart-zoom-ind');
+    if (ind) ind.textContent = Math.round(zoom * 100) + '%';
+  }
+  function zoomAt(clientX, clientY, factor) {
+    const c = document.getElementById('uart-canvas'); if (!c) return;
+    const r = c.getBoundingClientRect();
+    const nz = Math.min(2.5, Math.max(0.3, zoom * factor));
+    if (nz === zoom) return;
+    const lx = (clientX - r.left - panX) / zoom, ly = (clientY - r.top - panY) / zoom;
+    zoom = nz; panX = clientX - r.left - lx * zoom; panY = clientY - r.top - ly * zoom;
+    applyZoom();
+  }
+  function zoomBy(factor) {
+    const c = document.getElementById('uart-canvas'); if (!c) return;
+    const r = c.getBoundingClientRect();
+    zoomAt(r.left + r.width / 2, r.top + r.height / 2, factor);
+  }
+  function fitView() {
+    const c = document.getElementById('uart-canvas'); if (!c) return;
+    if (!devices.length) { zoom = 1; panX = panY = 0; applyZoom(); return; }
+    const r = c.getBoundingClientRect();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    devices.forEach((d) => {
+      const node = document.getElementById('node-' + d.id);
+      const h = node ? node.offsetHeight : 170;
+      minX = Math.min(minX, d.x); minY = Math.min(minY, d.y);
+      maxX = Math.max(maxX, d.x + NODE_W); maxY = Math.max(maxY, d.y + h);
+    });
+    const pad = 40, w = maxX - minX + pad * 2, h = maxY - minY + pad * 2;
+    zoom = Math.min(2.5, Math.max(0.3, Math.min(r.width / w, r.height / h)));
+    panX = r.width / 2 - ((minX + maxX) / 2) * zoom;
+    panY = pad - minY * zoom;
+    applyZoom();
+  }
+
+  // ---- selection -----------------------------------------------------------
+  function renderSelection() {
+    devices.forEach((d) => { const n = document.getElementById('node-' + d.id); if (n) n.classList.toggle('sel', selected.has(d.id)); });
+  }
+  async function deleteSelected() {
+    const ids = [...selected]; if (!ids.length) return;
+    if (ids.length > 1 && !confirm(`Remove ${ids.length} blocks?`)) return;
+    for (const id of ids) { const d = byId(id); if (d && d.connected) await disconnect(d); }
+    wires = wires.filter((w) => !selected.has(w.from) && !selected.has(w.to));
+    devices = devices.filter((d) => !selected.has(d.id));
+    selected.clear(); renderNodes();
+  }
+  function onKey(e) {
+    const cv = document.getElementById('uart-canvas');
+    if (!cv || cv.offsetParent === null) return; // UART Bridge not visible
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); zoomBy(1.15); return; }
+    if (mod && e.key === '-') { e.preventDefault(); zoomBy(1 / 1.15); return; }
+    if (mod && e.key === '0') { e.preventDefault(); zoom = 1; panX = panY = 0; applyZoom(); return; }
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT' || ae.isContentEditable)) return;
+    if (mod && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); selected = new Set(devices.map((d) => d.id)); renderSelection(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selected.size) { e.preventDefault(); deleteSelected(); return; }
+    if (e.key === 'Escape') { selected.clear(); renderSelection(); }
   }
 
   function nodeHTML(dev) {
@@ -353,6 +447,7 @@ const uartBridge = (() => {
     if (!wrap) return;
     wrap.innerHTML = devices.map(nodeHTML).join('');
     devices.forEach(bindNode);
+    renderSelection();
     renderWires();
     renderProgram();
   }
@@ -362,7 +457,14 @@ const uartBridge = (() => {
     if (!node) return;
     node.querySelector('[data-drag]').addEventListener('mousedown', (e) => {
       if (e.target.dataset.remove !== undefined) return;
-      drag = { dev, dx: e.clientX - dev.x, dy: e.clientY - dev.y }; e.preventDefault();
+      if (e.button !== 0) return;
+      if (e.ctrlKey || e.metaKey) { // toggle this block in the selection, no drag
+        selected.has(dev.id) ? selected.delete(dev.id) : selected.add(dev.id);
+        renderSelection(); e.preventDefault(); return;
+      }
+      if (!selected.has(dev.id)) { selected.clear(); selected.add(dev.id); renderSelection(); }
+      const items = devices.filter((d) => selected.has(d.id)).map((d) => ({ d, x0: d.x, y0: d.y }));
+      drag = { items, cx: e.clientX, cy: e.clientY }; e.preventDefault();
     });
     node.querySelector('[data-remove]').addEventListener('click', () => removeDevice(dev));
     node.querySelector('[data-conn]').addEventListener('click', () => dev.connected ? disconnect(dev) : connect(dev));
@@ -394,20 +496,27 @@ const uartBridge = (() => {
 
   function onCanvasMove(e) {
     if (drag) {
-      const canvas = document.getElementById('uart-canvas').getBoundingClientRect();
-      drag.dev.x = Math.max(0, e.clientX - drag.dx);
-      drag.dev.y = Math.max(0, e.clientY - drag.dy);
-      const node = document.getElementById('node-' + drag.dev.id);
-      node.style.left = drag.dev.x + 'px'; node.style.top = drag.dev.y + 'px';
+      const dx = (e.clientX - drag.cx) / zoom, dy = (e.clientY - drag.cy) / zoom;
+      drag.items.forEach((it) => {
+        it.d.x = Math.max(0, it.x0 + dx); it.d.y = Math.max(0, it.y0 + dy);
+        const node = document.getElementById('node-' + it.d.id);
+        if (node) { node.style.left = it.d.x + 'px'; node.style.top = it.d.y + 'px'; }
+      });
       renderWires();
     } else if (wireDrag) {
       wireDrag.x = e.clientX; wireDrag.y = e.clientY; renderWires();
+    } else if (pan) {
+      panX = pan.px0 + (e.clientX - pan.cx); panY = pan.py0 + (e.clientY - pan.cy);
+      if (Math.abs(e.clientX - pan.cx) > 3 || Math.abs(e.clientY - pan.cy) > 3) pan.moved = true;
+      applyZoom();
     }
   }
-  function onCanvasUp() { drag = null; wireDrag = null; renderWires(); }
+  function onCanvasUp() {
+    if (pan && !pan.moved) { selected.clear(); renderSelection(); } // click on empty space = deselect
+    drag = null; wireDrag = null; pan = null; renderWires();
+  }
 
   function termPos(dev, term) {
-    const canvas = document.getElementById('uart-canvas').getBoundingClientRect();
     const x = dev.x + (term === 'tx' ? NODE_W : 0);
     const y = dev.y + TERM_Y;
     return { x, y };
@@ -426,7 +535,7 @@ const uartBridge = (() => {
     }
     if (wireDrag && wireDrag.from) {
       const a = byId(wireDrag.from);
-      if (a) { const p1 = termPos(a, 'tx'); const p2 = { x: wireDrag.x - canvas.left, y: wireDrag.y - canvas.top }; paths += wirePath(p1, p2, 'drag', true); }
+      if (a) { const p1 = termPos(a, 'tx'); const p2 = { x: (wireDrag.x - canvas.left - panX) / zoom, y: (wireDrag.y - canvas.top - panY) / zoom }; paths += wirePath(p1, p2, 'drag', true); }
     }
     svg.innerHTML = paths;
     svg.querySelectorAll('[data-wire]').forEach((p) => p.addEventListener('click', () => removeWire(p.dataset.wire)));
@@ -457,7 +566,7 @@ const uartBridge = (() => {
   async function clearAll() {
     if (devices.length && !confirm('Disconnect and remove all devices and wires?')) return;
     for (const d of devices.slice()) { if (d.connected) await disconnect(d); }
-    devices = []; wires = []; renderNodes();
+    devices = []; wires = []; selected.clear(); renderNodes();
   }
 
   function saveLog() {
@@ -635,13 +744,22 @@ const uartBridge = (() => {
     if (!el) return;
     el.innerHTML = `
       <div class="uart-prog-head">
-        <input id="prog-name" class="kicad-input" value="${esc(program.name)}" title="Program name">
-        <div class="uart-prog-btns">
-          <button id="prog-new" class="kicad-btn kicad-btn-outline">New</button>
-          <button id="prog-save" class="kicad-btn kicad-btn-outline">Save</button>
-          <button id="prog-open" class="kicad-btn kicad-btn-outline">Open</button>
-          <button id="prog-exp" class="kicad-btn kicad-btn-outline">Export .py</button>
-          <button id="prog-imp" class="kicad-btn kicad-btn-outline">Import .py</button>
+        <div class="uart-prog-bar">
+          <span class="uart-prog-name" title="${esc(program.name)}">${esc(program.name || 'untitled')}${savedName ? '' : ' •'}</span>
+          <div class="uart-prog-btns">
+            <button id="prog-save" class="kicad-btn kicad-btn-outline">Save</button>
+            <button id="prog-open" class="kicad-btn kicad-btn-outline">Open</button>
+            <div class="uart-more">
+              <button id="prog-more" class="kicad-btn kicad-btn-outline" title="More actions">⋯</button>
+              <div id="prog-more-menu" class="uart-more-menu" hidden>
+                <button data-m="new">New</button>
+                <button data-m="rename">Rename…</button>
+                <button data-m="delete">Delete…</button>
+                <button data-m="export">Export .py</button>
+                <button data-m="import">Import .py</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="uart-prog-add">
@@ -652,14 +770,27 @@ const uartBridge = (() => {
       <div class="uart-prog-run"><button id="prog-run" class="kicad-btn ${running ? 'kicad-btn-outline' : 'kicad-btn-start'}">${running ? '■ Stop' : '▶ Run program'}</button></div>`;
 
     const g = (id) => document.getElementById(id);
-    g('prog-name').addEventListener('input', (e) => { program.name = e.target.value; });
-    g('prog-new').addEventListener('click', () => { if (program.steps.length && !confirm('Clear current program?')) return; program = { name: 'untitled', steps: [] }; renderProgram(); });
     g('prog-save').addEventListener('click', saveProgram);
     g('prog-open').addEventListener('click', openProgram);
-    g('prog-exp').addEventListener('click', exportPy);
-    g('prog-imp').addEventListener('click', importPy);
     g('prog-addbtn').addEventListener('click', () => { program.steps.push(newStep(g('prog-addtype').value)); renderProgram(); });
     g('prog-run').addEventListener('click', () => running ? stopProgram() : runProgram());
+    // ⋯ more-menu (New / Rename / Delete / Export / Import) — kept out of the way to save space
+    const more = g('prog-more'), menu = g('prog-more-menu');
+    more.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const willOpen = menu.hidden; menu.hidden = !willOpen;
+      if (willOpen) setTimeout(() => { const close = () => { menu.hidden = true; document.removeEventListener('click', close); }; document.addEventListener('click', close); }, 0);
+    });
+    menu.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-m]'); if (!b) return;
+      menu.hidden = true;
+      const m = b.dataset.m;
+      if (m === 'new') { if (program.steps.length && !confirm('Clear current program?')) return; program = { name: 'untitled', steps: [] }; savedName = null; renderProgram(); }
+      else if (m === 'rename') renameProgram();
+      else if (m === 'delete') deleteProgram();
+      else if (m === 'export') exportPy();
+      else if (m === 'import') importPy();
+    });
 
     const steps = g('prog-steps');
     steps.addEventListener('click', (e) => {
@@ -709,11 +840,62 @@ const uartBridge = (() => {
     renderNodes();
   }
 
+  // Name-prompt popup — used for first save and rename (replaces window.prompt).
+  function promptName(title, initial) {
+    return new Promise((resolve) => {
+      let done = (v) => { done = () => {}; ov.remove(); resolve(v); };
+      const ov = overlay(`<div class="uart-modal-title">${esc(title)}</div>
+        <input id="uart-name-input" class="kicad-input" style="width:100%;box-sizing:border-box" value="${esc(initial || '')}" placeholder="Program name">
+        <div class="uart-modal-actions" style="gap:6px">
+          <button id="uart-name-cancel" class="kicad-btn kicad-btn-outline">Cancel</button>
+          <button id="uart-name-ok" class="kicad-btn kicad-btn-start">Save</button>
+        </div>`);
+      ov.addEventListener('click', (e) => { if (e.target === ov) done(null); });
+      const inp = ov.querySelector('#uart-name-input');
+      ov.querySelector('#uart-name-ok').addEventListener('click', () => done(inp.value.trim() || null));
+      ov.querySelector('#uart-name-cancel').addEventListener('click', () => done(null));
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value.trim() || null); } else if (e.key === 'Escape') done(null); });
+      setTimeout(() => { inp.focus(); inp.select(); }, 0);
+    });
+  }
+
   async function saveProgram() {
-    if (!program.name || program.name === 'untitled') { const n = prompt('Save program as:', program.name); if (!n) return; program.name = n; }
-    const r = await window.api.uartProg.save(program.name, JSON.stringify(serializeState()));
-    if (r.error) alert('Save failed: ' + r.error); else log('program', 'sys', null, 'saved "' + r.name + '"');
+    let name = savedName;
+    if (!name) { // first save — ask for a name via popup
+      name = await promptName('Save program as', program.name === 'untitled' ? '' : program.name);
+      if (!name) return;
+    }
+    program.name = name;
+    const r = await window.api.uartProg.save(name, JSON.stringify(serializeState()));
+    if (r.error) { alert('Save failed: ' + r.error); return; }
+    savedName = r.name; program.name = r.name;
+    log('program', 'sys', null, 'saved "' + r.name + '"');
     renderProgram();
+  }
+
+  async function renameProgram() {
+    const newName = await promptName('Rename program', program.name === 'untitled' ? '' : program.name);
+    if (!newName) return;
+    const old = savedName;
+    program.name = newName;
+    const r = await window.api.uartProg.save(newName, JSON.stringify(serializeState()));
+    if (r.error) { alert('Rename failed: ' + r.error); return; }
+    if (old && old !== r.name) await window.api.uartProg.remove(old);
+    savedName = r.name; program.name = r.name;
+    log('program', 'sys', null, 'renamed → "' + r.name + '"');
+    renderProgram();
+  }
+
+  async function deleteProgram() {
+    if (!savedName) {
+      if (!program.steps.length || confirm('This program isn\'t saved yet — clear it?')) { program = { name: 'untitled', steps: [] }; savedName = null; renderProgram(); }
+      return;
+    }
+    if (!confirm(`Delete saved program "${savedName}"?`)) return;
+    const r = await window.api.uartProg.remove(savedName);
+    if (r && r.error) { alert('Delete failed: ' + r.error); return; }
+    log('program', 'sys', null, 'deleted "' + savedName + '"');
+    program = { name: 'untitled', steps: [] }; savedName = null; renderProgram();
   }
   async function openProgram() {
     const r = await window.api.uartProg.list();
@@ -725,7 +907,7 @@ const uartBridge = (() => {
     ov.querySelectorAll('.uart-port-row').forEach((b) => b.addEventListener('click', async () => {
       ov.remove(); const res = await window.api.uartProg.load(b.dataset.n);
       if (res.error) { alert('Load failed: ' + res.error); return; }
-      try { loadState(JSON.parse(res.data)); log('program', 'sys', null, 'opened "' + b.dataset.n + '"'); }
+      try { loadState(JSON.parse(res.data)); savedName = b.dataset.n; renderProgram(); log('program', 'sys', null, 'opened "' + b.dataset.n + '"'); }
       catch (e) { alert('Bad program file: ' + e.message); }
     }));
     ov.querySelector('#op-cancel').addEventListener('click', () => ov.remove());
@@ -788,7 +970,7 @@ const uartBridge = (() => {
     if (r.error) { alert('Import failed: ' + r.error); return; }
     const m = /^#\s*@MODEL\s+(\S+)/m.exec(r.content || '');
     if (!m) { alert('Not an EngOrg UART Bridge script (no @MODEL header).'); return; }
-    try { loadState(JSON.parse(unb64(m[1]))); log('program', 'sys', null, 'imported program from .py'); }
+    try { loadState(JSON.parse(unb64(m[1]))); savedName = null; renderProgram(); log('program', 'sys', null, 'imported program from .py'); }
     catch (e) { alert('Could not parse the embedded program: ' + e.message); }
   }
 

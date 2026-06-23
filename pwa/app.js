@@ -61,7 +61,8 @@ if ('serviceWorker' in navigator) {
 const COLOR_THEMES = {
   default: { name:'Default', dark:false, vars:{'--bg':'#F8FAFC','--bg-card':'#FFFFFF','--bg-elevated':'#F1F5F9','--border':'#E2E8F0','--text':'#0F172A','--text-secondary':'#334155','--text-muted':'#64748B','--accent':'#3B82F6','--accent-light':'rgba(59,130,246,0.12)','--success':'#22C55E','--warning':'#F59E0B','--danger':'#EF4444','--radius':'12px'} },
   dark: { name:'Dark', dark:true, vars:{'--bg':'#0F172A','--bg-card':'#1E293B','--bg-elevated':'#334155','--border':'#334155','--text':'#F1F5F9','--text-secondary':'#CBD5E1','--text-muted':'#94A3B8','--accent':'#3B82F6','--accent-light':'rgba(59,130,246,0.15)','--success':'#4ADE80','--warning':'#FBBF24','--danger':'#F87171','--radius':'12px'} },
-  glass: { name:'Glass', dark:true, vars:{'--bg':'#0B0E1A','--bg-card':'rgba(255,255,255,0.06)','--bg-elevated':'rgba(255,255,255,0.08)','--border':'rgba(255,255,255,0.1)','--text':'#E8ECF4','--text-secondary':'#B8C4D8','--text-muted':'#7B8BA8','--accent':'#818CF8','--accent-light':'rgba(129,140,248,0.12)','--success':'#34D399','--warning':'#FBBF24','--danger':'#FB7185','--radius':'16px'} },
+  glassDark: { name:'Liquid Glass Dark', dark:true, style:'glass', vars:{'--bg':'#070A14','--bg-card':'rgba(255,255,255,0.06)','--bg-elevated':'rgba(255,255,255,0.09)','--border':'rgba(255,255,255,0.16)','--text':'#EEF2FB','--text-secondary':'#C2CCDE','--text-muted':'#8896AE','--accent':'#8B93FF','--accent-light':'rgba(139,147,255,0.16)','--success':'#34D399','--warning':'#FBBF24','--danger':'#FB7185','--radius':'16px','--glass-c1':'rgba(99,102,241,0.55)','--glass-c2':'rgba(20,184,166,0.45)','--glass-c3':'rgba(168,85,247,0.5)'} },
+  glassLight: { name:'Liquid Glass Light', dark:false, style:'glass', vars:{'--bg':'#E7EEFB','--bg-card':'rgba(255,255,255,0.55)','--bg-elevated':'rgba(255,255,255,0.6)','--border':'rgba(255,255,255,0.75)','--text':'#1E293B','--text-secondary':'#475569','--text-muted':'#64748B','--accent':'#6366F1','--accent-light':'rgba(99,102,241,0.14)','--success':'#059669','--warning':'#D97706','--danger':'#E11D48','--radius':'16px','--glass-c1':'rgba(125,180,255,0.55)','--glass-c2':'rgba(255,170,210,0.5)','--glass-c3':'rgba(150,230,200,0.55)'} },
   neon: { name:'Neon', dark:true, vars:{'--bg':'#0A0A0F','--bg-card':'#141420','--bg-elevated':'#1A1A2A','--border':'#2A2A3E','--text':'#E0E0FF','--text-secondary':'#A0A0CC','--text-muted':'#6B6B99','--accent':'#00FFAA','--accent-light':'rgba(0,255,170,0.08)','--success':'#00FF88','--warning':'#FFD600','--danger':'#FF2266','--radius':'6px'} },
   brutalist: { name:'Brutalist', dark:false, vars:{'--bg':'#FAFAE0','--bg-card':'#FFFFF0','--bg-elevated':'#F0F0D8','--border':'#000000','--text':'#000000','--text-secondary':'#222200','--text-muted':'#555544','--accent':'#FF3300','--accent-light':'#FFEEEE','--success':'#008800','--warning':'#CC8800','--danger':'#CC0000','--radius':'0px'} },
   nord: { name:'Nord', dark:true, vars:{'--bg':'#2E3440','--bg-card':'#3B4252','--bg-elevated':'#434C5E','--border':'#434C5E','--text':'#ECEFF4','--text-secondary':'#D8DEE9','--text-muted':'#81A1C1','--accent':'#88C0D0','--accent-light':'rgba(136,192,208,0.12)','--success':'#A3BE8C','--warning':'#EBCB8B','--danger':'#BF616A','--radius':'8px'} },
@@ -79,6 +80,7 @@ const COLOR_THEMES = {
 };
 
 function applyTheme(themeId) {
+  if (themeId === 'glass') themeId = 'glassDark'; // old single glass → dark variant
   const theme = COLOR_THEMES[themeId] || COLOR_THEMES.dark;
   const root = document.documentElement;
   for (const [prop, val] of Object.entries(theme.vars)) {
@@ -88,6 +90,8 @@ function applyTheme(themeId) {
   root.style.colorScheme = theme.dark ? 'dark' : 'light';
   document.body.classList.toggle('theme-dark', theme.dark);
   document.body.classList.toggle('theme-light', !theme.dark);
+  document.body.dataset.style = theme.style || ''; // enables the liquid-glass CSS
+
   // Update meta theme-color
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme.vars['--accent'] || '#818CF8');

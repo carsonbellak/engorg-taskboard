@@ -21,6 +21,8 @@ const registerWifiChecker   = require('./ipc/wifi-checker');
 const registerContribute    = require('./ipc/contribute');
 const registerFtdi          = require('./ipc/ftdi');
 const registerUartPrograms  = require('./ipc/uart-programs');
+const registerUpdates       = require('./ipc/updates');
+const registerWindow        = require('./ipc/window');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -32,6 +34,10 @@ function ensureDataDir() {
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400, height: 900, minWidth: 1024, minHeight: 700,
+    // Custom themed title bar (renderer/titlebar.js): hide the native caption +
+    // menu bar but keep the resizable window frame. The app draws its own slim,
+    // theme-aware bar with the File/Edit/View/Window menus and window controls.
+    titleBarStyle: 'hidden',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -42,6 +48,13 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // Keep the application menu registered (for keyboard accelerators) but hidden —
+  // the custom titlebar reproduces the menu items visually.
+  mainWindow.setMenuBarVisibility(false);
+
+  // Notify the renderer so the custom titlebar can swap the maximize/restore icon.
+  mainWindow.on('maximize', () => mainWindow.webContents.send('win:maximized', true));
+  mainWindow.on('unmaximize', () => mainWindow.webContents.send('win:maximized', false));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) shell.openExternal(url);
@@ -117,6 +130,8 @@ app.whenReady().then(() => {
   registerContribute();
   registerFtdi();
   registerUartPrograms(getMainWindow);
+  registerUpdates();
+  registerWindow(getMainWindow);
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
@@ -144,6 +159,9 @@ app.whenReady().then(() => {
 
   createWindow();
   buildMenu();
+  // buildMenu() sets the application menu (kept for keyboard accelerators); make
+  // sure the native menu bar stays hidden afterward — the custom titlebar owns it.
+  if (mainWindow) mainWindow.setMenuBarVisibility(false);
 });
 
 app.on('window-all-closed', () => {

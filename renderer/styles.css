@@ -38,6 +38,66 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* === CUSTOM TITLE BAR === */
+#titlebar {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  flex-shrink: 0;
+  background: var(--bg-header, #FFFFFF);
+  color: var(--text-primary, #1E293B);
+  border-bottom: var(--header-border, 1px solid var(--border-color, #E2E8F0));
+  -webkit-app-region: drag;
+  user-select: none;
+  position: relative;
+  z-index: 1000;
+  transition: background 0.3s, border-color 0.3s;
+}
+.titlebar-left { display: flex; align-items: center; -webkit-app-region: no-drag; }
+.titlebar-icon { font-size: 13px; padding: 0 5px 0 9px; opacity: 0.85; }
+.titlebar-app { font-size: 11px; font-weight: 700; color: var(--text-muted, #64748B); margin-right: 8px; white-space: nowrap; }
+.titlebar-menu { display: flex; align-items: stretch; }
+.titlebar-drag { flex: 1; -webkit-app-region: drag; }
+.titlebar-controls { display: flex; -webkit-app-region: no-drag; }
+
+.tb-menu-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-secondary, #475569); font-size: 12px; font-family: inherit;
+  padding: 0 9px; height: 28px;
+}
+.tb-menu-btn:hover, .tb-menu-btn.open { background: var(--bg-hover, #F1F5F9); color: var(--text-primary, #1E293B); }
+
+.tb-btn {
+  background: none; border: none; cursor: pointer;
+  width: 44px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-secondary, #475569);
+  font-family: "Segoe MDL2 Assets", "Segoe Fluent Icons", sans-serif; font-size: 10px;
+}
+.tb-btn:hover { background: var(--bg-hover, #F1F5F9); color: var(--text-primary, #1E293B); }
+.tb-close:hover { background: #E81123; color: #FFFFFF; }
+
+.tb-dropdown {
+  position: absolute; top: 28px;
+  min-width: 190px; padding: 4px;
+  background: var(--bg-card, #FFFFFF);
+  border: 1px solid var(--border-color, #E2E8F0);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+  z-index: 1001;
+  -webkit-app-region: no-drag;
+}
+.tb-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  width: 100%; background: none; border: none; text-align: left; cursor: pointer;
+  color: var(--text-primary, #1E293B); font-size: 12px; font-family: inherit;
+  padding: 6px 10px; border-radius: 6px;
+}
+.tb-item:hover { background: var(--bg-hover, #F1F5F9); }
+.tb-item .tb-accel { color: var(--text-muted, #94A3B8); font-size: 11px; }
+.tb-sep { height: 1px; background: var(--border-color, #E2E8F0); margin: 4px 6px; }
+
 /* === HEADER === */
 #header {
   display: flex;
@@ -1235,6 +1295,22 @@ body.theme-dark .sticky-note .note-link-chip:hover {
 }
 
 .modal-box.modal-sm { max-width: 360px; }
+
+/* === UPDATE PROMPT === */
+.update-modal-body p { margin: 0 0 10px; font-size: 14px; line-height: 1.5; color: var(--text-secondary, #475569); }
+.update-latest { font-size: 12px; color: var(--text-muted, #64748B); margin-bottom: 8px; }
+.update-latest code, .update-commit-list code { font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+  background: var(--bg-input, rgba(148,163,184,0.15)); padding: 1px 5px; border-radius: 4px; }
+.update-commit-list { margin: 6px 0 0; padding-left: 0; list-style: none; max-height: 160px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 4px; }
+.update-commit-list li { font-size: 12px; color: var(--text-secondary, #475569); line-height: 1.4; word-break: break-word; }
+.update-output { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow-y: auto;
+  background: var(--bg-input, rgba(148,163,184,0.12)); color: var(--text-secondary, #475569); }
+.update-output.update-error { color: #ef4444; }
+.update-skip-link { display: block; margin: 14px 0 0; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--text-muted, #64748B); text-decoration: underline; padding: 0; }
+.update-skip-link:hover { color: var(--text-primary, #1E293B); }
 
 .modal-box h2 {
   margin: 0 0 16px;
@@ -6459,6 +6535,13 @@ body.theme-dark .sticky-note .note-link-chip:hover {
 }
 
 /* === NOTE SIZE VARIANTS === */
+body[data-note-size="xs"] .sticky-note {
+  width: 150px; min-height: 60px; max-height: 92px; padding: 8px 10px;
+}
+body[data-note-size="xs"] .sticky-note .note-text { font-size: 11px; -webkit-line-clamp: 2; }
+body[data-note-size="xs"] .sticky-note .note-project-badge { font-size: 8px; }
+body[data-note-size="xs"] .sticky-note .note-bottom { font-size: 8px; }
+
 body[data-note-size="compact"] .sticky-note {
   width: 180px; min-height: 80px; max-height: 120px; padding: 10px 12px;
 }
@@ -6470,6 +6553,21 @@ body[data-note-size="large"] .sticky-note {
   width: 280px; min-height: 140px; max-height: 200px; padding: 16px 18px;
 }
 body[data-note-size="large"] .sticky-note .note-text { font-size: 15px; -webkit-line-clamp: 4; }
+
+/* Hover must always fully expand a note, whatever the size variant. The size
+   rules above set a fixed max-height / line-clamp with higher specificity than
+   the base `.sticky-note:hover`, so re-assert the expand here (otherwise small
+   notes stay clamped and their text gets cut off on hover). */
+body[data-note-size="xs"] .sticky-note:hover,
+body[data-note-size="compact"] .sticky-note:hover,
+body[data-note-size="large"] .sticky-note:hover {
+  max-height: none;
+}
+body[data-note-size="xs"] .sticky-note:hover .note-text,
+body[data-note-size="compact"] .sticky-note:hover .note-text,
+body[data-note-size="large"] .sticky-note:hover .note-text {
+  -webkit-line-clamp: unset;
+}
 
 /* === STALE ANIMATION TOGGLE === */
 body.no-stale-anim .sticky-note.note-shake,
@@ -6551,6 +6649,7 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
 .settings-size-preview {
   border-radius: 6px; background: var(--bg-hover, #F1F5F9); display: flex; align-items: center; justify-content: center;
 }
+.settings-size-xs { width: 30px; height: 24px; }
 .settings-size-compact { width: 40px; height: 30px; }
 .settings-size-medium { width: 55px; height: 38px; }
 .settings-size-large { width: 70px; height: 48px; }
@@ -7034,13 +7133,29 @@ body.style-glass #main-content::before {
   100% { transform: rotate(2deg); opacity: 1; }
 }
 body.style-glass .modal-box {
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  background: rgba(255,255,255,0.06) !important;
-  border: 1px solid rgba(255,255,255,0.1);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--card-shadow);
 }
 body.style-glass .sticky-note:hover {
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.08) !important;
+  box-shadow: var(--card-hover-shadow) !important;
+}
+
+/* Liquid glass colour field — soft drifting blobs behind the frosted UI */
+.glass-blob {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(46px);
+  opacity: 0.95;
+  will-change: transform;
+  pointer-events: none;
+}
+@keyframes glass-blob-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(-6vw, 5vh) scale(1.18); }
+  100% { transform: translate(7vw, -4vh) scale(0.92); }
 }
 
 /*
@@ -7513,39 +7628,44 @@ body.style-highcontrast #main-content::after {
 }
 
 /* Glass style - frosted translucent panels */
+body.style-glass #titlebar,
 body.style-glass #header {
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
   background: var(--bg-header);
 }
 body.style-glass #sidebar {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   background: var(--bg-sidebar);
 }
 body.style-glass .sticky-note {
-  backdrop-filter: blur(var(--card-blur, 20px));
-  -webkit-backdrop-filter: blur(var(--card-blur, 20px));
-  background: rgba(255,255,255,0.06) !important;
-  border-color: rgba(255,255,255,0.1) !important;
+  backdrop-filter: blur(var(--card-blur, 22px)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--card-blur, 22px)) saturate(180%);
+  background: var(--bg-card) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: var(--card-shadow) !important;
 }
 body.style-glass .sidebar-item.active {
-  backdrop-filter: blur(12px);
-  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px) saturate(160%);
+  background: var(--bg-hover);
 }
 body.style-glass .header-tab.active {
-  backdrop-filter: blur(12px);
-  background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(12px) saturate(160%);
+  background: var(--bg-hover);
 }
 body.style-glass .filter-chip {
-  backdrop-filter: blur(8px);
-  background: rgba(255,255,255,0.04);
-  border-color: rgba(255,255,255,0.1);
+  backdrop-filter: blur(10px) saturate(160%);
+  background: var(--bg-input);
+  border-color: var(--border-color);
   color: var(--text-muted);
 }
-body.style-glass .stats-card {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+body.style-glass .stats-card,
+body.style-glass .board-note-card,
+body.style-glass .settings-section,
+body.style-glass .modal {
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
 }
 
 /* Neon style - glow effects */
@@ -8893,8 +9013,42 @@ body.style-highcontrast :focus-visible {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;          /* behind the app foreground by default */
   overflow: hidden;
+}
+/* Occasional particles are promoted here to drift *over* the content. Sits above
+   the main content but below the header (100), titlebar (1000) and modals (9000),
+   so the rare front-particle never covers the chrome or a dialog. */
+.theme-fx-layer-front {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 90;
+  overflow: hidden;
+}
+
+/* For themes with ambient effects, paint the deep background on <body> and keep
+   the scroll surfaces transparent. Otherwise the opaque #main-content would cover
+   the behind-the-UI effect layer (z-index:-1) and you'd only ever see the rare
+   front-promoted particles. With the surfaces transparent the effects are visible
+   behind/through the (translucent) cards, the way a background effect should be. */
+body.style-glass, body.style-dark, body.style-nord, body.style-gradient,
+body.style-neon, body.style-hacker, body.style-grunge { background: var(--bg-primary); }
+body.style-forest { background: linear-gradient(175deg, #F0F7F4 0%, #E6F0EB 40%, #D5E8DD 100%); }
+body.style-rose   { background: linear-gradient(170deg, #FFF5F7 0%, #FEE2E8 50%, #FFF1F2 100%); }
+body.style-sand   { background: linear-gradient(170deg, #FAF7F2 0%, #F0EBE1 40%, #E8E0D0 100%); }
+
+body.style-glass #app-body,    body.style-glass #main-content,
+body.style-dark #app-body,     body.style-dark #main-content,
+body.style-nord #app-body,     body.style-nord #main-content,
+body.style-gradient #app-body, body.style-gradient #main-content,
+body.style-neon #app-body,     body.style-neon #main-content,
+body.style-hacker #app-body,   body.style-hacker #main-content,
+body.style-grunge #app-body,   body.style-grunge #main-content,
+body.style-forest #app-body,   body.style-forest #main-content,
+body.style-rose #app-body,     body.style-rose #main-content,
+body.style-sand #app-body,     body.style-sand #main-content {
+  background: transparent;
 }
 
 /* Gears */
@@ -10107,6 +10261,7 @@ body.theme-light .syn-builtin { color: #059669; }
 /* ============================================================
    ENGINEERING UTILITIES TAB
    ============================================================ */
+#main-content:has(#view-engineering.active) { padding: 0; overflow: hidden; }
 .eng-utilities { display: flex; flex: 1; min-height: 0; gap: 0; }
 .eng-subnav {
   width: 210px; flex-shrink: 0; padding: 12px 10px;
@@ -10313,20 +10468,27 @@ body.theme-light .syn-builtin { color: #059669; }
    UART BRIDGE
    ============================================================ */
 .uart-bridge { display: flex; flex-direction: column; height: 100%; box-sizing: border-box; overflow: hidden; }
-.uart-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
-.uart-toolbar .kicad-btn { font-size: 13px; padding: 8px 12px; }
+.uart-toolbar { display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+.uart-toolbar .kicad-btn { font-size: 12px; padding: 5px 10px; }
 .uart-hint { font-size: 12px; color: var(--text-muted); }
 
-.uart-canvas { position: relative; flex: 1; min-height: 220px; overflow: auto; background:
+.uart-canvas { position: relative; flex: 1; min-height: 220px; overflow: hidden; cursor: grab; background:
   radial-gradient(var(--border-color) 1px, transparent 1px); background-size: 22px 22px; }
+.uart-canvas:active { cursor: grabbing; }
+.uart-zoom { position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; }
 .uart-wires { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .uart-wire { stroke: var(--accent, #3B82F6); stroke-width: 2.5; }
 .uart-wire-temp { stroke: var(--accent, #3B82F6); stroke-width: 2; stroke-dasharray: 5 4; opacity: 0.7; }
 .uart-wire-hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
 #uart-nodes { position: absolute; inset: 0; }
 
+.uart-zoomctl { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.uart-zoomctl .kicad-btn { padding: 4px 9px; font-size: 13px; line-height: 1; }
+.uart-zoom-ind { font-size: 11px; color: var(--text-muted); min-width: 38px; text-align: center; cursor: default; }
+
 .uart-node { position: absolute; background: var(--bg-secondary); border: 1px solid var(--border-color);
   border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.12); user-select: none; }
+.uart-node.sel { border-color: var(--accent, #3B82F6); box-shadow: 0 0 0 2px var(--accent, #3B82F6), 0 4px 14px rgba(0,0,0,0.18); }
 .uart-node-head { display: flex; align-items: center; gap: 7px; padding: 8px 10px; cursor: move;
   border-bottom: 1px solid var(--border-color); border-radius: 10px 10px 0 0; background: var(--bg-hover); }
 .uart-node-name { font-weight: 700; font-size: 13px; color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10361,7 +10523,7 @@ body.theme-light .syn-builtin { color: #059669; }
 .uart-stats { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, Consolas, monospace; }
 
 /* monitor */
-.uart-monitor-wrap { flex-shrink: 0; height: 200px; display: flex; flex-direction: column; border-top: 1px solid var(--border-color); }
+.uart-monitor-wrap { flex-shrink: 0; height: 200px; min-height: 120px; display: flex; flex-direction: column; border-top: 1px solid var(--border-color); }
 .uart-monitor-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; font-size: 12px; font-weight: 700; color: var(--text-secondary); }
 .uart-monitor-head .kicad-btn { padding: 4px 10px; font-size: 11px; }
 .uart-monitor { flex: 1; overflow: auto; padding: 6px 12px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; background: var(--bg-input, var(--bg-primary)); }
@@ -10384,11 +10546,20 @@ body.theme-light .syn-builtin { color: #059669; }
 /* program panel split */
 .uart-mid { display:flex; flex:1; min-height:0; }
 .uart-mid .uart-canvas { flex:2; }
-.uart-program { flex:1; min-width:330px; max-width:430px; border-left:1px solid var(--border-color); display:flex; flex-direction:column; overflow:hidden; background:var(--bg-secondary); }
-.uart-prog-head { display:flex; flex-direction:column; gap:6px; padding:10px; border-bottom:1px solid var(--border-color); }
-.uart-prog-head .kicad-input { font-weight:700; }
-.uart-prog-btns { display:flex; gap:5px; flex-wrap:wrap; }
-.uart-prog-btns .kicad-btn { padding:5px 8px; font-size:11px; flex:1; }
+.uart-right { flex:0 0 300px; min-width:260px; max-width:340px; display:flex; flex-direction:column; min-height:0; border-left:1px solid var(--border-color); }
+.uart-program { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:var(--bg-secondary); }
+.uart-prog-head { display:flex; flex-direction:column; gap:6px; padding:8px 10px; border-bottom:1px solid var(--border-color); }
+.uart-prog-bar { display:flex; align-items:center; gap:8px; }
+.uart-prog-name { flex:1; min-width:0; font-weight:700; font-size:13px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.uart-prog-btns { display:flex; gap:5px; align-items:center; flex-shrink:0; }
+.uart-prog-btns .kicad-btn { padding:5px 9px; font-size:11px; }
+.uart-more { position:relative; display:flex; }
+.uart-more > .kicad-btn { padding:5px 8px; font-weight:700; }
+.uart-more-menu { position:absolute; top:calc(100% + 4px); right:0; z-index:30; display:flex; flex-direction:column; min-width:130px;
+  background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:8px; box-shadow:0 8px 22px rgba(0,0,0,0.28); overflow:hidden; padding:4px; }
+.uart-more-menu[hidden] { display:none; }
+.uart-more-menu button { text-align:left; border:none; background:transparent; color:var(--text-primary); cursor:pointer; font-size:12px; padding:7px 10px; border-radius:6px; }
+.uart-more-menu button:hover { background:var(--bg-hover); }
 .uart-prog-add { display:flex; gap:6px; padding:8px 10px; border-bottom:1px solid var(--border-color); }
 .uart-prog-add .kicad-input { flex:1; }
 .uart-prog-add .kicad-btn { padding:6px 10px; font-size:12px; }

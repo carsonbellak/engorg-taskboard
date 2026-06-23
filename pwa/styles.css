@@ -31,6 +31,28 @@ body {
   user-select: none;
 }
 
+/* === LIQUID GLASS === */
+/* Soft drifting colour field behind the frosted (backdrop-blurred) chrome. */
+body[data-style="glass"] {
+  background:
+    radial-gradient(60vw 60vw at 14% 18%, var(--glass-c1), transparent 68%),
+    radial-gradient(55vw 55vw at 84% 30%, var(--glass-c2), transparent 68%),
+    radial-gradient(68vw 68vw at 50% 94%, var(--glass-c3), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+body[data-style="glass"] #app-header,
+body[data-style="glass"] #bottom-nav {
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+}
+body[data-style="glass"] .board-card,
+body[data-style="glass"] .board-column {
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.25);
+}
+
 /* === SCREENS === */
 .screen { display: none; height: 100vh; height: 100dvh; flex-direction: column; }
 .screen.active { display: flex; }

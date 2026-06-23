@@ -79,6 +79,25 @@ contextBridge.exposeInMainWorld('api', {
     exportPython: (opts) => ipcRenderer.invoke('uartprog:exportPython', opts),
     importPython: () => ipcRenderer.invoke('uartprog:importPython')
   },
+  // Custom title bar — window controls + menu actions (see renderer/titlebar.js)
+  win: {
+    minimize: () => ipcRenderer.invoke('win:minimize'),
+    maximizeToggle: () => ipcRenderer.invoke('win:maximizeToggle'),
+    close: () => ipcRenderer.invoke('win:close'),
+    isMaximized: () => ipcRenderer.invoke('win:isMaximized'),
+    onMaximized: (cb) => ipcRenderer.on('win:maximized', (e, v) => cb(v))
+  },
+  menu: {
+    action: (name) => ipcRenderer.invoke('appmenu:action', name)
+  },
+  // App updates — check the canonical repo for newer commits on startup
+  updates: {
+    check: () => ipcRenderer.invoke('updates:check'),
+    apply: () => ipcRenderer.invoke('updates:apply'),
+    skip: (sha) => ipcRenderer.invoke('updates:skip', sha),
+    openRepo: () => ipcRenderer.invoke('updates:openRepo'),
+    restart: () => ipcRenderer.invoke('updates:restart')
+  },
   // Contribute — submit local changes to the canonical repo as a GitHub PR
   contribute: {
     getChanges: () => ipcRenderer.invoke('contribute:getChanges'),

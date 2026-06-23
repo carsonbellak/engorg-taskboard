@@ -835,6 +835,12 @@
 
     console.log('EngOrg initialized:', dataManager.tasks.length, 'notes,', dataManager.scheduleItems.length, 'events,', dataManager.purchases.length, 'purchases');
 
+    // Scan the canonical repo for newer commits and prompt to update. Non-blocking,
+    // silent on errors / when up to date. Opt out via Settings → Check for updates.
+    if (dataManager.settings.autoCheckUpdates !== false && typeof updateChecker !== 'undefined') {
+      setTimeout(() => updateChecker.run(), 1500);
+    }
+
   } catch (err) {
     console.error('Init failed:', err);
     document.body.innerHTML = `<div style="padding:40px;text-align:center;font-family:sans-serif;">

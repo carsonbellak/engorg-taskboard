@@ -95,50 +95,106 @@ const COLOR_THEMES = {
       '--scrollbar-thumb-hover': 'rgba(148,163,184,0.5)',
     }
   },
-  glass: {
-    name: 'Glass',
-    desc: 'Frosted translucent panels',
+  glassDark: {
+    name: 'Liquid Glass Dark',
+    desc: 'Frosted panels over a deep liquid glow',
     style: 'glass',
     vars: {
-      '--bg-primary': '#0B0E1A',
-      '--bg-secondary': 'rgba(20,25,50,0.6)',
-      '--bg-sidebar': 'rgba(15,20,40,0.5)',
-      '--bg-header': 'rgba(15,20,40,0.7)',
-      '--bg-card': 'rgba(255,255,255,0.06)',
-      '--bg-input': 'rgba(255,255,255,0.05)',
-      '--bg-hover': 'rgba(255,255,255,0.08)',
-      '--border-color': 'rgba(255,255,255,0.1)',
-      '--border-light': 'rgba(255,255,255,0.05)',
-      '--text-primary': '#E8ECF4',
-      '--text-secondary': '#B8C4D8',
-      '--text-muted': '#7B8BA8',
-      '--text-faint': '#4F5F7A',
-      '--accent': '#818CF8',
-      '--accent-hover': '#A5B4FC',
-      '--accent-bg': 'rgba(129,140,248,0.12)',
-      '--accent-text': '#A5B4FC',
+      '--bg-primary': '#070A14',
+      '--bg-secondary': 'rgba(255,255,255,0.05)',
+      '--bg-sidebar': 'rgba(255,255,255,0.04)',
+      '--bg-header': 'rgba(255,255,255,0.05)',
+      '--bg-card': 'rgba(255,255,255,0.09)',
+      '--bg-input': 'rgba(255,255,255,0.06)',
+      '--bg-hover': 'rgba(255,255,255,0.12)',
+      '--border-color': 'rgba(255,255,255,0.16)',
+      '--border-light': 'rgba(255,255,255,0.08)',
+      '--text-primary': '#EEF2FB',
+      '--text-secondary': '#C2CCDE',
+      '--text-muted': '#8896AE',
+      '--text-faint': '#5A6883',
+      '--accent': '#8B93FF',
+      '--accent-hover': '#AEB4FF',
+      '--accent-bg': 'rgba(139,147,255,0.16)',
+      '--accent-text': '#AEB4FF',
       '--success': '#34D399',
       '--warning': '#FBBF24',
       '--danger': '#FB7185',
-      '--shadow': 'rgba(0,0,0,0.2)',
-      '--shadow-lg': 'rgba(0,0,0,0.4)',
+      '--shadow': 'rgba(0,0,0,0.25)',
+      '--shadow-lg': 'rgba(0,0,0,0.45)',
       '--radius-sm': '12px',
       '--radius-md': '16px',
-      '--radius-lg': '20px',
+      '--radius-lg': '22px',
       '--border-width': '1px',
       '--card-border-width': '1px',
-      '--header-bg': 'rgba(15,20,40,0.7)',
-      '--sidebar-bg': 'rgba(15,20,40,0.5)',
-      '--card-blur': '20px',
+      '--header-bg': 'rgba(255,255,255,0.05)',
+      '--sidebar-bg': 'rgba(255,255,255,0.04)',
+      '--card-blur': '22px',
       '--card-opacity': '1',
       '--font-weight-normal': '400',
       '--font-weight-bold': '600',
       '--font-weight-heavy': '700',
-      '--header-border': '1px solid rgba(255,255,255,0.08)',
-      '--sidebar-border': '1px solid rgba(255,255,255,0.06)',
-      '--card-shadow': '0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)',
-      '--card-hover-shadow': '0 16px 40px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)',
-      '--btn-shadow': '0 4px 16px rgba(129,140,248,0.3)',
+      '--header-border': '1px solid rgba(255,255,255,0.1)',
+      '--sidebar-border': '1px solid rgba(255,255,255,0.08)',
+      '--card-shadow': '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.04)',
+      '--card-hover-shadow': '0 16px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.32), inset 0 0 0 1px rgba(255,255,255,0.06)',
+      '--btn-shadow': '0 4px 16px rgba(139,147,255,0.3)',
+      // Liquid glass colour field (drifting blobs the frosted panels refract)
+      '--glass-c1': 'rgba(99,102,241,0.55)',
+      '--glass-c2': 'rgba(20,184,166,0.45)',
+      '--glass-c3': 'rgba(168,85,247,0.5)',
+      '--glass-edge': 'rgba(255,255,255,0.5)',
+    }
+  },
+  glassLight: {
+    name: 'Liquid Glass Light',
+    desc: 'Frosted panels over a soft pastel glow',
+    style: 'glass',
+    vars: {
+      '--bg-primary': '#E7EEFB',
+      '--bg-secondary': 'rgba(255,255,255,0.5)',
+      '--bg-sidebar': 'rgba(255,255,255,0.42)',
+      '--bg-header': 'rgba(255,255,255,0.55)',
+      '--bg-card': 'rgba(255,255,255,0.55)',
+      '--bg-input': 'rgba(255,255,255,0.55)',
+      '--bg-hover': 'rgba(255,255,255,0.75)',
+      '--border-color': 'rgba(255,255,255,0.75)',
+      '--border-light': 'rgba(255,255,255,0.55)',
+      '--text-primary': '#1E293B',
+      '--text-secondary': '#475569',
+      '--text-muted': '#64748B',
+      '--text-faint': '#94A3B8',
+      '--accent': '#6366F1',
+      '--accent-hover': '#4F46E5',
+      '--accent-bg': 'rgba(99,102,241,0.14)',
+      '--accent-text': '#4F46E5',
+      '--success': '#059669',
+      '--warning': '#D97706',
+      '--danger': '#E11D48',
+      '--shadow': 'rgba(30,41,59,0.1)',
+      '--shadow-lg': 'rgba(30,41,59,0.18)',
+      '--radius-sm': '12px',
+      '--radius-md': '16px',
+      '--radius-lg': '22px',
+      '--border-width': '1px',
+      '--card-border-width': '1px',
+      '--header-bg': 'rgba(255,255,255,0.55)',
+      '--sidebar-bg': 'rgba(255,255,255,0.42)',
+      '--card-blur': '22px',
+      '--card-opacity': '1',
+      '--font-weight-normal': '400',
+      '--font-weight-bold': '600',
+      '--font-weight-heavy': '700',
+      '--header-border': '1px solid rgba(255,255,255,0.8)',
+      '--sidebar-border': '1px solid rgba(255,255,255,0.6)',
+      '--card-shadow': '0 8px 32px rgba(30,41,59,0.12), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 0 0 1px rgba(255,255,255,0.4)',
+      '--card-hover-shadow': '0 16px 48px rgba(30,41,59,0.18), inset 0 1px 0 rgba(255,255,255,1), inset 0 0 0 1px rgba(255,255,255,0.6)',
+      '--btn-shadow': '0 4px 16px rgba(99,102,241,0.28)',
+      // Liquid glass colour field (drifting blobs the frosted panels refract)
+      '--glass-c1': 'rgba(125,180,255,0.55)',
+      '--glass-c2': 'rgba(255,170,210,0.5)',
+      '--glass-c3': 'rgba(150,230,200,0.55)',
+      '--glass-edge': 'rgba(255,255,255,0.9)',
     }
   },
   neon: {
@@ -790,7 +846,7 @@ const COLOR_THEMES = {
 };
 
 // Which themes count as dark (for scrollbar styling, etc.)
-const DARK_THEMES = ['dark', 'midnight', 'ocean', 'highContrast', 'glass', 'neon', 'nord', 'sunset', 'grunge', 'hacker'];
+const DARK_THEMES = ['dark', 'midnight', 'ocean', 'highContrast', 'glassDark', 'neon', 'nord', 'sunset', 'grunge', 'hacker'];
 
 function applyTheme(themeId) {
   const theme = COLOR_THEMES[themeId];
@@ -868,14 +924,14 @@ function renderSettings() {
       <div class="settings-section">
         <h3 class="settings-section-title">Note Card Size</h3>
         <div class="settings-option-row">
-          ${['compact', 'medium', 'large'].map(size => `
+          ${[['xs', 'Extra Small'], ['compact', 'Compact'], ['medium', 'Medium'], ['large', 'Large']].map(([size, label]) => `
             <button class="settings-size-btn ${size === noteSize ? 'active' : ''}" data-size="${size}">
               <div class="settings-size-preview settings-size-${size}">
                 <div class="settings-size-lines">
                   <div></div><div></div><div></div>
                 </div>
               </div>
-              <span>${size.charAt(0).toUpperCase() + size.slice(1)}</span>
+              <span>${label}</span>
             </button>
           `).join('')}
         </div>
@@ -899,6 +955,11 @@ function renderSettings() {
             <span class="settings-toggle-label">Compact sidebar</span>
             <span class="settings-toggle-desc">Reduce sidebar padding and font sizes</span>
             <input type="checkbox" class="settings-checkbox" id="settings-compact-sidebar" ${dataManager.settings.compactSidebar === true ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Check for updates on startup</span>
+            <span class="settings-toggle-desc">Scan the app repository for new versions and prompt to update</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-auto-update" ${dataManager.settings.autoCheckUpdates !== false ? 'checked' : ''}>
           </label>
           <label class="settings-toggle-row">
             <span class="settings-toggle-label">3D Printer Support</span>
@@ -1119,6 +1180,9 @@ function renderSettings() {
   document.getElementById('settings-compact-sidebar').addEventListener('change', (e) => {
     dataManager.updateSettings({ compactSidebar: e.target.checked });
     document.body.classList.toggle('compact-sidebar', e.target.checked);
+  });
+  document.getElementById('settings-auto-update').addEventListener('change', (e) => {
+    dataManager.updateSettings({ autoCheckUpdates: e.target.checked });
   });
   document.getElementById('settings-printer-enabled').addEventListener('change', async (e) => {
     const enabled = e.target.checked;
@@ -1407,7 +1471,9 @@ function updatePrinterTabVisibility() {}
 
 // Apply saved theme on load
 function initTheme() {
-  const theme = dataManager.settings.theme || 'default';
+  let theme = dataManager.settings.theme || 'default';
+  // The old single 'glass' theme was split into Liquid Glass light/dark.
+  if (theme === 'glass') { theme = 'glassDark'; dataManager.settings.theme = theme; }
   applyTheme(theme);
   const noteSize = dataManager.settings.noteSize || 'medium';
   document.body.dataset.noteSize = noteSize;
