@@ -1345,6 +1345,9 @@ body.theme-dark .sticky-note .note-link-chip:hover {
   font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 140px; overflow-y: auto;
   background: var(--bg-input, rgba(148,163,184,0.12)); color: var(--text-secondary, #475569); }
 .update-output.update-error { color: #ef4444; }
+.update-progress { height: 10px; border-radius: 99px; background: var(--bg-input, rgba(148,163,184,0.18)); overflow: hidden; margin: 6px 0 4px; }
+.update-progress-bar { height: 100%; width: 0; border-radius: 99px; background: var(--accent, #3B82F6); transition: width 0.15s ease; }
+.update-progress-pct { font-size: 12px; color: var(--text-muted, #64748B); text-align: right; font-variant-numeric: tabular-nums; }
 .update-skip-link { display: block; margin: 14px 0 0; background: none; border: none; cursor: pointer;
   font-size: 12px; color: var(--text-muted, #64748B); text-decoration: underline; padding: 0; }
 .update-skip-link:hover { color: var(--text-primary, #1E293B); }

@@ -96,6 +96,9 @@ contextBridge.exposeInMainWorld('api', {
     apply: () => ipcRenderer.invoke('updates:apply'),
     skip: (sha) => ipcRenderer.invoke('updates:skip', sha),
     openRepo: () => ipcRenderer.invoke('updates:openRepo'),
+    download: () => ipcRenderer.invoke('updates:download'),
+    runInstaller: (p) => ipcRenderer.invoke('updates:runInstaller', p),
+    onProgress: (cb) => ipcRenderer.on('updates:progress', (e, d) => cb(d)),
     restart: () => ipcRenderer.invoke('updates:restart')
   },
   // Contribute — submit local changes to the canonical repo as a GitHub PR

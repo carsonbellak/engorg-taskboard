@@ -56,11 +56,7 @@ const updateChecker = (() => {
     if (res.isGitRepo) {
       actions.push({ label: 'Update now', primary: true, onClick: (ov, box) => applyGitUpdate(ov, box, res) });
     } else {
-      actions.push({ label: 'Open repo', primary: true, onClick: async (ov) => {
-        await window.api.updates.openRepo();
-        if (latest.sha) window.api.updates.skip(latest.sha); // assume they'll update; stop nagging
-        closeModal(ov);
-      } });
+      actions.push({ label: 'Download & Install', primary: true, onClick: (ov, box) => downloadAndInstall(ov, box, res) });
     }
 
     const { box } = buildModal({ title: 'Update available', bodyHtml, actions });
@@ -97,6 +93,51 @@ const updateChecker = (() => {
       addActions(actions, [
         { label: 'Close', onClick: () => closeModal(ov) },
         { label: 'Open repo', primary: true, onClick: async () => { await window.api.updates.openRepo(); closeModal(ov); } },
+      ]);
+    }
+  }
+
+  // Packaged-build update: download the latest installer in-app (with a progress
+  // bar) and run it — no trip to GitHub.
+  let progressBound = false;
+  async function downloadAndInstall(ov, box, res) {
+    const body = box.querySelector('.update-modal-body');
+    const actions = box.querySelector('.modal-actions');
+    const skipLink = box.querySelector('.update-skip-link');
+    if (skipLink) skipLink.remove();
+    body.innerHTML = `<p>Downloading the latest version…</p>
+      <div class="update-progress"><div class="update-progress-bar" id="update-progress-bar"></div></div>
+      <div class="update-progress-pct" id="update-progress-pct">0%</div>`;
+    actions.innerHTML = '';
+
+    if (!progressBound) { // register the progress listener once
+      progressBound = true;
+      window.api.updates.onProgress(({ pct }) => {
+        const bar = document.getElementById('update-progress-bar');
+        const pctEl = document.getElementById('update-progress-pct');
+        if (bar) bar.style.width = (pct || 0) + '%';
+        if (pctEl) pctEl.textContent = (pct != null ? pct : 0) + '%';
+      });
+    }
+
+    const latest = res.latest || {};
+    const r = await window.api.updates.download();
+    if (r && r.ok) {
+      body.innerHTML = `<p>Download complete. The app will close so the installer can apply the update, then reopen.</p>`;
+      addActions(actions, [
+        { label: 'Later', onClick: () => closeModal(ov) },
+        { label: 'Install & restart', primary: true, onClick: () => {
+          // Advance the baseline so the freshly installed build doesn't re-prompt.
+          if (latest.sha) window.api.updates.skip(latest.sha);
+          window.api.updates.runInstaller(r.path);
+        } },
+      ]);
+    } else {
+      const msg = (r && r.error) || 'The download failed.';
+      body.innerHTML = `<p>Couldn't download the update:</p><pre class="update-output update-error">${esc(msg)}</pre>`;
+      addActions(actions, [
+        { label: 'Close', onClick: () => closeModal(ov) },
+        { label: 'Retry', primary: true, onClick: () => downloadAndInstall(ov, box, res) },
       ]);
     }
   }

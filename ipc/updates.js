@@ -13,12 +13,15 @@
 // All GitHub calls are unauthenticated (public repo). Failures are non-fatal —
 // the checker reports it couldn't determine an update and the UI stays quiet.
 
-const { ipcMain, app, shell } = require('electron');
+const { ipcMain, app, shell, BrowserWindow } = require('electron');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const config = require('../config');
+
+// Rolling release the CI publishes EngOrg-Setup.exe to on every push.
+const INSTALLER_URL = `${config.CONTRIB_REPO_URL}/releases/download/latest/EngOrg-Setup.exe`;
 
 const APP_ROOT = path.join(__dirname, '..');
 const STATE_FILE = path.join(config.DATA_DIR, 'update_state.json');
@@ -130,6 +133,55 @@ module.exports = function registerUpdates() {
   ipcMain.handle('updates:openRepo', async () => {
     try { await shell.openExternal(config.CONTRIB_REPO_URL); return { ok: true }; }
     catch (err) { return { error: err.message }; }
+  });
+
+  // Download the latest installer in-app (with progress) so the user never has to
+  // visit GitHub. Returns the saved path; the renderer then calls updates:runInstaller.
+  ipcMain.handle('updates:download', async () => {
+    const dest = path.join(app.getPath('temp'), 'EngOrg-Setup.exe');
+    const win = BrowserWindow.getAllWindows()[0];
+    try {
+      const res = await fetch(INSTALLER_URL, { cache: 'no-store', redirect: 'follow' });
+      if (!res.ok || !res.body) return { error: `Download failed (${res.status}).` };
+      const total = Number(res.headers.get('content-length')) || 0;
+
+      await fsp.mkdir(path.dirname(dest), { recursive: true });
+      const fileStream = fs.createWriteStream(dest);
+      const reader = res.body.getReader();
+      let received = 0, lastPct = -1;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          await new Promise((resolve, reject) => fileStream.write(Buffer.from(value), (e) => (e ? reject(e) : resolve())));
+          received += value.length;
+          if (win && total) {
+            const pct = Math.floor((received / total) * 100);
+            if (pct !== lastPct) { lastPct = pct; win.webContents.send('updates:progress', { received, total, pct }); }
+          }
+        }
+      } finally {
+        await new Promise((resolve) => fileStream.end(resolve));
+      }
+      if (total && received < total) return { error: 'Download was incomplete — try again.' };
+      return { ok: true, path: dest };
+    } catch (err) {
+      try { fs.existsSync(dest) && fs.unlinkSync(dest); } catch {}
+      return { error: err.message };
+    }
+  });
+
+  // Launch the downloaded installer (detached) and quit so it can replace the
+  // running files. The installer reinstalls to C:\Assistant and relaunches the app.
+  ipcMain.handle('updates:runInstaller', async (e, installerPath) => {
+    try {
+      const p = installerPath || path.join(app.getPath('temp'), 'EngOrg-Setup.exe');
+      if (!fs.existsSync(p)) return { error: 'Installer not found — download it again.' };
+      const child = spawn(p, [], { detached: true, stdio: 'ignore' });
+      child.unref();
+      setTimeout(() => { app.quit(); }, 800);
+      return { ok: true };
+    } catch (err) { return { error: err.message }; }
   });
 
   ipcMain.handle('updates:restart', async () => { app.relaunch(); app.exit(0); });
