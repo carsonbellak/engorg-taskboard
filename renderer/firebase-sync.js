@@ -253,10 +253,12 @@ class FirebaseSync {
       this.listeners.push(unsub);
     }
 
-    // Timers — top-level collection, not nested under users/{uid}/data/
+    // Timers — top-level collection, not nested under users/{uid}/data/.
+    // No orderBy: a bare uid equality query uses Firestore's automatic
+    // single-field index, so it works even if the composite (uid, expiresAt)
+    // index hasn't been deployed. We sort client-side instead.
     const timerUnsub = this.db.collection('timers')
       .where('uid', '==', this.user.uid)
-      .orderBy('expiresAt', 'asc')
       .onSnapshot(snap => {
         const all = snap.docs.map(d => ({
           id: d.id,
@@ -265,7 +267,8 @@ class FirebaseSync {
           startedAt: d.data().startedAt?.toDate?.() || null
         }));
         window._timers = {
-          active: all.filter(t => t.status === 'active'),
+          active: all.filter(t => t.status === 'active')
+            .sort((a, b) => (a.expiresAt || 0) - (b.expiresAt || 0)),
           recent: all.filter(t => t.status !== 'active')
             .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))
             .slice(0, 20)

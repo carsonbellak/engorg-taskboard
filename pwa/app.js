@@ -280,9 +280,10 @@ function setupListeners(uid) {
   });
   listeners.push(unsubPrinter);
 
+  // No orderBy → uses the automatic single-field uid index (works without the
+  // composite index being deployed); sort client-side instead.
   const unsubTimers = db.collection('timers')
     .where('uid', '==', uid)
-    .orderBy('expiresAt', 'asc')
     .onSnapshot(snap => {
       const all = snap.docs.map(d => ({
         id: d.id,
@@ -290,7 +291,8 @@ function setupListeners(uid) {
         expiresAt: d.data().expiresAt?.toDate?.() || null,
         startedAt: d.data().startedAt?.toDate?.() || null
       }));
-      timers.active = all.filter(t => t.status === 'active');
+      timers.active = all.filter(t => t.status === 'active')
+        .sort((a, b) => (a.expiresAt || 0) - (b.expiresAt || 0));
       timers.recent = all
         .filter(t => t.status !== 'active')
         .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0))

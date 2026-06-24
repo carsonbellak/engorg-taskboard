@@ -2,6 +2,34 @@
 
 let _timerCountdownInterval = null;
 const _CIRC = 2 * Math.PI * 54; // SVG ring circumference (r=54)
+const _notifiedTimers = new Set(); // ids we've already alerted for (avoid repeat)
+
+// Fire a desktop notification + audible beeps when a timer reaches zero.
+function _onTimerExpired(label) {
+  try {
+    if (typeof Notification !== 'undefined') {
+      if (Notification.permission === 'granted') new Notification('⏱ Timer finished', { body: label });
+      else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(p => { if (p === 'granted') new Notification('⏱ Timer finished', { body: label }); });
+      }
+    }
+  } catch {}
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = 880;
+    osc.connect(gain); gain.connect(ctx.destination);
+    const t0 = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t0);
+    for (let i = 0; i < 3; i++) { // three short beeps
+      const s = t0 + i * 0.32;
+      gain.gain.setValueAtTime(0.2, s);
+      gain.gain.exponentialRampToValueAtTime(0.0001, s + 0.25);
+    }
+    osc.start(t0); osc.stop(t0 + 1.0);
+    osc.onended = () => { try { ctx.close(); } catch {} };
+  } catch {}
+}
 
 function renderTimers() {
   const container = document.getElementById('view-timers');
@@ -162,17 +190,33 @@ async function _createTimer(label, durationSeconds) {
   const expiresAt = new Date(now.getTime() + durationSeconds * 1000);
   const timerId  = `timer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-  await firebaseSync.db.doc(`timers/${timerId}`).set({
-    uid: user.uid,
-    label,
-    durationSeconds,
-    startedAt:        firebase.firestore.Timestamp.fromDate(now),
-    expiresAt:        firebase.firestore.Timestamp.fromDate(expiresAt),
-    status:           'active',
-    notificationSent: false,
-    createdAt:        now.toISOString(),
-    createdVia:       'desktop'
-  });
+  // Optimistic local add: show the timer & start its countdown immediately,
+  // without waiting for the Firestore listener to round-trip (and so it still
+  // works if cloud sync is briefly unavailable). The listener reconciles later.
+  window._timers = window._timers || { active: [], recent: [] };
+  window._timers.active = [...window._timers.active, {
+    id: timerId, label, durationSeconds, status: 'active', expiresAt, startedAt: now,
+  }].sort((a, b) => (a.expiresAt || 0) - (b.expiresAt || 0));
+  window.dispatchEvent(new CustomEvent('timers-changed'));
+
+  try {
+    await firebaseSync.db.doc(`timers/${timerId}`).set({
+      uid: user.uid,
+      label,
+      durationSeconds,
+      startedAt:        firebase.firestore.Timestamp.fromDate(now),
+      expiresAt:        firebase.firestore.Timestamp.fromDate(expiresAt),
+      status:           'active',
+      notificationSent: false,
+      createdAt:        now.toISOString(),
+      createdVia:       'desktop'
+    });
+  } catch (err) {
+    // Roll back the optimistic entry only if the write genuinely failed.
+    window._timers.active = window._timers.active.filter(t => t.id !== timerId);
+    window.dispatchEvent(new CustomEvent('timers-changed'));
+    throw err;
+  }
 }
 
 function _startCountdown() {
@@ -183,7 +227,15 @@ function _startCountdown() {
     document.querySelectorAll('#view-timers .timer-card-countdown[data-expires]').forEach(el => {
       const secsLeft = Math.max(0, Math.round((parseInt(el.dataset.expires) - now) / 1000));
       el.textContent = fmtCountdown(secsLeft);
-      if (secsLeft === 0) el.closest('.timer-card')?.classList.add('timer-card-expired');
+      if (secsLeft === 0) {
+        const card = el.closest('.timer-card');
+        card?.classList.add('timer-card-expired');
+        const id = card?.dataset.id;
+        if (id && !_notifiedTimers.has(id)) {
+          _notifiedTimers.add(id);
+          _onTimerExpired(card?.querySelector('.timer-card-label')?.textContent || 'Timer');
+        }
+      }
     });
 
     document.querySelectorAll('#view-timers .timer-ring-fg[data-expires]').forEach(ring => {
@@ -200,6 +252,25 @@ function _startCountdown() {
 function stopTimerCountdown() {
   if (_timerCountdownInterval) { clearInterval(_timerCountdownInterval); _timerCountdownInterval = null; }
 }
+
+// Always-on watcher: fires the expiry alert even when the Timers tab isn't open
+// (the DOM countdown above only runs while the view is rendered).
+let _globalTimerWatch = null;
+function _ensureGlobalTimerWatch() {
+  if (_globalTimerWatch) return;
+  _globalTimerWatch = setInterval(() => {
+    const active = (window._timers && window._timers.active) || [];
+    const now = Date.now();
+    for (const t of active) {
+      const expMs = t.expiresAt ? (t.expiresAt.getTime ? t.expiresAt.getTime() : +new Date(t.expiresAt)) : 0;
+      if (expMs && expMs <= now && t.id && !_notifiedTimers.has(t.id)) {
+        _notifiedTimers.add(t.id);
+        _onTimerExpired(t.label || 'Timer');
+      }
+    }
+  }, 1000);
+}
+_ensureGlobalTimerWatch();
 
 function fmtCountdown(seconds) {
   const s = Math.max(0, seconds);
