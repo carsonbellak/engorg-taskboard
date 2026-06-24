@@ -509,9 +509,11 @@ const printerController = (() => {
     }
   }
 
-  // === Snapshot Feed (low-rate fallback) ===
-  // Captures occasional frames for /snapshot endpoint (OrcaSlicer thumbnails, cloud sync).
-  // Fluidd now uses WebRTC directly for live video — this is just for compatibility.
+  // === Snapshot Feed ===
+  // Decodes the live WebRTC video to JPEG frames and pushes them to the main process
+  // (state.latestCameraFrame), which serves them at /snapshot and /stream. This is the
+  // ONLY camera source Fluidd and OrcaSlicer see — the K1C allows just one WebRTC peer,
+  // and the desktop owns it, so everything else consumes this MJPEG feed instead.
   function startSnapshotFeed(videoEl) {
     stopSnapshotFeed();
     const canvas = document.createElement('canvas');
@@ -525,7 +527,7 @@ const printerController = (() => {
         const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
         window.api.printer.sendCameraFrame(dataUrl);
       }
-    }, 1000); // 1fps — just for thumbnails/cloud, Fluidd uses WebRTC for live video
+    }, 100); // ~10fps — matches the /stream push cadence so Fluidd shows smooth video
   }
 
   function stopSnapshotFeed() {

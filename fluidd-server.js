@@ -38,16 +38,19 @@ const MIME_TYPES = {
   '.ttf': 'font/ttf', '.webmanifest': 'application/manifest+json',
 };
 
-// Webcam config object returned for all webcam API/WS calls
-// Uses webrtc-go2rtc: Fluidd opens WebSocket to /api/ws, sends SDP offer + ICE candidates,
-// we buffer candidates then relay the complete offer to K1C (port 8000), return the answer.
-// Native H.264 WebRTC video direct from K1C — zero CPU encoding overhead.
+// Webcam config object returned for all webcam API/WS calls.
+// Uses MJPEG (not WebRTC): the K1C's MetaRTC endpoint only serves ONE WebRTC peer
+// at a time, and the desktop printer page holds that single slot open continuously
+// (background bridge + auto-reconnect). If Fluidd also tried WebRTC (service
+// 'webrtc-go2rtc'), the K1C would refuse its second peer and Fluidd would error.
+// Instead Fluidd reads the /stream + /snapshot endpoints, which we already feed from
+// the desktop's decoded WebRTC frames (state.latestCameraFrame) — no second peer needed.
 const WEBCAM_ENTRY = {
-  name: 'K1C Camera', location: 'printer', service: 'webrtc-go2rtc',
+  name: 'K1C Camera', location: 'printer', service: 'mjpegstreamer-adaptive',
   enabled: true, icon: 'mdiWebcam', target_fps: 15, target_fps_idle: 15,
-  stream_url: '/', snapshot_url: '/snapshot',
+  stream_url: '/stream', snapshot_url: '/snapshot',
   flip_horizontal: false, flip_vertical: false, rotation: 0,
-  aspect_ratio: '16:9', extra_data: {}, source: 'config', uid: 'k1c-cam-go2rtc'
+  aspect_ratio: '16:9', extra_data: {}, source: 'config', uid: 'k1c-cam-mjpeg'
 };
 
 // WebSocket server for go2rtc signaling (noServer mode — we handle upgrade manually)
