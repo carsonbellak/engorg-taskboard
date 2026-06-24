@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('api', {
     selectZips: () => ipcRenderer.invoke('kicad:selectZips'),
     selectOutputFolder: () => ipcRenderer.invoke('kicad:selectOutputFolder'),
     selectExistingLibrary: () => ipcRenderer.invoke('kicad:selectExistingLibrary'),
+    resolveLibrary: (opts) => ipcRenderer.invoke('kicad:resolveLibrary', opts),
     selectStepFile: () => ipcRenderer.invoke('kicad:selectStepFile'),
     getDigikeyDefaults: () => ipcRenderer.invoke('kicad:getDigikeyDefaults'),
     extractZips: (opts) => ipcRenderer.invoke('kicad:extractZips', opts),
