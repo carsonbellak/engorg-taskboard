@@ -1311,6 +1311,19 @@ body.theme-dark .sticky-note .note-link-chip:hover {
 
 .modal.hidden { display: none; }
 
+/* Frameless-window drag-region fix: the title bar + header are draggable
+   (-webkit-app-region: drag). Chromium hit-tests drag regions at the OS level
+   and IGNORES z-index, so a draggable header can swallow clicks on a modal
+   control rendered on top of it (e.g. the project-name input near the top of a
+   centered modal) — making it impossible to click/type "sometimes". Killing the
+   drag region whenever any modal is open removes the conflict entirely; there's
+   no reason to drag the window while a modal is up. */
+body:has(.modal:not(.hidden)) #titlebar,
+body:has(.modal:not(.hidden)) #titlebar .titlebar-drag,
+body:has(.modal:not(.hidden)) #header {
+  -webkit-app-region: no-drag;
+}
+
 .modal-box {
   background: var(--bg-card, #FFFFFF);
   border-radius: 16px;
@@ -1386,10 +1399,6 @@ body.theme-dark .sticky-note .note-link-chip:hover {
   background: var(--bg-secondary, #F8FAFC);
   transition: border-color 0.15s;
   box-sizing: border-box;
-  -webkit-app-region: no-drag;
-  pointer-events: auto;
-  position: relative;
-  z-index: 1;
 }
 
 .modal-box textarea {
