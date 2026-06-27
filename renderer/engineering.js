@@ -48,8 +48,15 @@ const engineeringUtilities = (() => {
       activate() { uartBridge.mount(document.getElementById('view-uart-bridge')); uartBridge.activate(); },
       deactivate() { uartBridge.deactivate(); },
     },
+    'git-manager': {
+      id: 'git-manager', name: 'Git Manager', icon: '🌿',
+      description: 'GitHub-Desktop-style git client — commit, branch, fetch/pull/push/sync, stash, history and diffs with buttons, plus an optional raw git terminal.',
+      paneId: 'eng-util-git-manager',
+      activate() { gitManager.mount(document.getElementById('view-git-manager')); gitManager.activate(); },
+      deactivate() { gitManager.deactivate(); },
+    },
   };
-  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge'];
+  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {

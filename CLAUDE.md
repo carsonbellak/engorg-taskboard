@@ -69,7 +69,7 @@ The in-app equivalent (for non-maintainers) is Settings → Contribute → "Subm
 | `printer.js` | Printer tab — Moonraker status, camera WebRTC, print controls |
 | `slicer.js` | Slicer tab — model select, profile picker, slice and send |
 | `cad-viewer.js` | 3D model viewer — STL/OBJ/GLTF via Three.js, KiCad SVG/GLB via kicad-cli |
-| `file-viewer.js` | File browser — directory tree, text/binary viewer, Git panel, batch rename, content search |
+| `file-viewer.js` | File browser — directory tree, text/binary viewer, batch rename, content search, and **Git integration**: branch indicator, commit panel, per-file status badges (incl. conflicts), and a right-click git menu (status-aware Stage/Unstage, View Diff modal, Discard, **Open in Git Manager** → `gitManager.openRepo`). Badges/menu read `window.api.git.status` (cached as `gitStatus`/`gitFileMap`). |
 | `settings.js` | Settings tab — persists to `settings.json` |
 | `stats.js` | Stats/analytics tab |
 | `noteboard.js` | Sticky notes board |
@@ -84,6 +84,7 @@ The in-app equivalent (for non-maintainers) is Settings → Contribute → "Subm
 | `titlebar.js` | Custom window titlebar (frameless window controls) |
 | `wifi-checker.js` | Wi-Fi / network diagnostics utility |
 | `uart-bridge.js` | Serial/UART bridge utility |
+| `git-manager.js` | **Git Manager** utility — GitHub-Desktop-style git client: repo + branch dropdowns, Fetch/Pull/Push/Sync, stage checkboxes, commit box (with **amend**), History + diff viewer with a **right-click commit context menu** (checkout/branch/tag/cherry-pick/revert/reset/copy-SHA), **conflict resolution** (ours/theirs/edit/continue/abort banner), stash/tags/remotes **manager dialogs**, optional **auto-fetch** (5 min), one-click **Upload folder** / **Download folder**, plus a raw git terminal. Tracked repos persist in `settings.json` (`gitRepos`, `gitLastRepo`); auto-fetch toggle in `gitAutoFetch`. Mounts in the Engineering Utilities tab via the `git-manager` BUILTIN. Backed by `window.api.git.*`. Desktop-only. |
 | `components/add-note-modal.js` | **`ModalManager`** — owns ALL modals: add/edit note, schedule event, **project**, category. (Despite the filename, this is the central modal controller, not just notes.) |
 | `components/sticky-note.js` | Sticky-note card rendering/helpers |
 | `components/project-manager.js` | Stub only — project CRUD actually lives in `ModalManager` (`add-note-modal.js`) |
@@ -180,12 +181,32 @@ All data is loaded/cached by `renderer/data.js` (`DataManager`, the global `data
 - `files:hasKicadCli()` → boolean
 
 ### Git
-- `git:status(dirPath)` → `{ branch, files: [{ path, status }], error? }`
-- `git:stage(filePath)` → true
-- `git:unstage(filePath)` → true
-- `git:commit(dirPath, message)` → string output
-- `git:diff(filePath)` → string diff
+All shell out to system `git` (no native deps). Network ops run with `GIT_TERMINAL_PROMPT=0` — auth relies on the OS credential manager. `dirPath` = repo working dir; paths in the `*Paths` variants are **repo-relative**.
+- `git:status(dirPath)` → `{ branch, files: [{ path, orig, status, index, work, staged, unstaged, untracked }], upstream, ahead, behind, staged[], unstaged[], error? }` (back-compat: `branch`, `files[].path`, `files[].status` preserved)
+- `git:branches(dirPath)` → `{ current, local: [{ name, current, upstream }], remote: [names], error? }`
+- `git:log(dirPath, limit=80)` → `{ commits: [{ hash, shortHash, author, email, date, subject, refs }], error? }`
+- `git:remotes(dirPath)` → `{ remotes: [{ name, url }], error? }`
 - `git:isRepo(dirPath)` → boolean
+- `git:diff(filePath)` → string diff · `git:diffPath(dirPath, relPath, staged)` → string diff (untracked files shown via `--no-index`)
+- `git:stage(filePath)` / `git:unstage(filePath)` → true (resolve repo root from the file)
+- `git:stagePaths(dirPath, paths[])` / `git:unstagePaths(dirPath, paths[])` / `git:stageAll(dirPath)` / `git:unstageAll(dirPath)` → true
+- `git:discardPaths(dirPath, paths[])` / `git:discardAll(dirPath)` → true (restore + clean)
+- `git:commit(dirPath, message, { amend?, stageAll? })` → string · `git:undoLastCommit(dirPath)` → true (soft reset, keeps changes staged)
+- `git:createBranch(dirPath, name, checkout=true)` / `git:checkout(dirPath, name)` / `git:deleteBranch(dirPath, name, force)` / `git:renameBranch(dirPath, old, new)` / `git:merge(dirPath, branch)` → true/string
+- `git:stash(dirPath, message?)` / `git:stashList(dirPath)` / `git:stashApply(dirPath, ref, drop=true)` / `git:stashDrop(dirPath, ref)`
+- **In-progress ops / conflicts**: `git:mergeStatus(dirPath)` → `{ state: 'merge'|'rebase'|'cherry-pick'|'revert'|null }` (reads the git dir for MERGE_HEAD etc.) · `git:resolvePaths(dirPath, paths[], 'ours'|'theirs')` (checkout side + add) · `git:abort(dirPath, state)` · `git:continueOp(dirPath, state)` (commits/continues with `GIT_EDITOR=true`). Conflicted files are flagged `conflicted:true` in `git:status`.
+- **Commit-level ops** (History context menu): `git:revert` · `git:cherryPick` · `git:reset(dirPath, hash, 'soft'|'mixed'|'hard')` · `git:checkoutCommit` (detached) · `git:branchAt(dirPath, name, hash)` · `git:lastCommitMessage(dirPath)` (for amend prefill)
+- **Tags**: `git:tags(dirPath)` → `{ tags: [{ name, subject }] }` · `git:tagAt(dirPath, name, hash?, message?)` (annotated if message) · `git:deleteTag` · `git:pushTag`
+- **Remotes (write)**: `git:removeRemote` · `git:renameRemote` · `git:setRemoteUrl`
+- `git:fetch(dirPath)` / `git:pull(dirPath, { rebase? })` / `git:push(dirPath, { setUpstream?, remote?, branch?, force?, tags? })` / `git:sync(dirPath)` (fetch → pull → push) → string
+- `git:init(dirPath)` → true · `git:clone(parentDir, url, dirName?)` → `{ path, output }` · `git:addRemote(dirPath, name, url)` → true
+- **Folder upload/download** (one-folder workflows in the Git Manager):
+  - `git:uploadFolder(repoDir, srcFolder, { subfolder?, commitMessage?, push? })` → `{ dest, output }` — recursively copy a local folder INTO the repo, then `add -A` + commit (+ push)
+  - `git:publishFolder(srcFolder, remoteUrl, { branch?, commitMessage? })` → `{ path, branch, output }` — init the folder as a repo, add `origin`, commit, `push -u`
+  - `git:extractFolder(srcFolder, destParent)` → `{ dest }` — recursively copy a folder out of the repo to a destination
+  - `git:sparseDownload(remoteUrl, subfolder, destParent, { branch? })` → `{ dest }` — sparse-checkout just one subfolder from a remote, copy it out (temp clone auto-cleaned)
+  - `git:listFolders(dirPath)` → `{ folders: [name] }` — immediate subfolders (excludes `.git`)
+- `git:raw(dirPath, commandLine)` → `{ stdout, stderr, ok, error? }` (powers the in-utility git terminal; a leading `git` is tolerated)
 
 ### Auth
 - `auth:googleSignIn()` → `{ idToken, accessToken }`

@@ -176,11 +176,74 @@ contextBridge.exposeInMainWorld('api', {
   },
   // Git integration
   git: {
+    // inspection
     status: (dir) => ipcRenderer.invoke('git:status', dir),
+    branches: (dir) => ipcRenderer.invoke('git:branches', dir),
+    log: (dir, limit) => ipcRenderer.invoke('git:log', dir, limit),
+    remotes: (dir) => ipcRenderer.invoke('git:remotes', dir),
+    isRepo: (dir) => ipcRenderer.invoke('git:isRepo', dir),
+    diff: (path) => ipcRenderer.invoke('git:diff', path),
+    diffPath: (dir, relPath, staged) => ipcRenderer.invoke('git:diffPath', dir, relPath, staged),
+    // staging
     stage: (path) => ipcRenderer.invoke('git:stage', path),
     unstage: (path) => ipcRenderer.invoke('git:unstage', path),
-    commit: (dir, msg) => ipcRenderer.invoke('git:commit', dir, msg),
-    diff: (path) => ipcRenderer.invoke('git:diff', path),
-    isRepo: (dir) => ipcRenderer.invoke('git:isRepo', dir)
+    stagePaths: (dir, paths) => ipcRenderer.invoke('git:stagePaths', dir, paths),
+    unstagePaths: (dir, paths) => ipcRenderer.invoke('git:unstagePaths', dir, paths),
+    stageAll: (dir) => ipcRenderer.invoke('git:stageAll', dir),
+    unstageAll: (dir) => ipcRenderer.invoke('git:unstageAll', dir),
+    discardPaths: (dir, paths) => ipcRenderer.invoke('git:discardPaths', dir, paths),
+    discardAll: (dir) => ipcRenderer.invoke('git:discardAll', dir),
+    // commit / history
+    commit: (dir, msg, opts) => ipcRenderer.invoke('git:commit', dir, msg, opts),
+    undoLastCommit: (dir) => ipcRenderer.invoke('git:undoLastCommit', dir),
+    // branching
+    createBranch: (dir, name, checkout) => ipcRenderer.invoke('git:createBranch', dir, name, checkout),
+    checkout: (dir, name) => ipcRenderer.invoke('git:checkout', dir, name),
+    deleteBranch: (dir, name, force) => ipcRenderer.invoke('git:deleteBranch', dir, name, force),
+    renameBranch: (dir, oldName, newName) => ipcRenderer.invoke('git:renameBranch', dir, oldName, newName),
+    merge: (dir, branch) => ipcRenderer.invoke('git:merge', dir, branch),
+    // stash
+    stash: (dir, msg) => ipcRenderer.invoke('git:stash', dir, msg),
+    stashList: (dir) => ipcRenderer.invoke('git:stashList', dir),
+    stashApply: (dir, ref, drop) => ipcRenderer.invoke('git:stashApply', dir, ref, drop),
+    stashDrop: (dir, ref) => ipcRenderer.invoke('git:stashDrop', dir, ref),
+    // network
+    fetch: (dir) => ipcRenderer.invoke('git:fetch', dir),
+    pull: (dir, opts) => ipcRenderer.invoke('git:pull', dir, opts),
+    push: (dir, opts) => ipcRenderer.invoke('git:push', dir, opts),
+    sync: (dir) => ipcRenderer.invoke('git:sync', dir),
+    // lifecycle
+    init: (dir) => ipcRenderer.invoke('git:init', dir),
+    clone: (parentDir, url, dirName) => ipcRenderer.invoke('git:clone', parentDir, url, dirName),
+    addRemote: (dir, name, url) => ipcRenderer.invoke('git:addRemote', dir, name, url),
+    // in-progress ops / conflict resolution
+    mergeStatus: (dir) => ipcRenderer.invoke('git:mergeStatus', dir),
+    resolvePaths: (dir, paths, side) => ipcRenderer.invoke('git:resolvePaths', dir, paths, side),
+    abort: (dir, state) => ipcRenderer.invoke('git:abort', dir, state),
+    continueOp: (dir, state) => ipcRenderer.invoke('git:continueOp', dir, state),
+    // commit-level operations
+    revert: (dir, hash) => ipcRenderer.invoke('git:revert', dir, hash),
+    cherryPick: (dir, hash) => ipcRenderer.invoke('git:cherryPick', dir, hash),
+    reset: (dir, hash, mode) => ipcRenderer.invoke('git:reset', dir, hash, mode),
+    checkoutCommit: (dir, hash) => ipcRenderer.invoke('git:checkoutCommit', dir, hash),
+    branchAt: (dir, name, hash) => ipcRenderer.invoke('git:branchAt', dir, name, hash),
+    lastCommitMessage: (dir) => ipcRenderer.invoke('git:lastCommitMessage', dir),
+    // tags
+    tags: (dir) => ipcRenderer.invoke('git:tags', dir),
+    tagAt: (dir, name, hash, message) => ipcRenderer.invoke('git:tagAt', dir, name, hash, message),
+    deleteTag: (dir, name) => ipcRenderer.invoke('git:deleteTag', dir, name),
+    pushTag: (dir, name) => ipcRenderer.invoke('git:pushTag', dir, name),
+    // remotes (write)
+    removeRemote: (dir, name) => ipcRenderer.invoke('git:removeRemote', dir, name),
+    renameRemote: (dir, oldN, newN) => ipcRenderer.invoke('git:renameRemote', dir, oldN, newN),
+    setRemoteUrl: (dir, name, url) => ipcRenderer.invoke('git:setRemoteUrl', dir, name, url),
+    // folder upload / download
+    uploadFolder: (repoDir, srcFolder, opts) => ipcRenderer.invoke('git:uploadFolder', repoDir, srcFolder, opts),
+    publishFolder: (srcFolder, remoteUrl, opts) => ipcRenderer.invoke('git:publishFolder', srcFolder, remoteUrl, opts),
+    extractFolder: (srcFolder, destParent) => ipcRenderer.invoke('git:extractFolder', srcFolder, destParent),
+    sparseDownload: (remoteUrl, subfolder, destParent, opts) => ipcRenderer.invoke('git:sparseDownload', remoteUrl, subfolder, destParent, opts),
+    listFolders: (dir) => ipcRenderer.invoke('git:listFolders', dir),
+    // raw cli
+    raw: (dir, commandLine) => ipcRenderer.invoke('git:raw', dir, commandLine),
   }
 });

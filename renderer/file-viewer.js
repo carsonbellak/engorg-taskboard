@@ -1676,11 +1676,14 @@ class FileViewer {
       const branchEl = document.getElementById('fv-git-branch');
       if (status.branch) branchEl.textContent = '\u2387 ' + status.branch;
 
-      // Build status map: relative path -> status char
+      // Build status map: relative path -> status char (+ a richer map for the
+      // context menu: staged/unstaged/conflicted/untracked flags).
       this.gitStatus = {};
+      this.gitFileMap = {};
       if (status.files) {
         for (const f of status.files) {
           this.gitStatus[f.path] = f.status;
+          this.gitFileMap[f.path] = f;
         }
       }
 
@@ -1712,7 +1715,9 @@ class FileViewer {
 
       const badge = document.createElement('span');
       badge.className = 'fv-git-badge';
-      if (status === 'M' || status === 'MM' || status === 'AM') { badge.classList.add('modified'); badge.textContent = 'M'; }
+      const fo = this.gitFileMap && this.gitFileMap[relPath];
+      if (fo && fo.conflicted) { badge.classList.add('conflicted'); badge.textContent = '!'; }
+      else if (status === 'M' || status === 'MM' || status === 'AM') { badge.classList.add('modified'); badge.textContent = 'M'; }
       else if (status === 'A' || status === 'A ') { badge.classList.add('added'); badge.textContent = 'A'; }
       else if (status === 'D' || status === 'D ') { badge.classList.add('deleted'); badge.textContent = 'D'; }
       else if (status === '??' || status === '?') { badge.classList.add('untracked'); badge.textContent = '?'; }
@@ -2844,20 +2849,19 @@ class FileViewer {
         actions.push({ label: 'Send to Printer', action: () => this._sendToPrinter(item.path) });
       }
 
-      // Git stage/unstage
+      // Git actions — only for files with actual changes, status-aware.
       if (this.isGitRepo) {
-        actions.push({ label: 'Git Stage', action: async () => {
-          try { await window.api.git.stage(item.path); fvToast('Staged', 'success'); await this._refreshGitStatus(); } catch (e) { fvToast('Stage failed', 'error'); }
-        }});
-        actions.push({ label: 'Git Diff', action: async () => {
-          try {
-            const diff = await window.api.git.diff(item.path);
-            if (diff) {
-              // Open diff as a virtual text file in a new tab
-              this.paneManager.getActivePane().openFile(item.path + '.diff', { name: item.name + ' (diff)' }, true);
-            } else { fvToast('No diff', 'info'); }
-          } catch (e) { fvToast('Diff failed', 'error'); }
-        }});
+        const rel = this._relPath(item.path);
+        const gf = this.gitFileMap && this.gitFileMap[rel];
+        if (gf) {
+          if (gf.staged) actions.push({ label: 'Git: Unstage', action: async () => { try { await window.api.git.unstage(item.path); fvToast('Unstaged', 'success'); await this._refreshGitStatus(); } catch (e) { fvToast('Unstage failed', 'error'); } } });
+          if (gf.unstaged || gf.untracked) actions.push({ label: 'Git: Stage', action: async () => { try { await window.api.git.stage(item.path); fvToast('Staged', 'success'); await this._refreshGitStatus(); } catch (e) { fvToast('Stage failed', 'error'); } } });
+          if (!gf.untracked) actions.push({ label: 'Git: View Diff', action: () => this._showGitDiff(rel, gf.staged && !gf.unstaged) });
+          actions.push({ label: 'Git: Discard Changes', danger: true, action: async () => {
+            if (!confirm(`Discard changes to "${item.name}"? This cannot be undone.`)) return;
+            try { await window.api.git.discardPaths(this.rootDir, [rel]); fvToast('Discarded', 'success'); await this.loadTree(); await this._refreshGitStatus(); } catch (e) { fvToast('Discard failed', 'error'); }
+          } });
+        }
       }
 
       actions.push({ label: 'Delete', action: () => this._deleteFile(item), danger: true });
@@ -2881,6 +2885,7 @@ class FileViewer {
         }
       }});
     }
+    if (this.isGitRepo) actions.push({ label: 'Open in Git Manager', action: () => this._openInGitManager() });
     actions.push({ label: 'Copy Path', action: () => { navigator.clipboard.writeText(item.path); fvToast('Path copied', 'info'); } });
 
     menu.innerHTML = actions.map(a => `<button class="fv-context-item${a.danger ? ' fv-context-danger' : ''}">${fvEsc(a.label)}</button>`).join('');
@@ -2893,6 +2898,55 @@ class FileViewer {
       if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
       if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
     });
+  }
+
+  // Repo-relative, forward-slashed path for a file under the current root.
+  _relPath(fullPath) {
+    return fullPath.replace(this.rootDir, '').replace(/^[/\\]/, '').replace(/\\/g, '/');
+  }
+
+  // Lightweight, transient diff viewer (reuses the global gm-diff styles).
+  async _showGitDiff(relPath, staged) {
+    const ov = document.createElement('div');
+    ov.className = 'gm-modal-overlay';
+    ov.innerHTML = `<div class="gm-modal gm-modal-wide" style="max-width:780px;width:92vw">
+      <h3 style="margin:0 0 10px">${fvEsc(relPath)}</h3>
+      <div class="gm-diff fv-gitdiff" id="fv-gitdiff"><div class="gm-diff-empty">Loading diff…</div></div>
+      <div class="gm-modal-actions"><button class="gm-btn gm-btn-ghost" data-c>Close</button></div></div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    ov.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    ov.querySelector('[data-c]').addEventListener('click', close);
+    let diff = '';
+    try { diff = await window.api.git.diffPath(this.rootDir, relPath, !!staged); } catch (e) { diff = ''; }
+    const out = ov.querySelector('#fv-gitdiff');
+    out.innerHTML = (diff && diff.trim()) ? diff.split('\n').map(l => {
+      let c = 'gm-dl';
+      if (l.startsWith('+++') || l.startsWith('---')) c += ' gm-dl-meta';
+      else if (l.startsWith('@@')) c += ' gm-dl-hunk';
+      else if (l.startsWith('+')) c += ' gm-dl-add';
+      else if (l.startsWith('-')) c += ' gm-dl-del';
+      else if (l.startsWith('diff ') || l.startsWith('index ')) c += ' gm-dl-meta';
+      return `<div class="${c}">${fvEsc(l) || '&nbsp;'}</div>`;
+    }).join('') : '<div class="gm-diff-empty">No textual diff (binary or no changes).</div>';
+  }
+
+  // Jump to the full Git Manager utility, with the current repo selected.
+  async _openInGitManager() {
+    if (!this.rootDir) return;
+    try {
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+      const tab = document.querySelector('.header-tab[data-view="engineering"]');
+      if (tab) tab.classList.add('active');
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('view-engineering').classList.add('active');
+      if (typeof viewRenderer !== 'undefined') viewRenderer.currentView = 'engineering';
+      const qf = document.getElementById('quick-filters'); if (qf) qf.classList.add('hidden');
+      await engineeringUtilities.select('git-manager');
+      if (typeof gitManager !== 'undefined' && gitManager.openRepo) await gitManager.openRepo(this.rootDir);
+      dataManager.updateSettings({ activeView: 'engineering' });
+    } catch (e) { fvToast('Could not open Git Manager', 'error'); }
   }
 
   async _sendToPrinter(filePath) {
