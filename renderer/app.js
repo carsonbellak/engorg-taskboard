@@ -24,13 +24,29 @@
 
     // ============ BUILD SIDEBAR ============
     function buildSidebar() {
-      // Projects - with category badges
+      // Projects - grouped into collapsible groups + an ungrouped list
       const projContainer = document.getElementById('sidebar-projects');
-      projContainer.innerHTML = dataManager.projects.map(p => {
+      const groups = dataManager.getActiveProjectGroups();
+
+      const catBadgesHtml = (p) => {
         const cats = p.categories || [];
-        const catBadges = cats.length > 1
+        return cats.length > 1
           ? cats.map(cat => `<span class="sidebar-cat-dot" style="background:${PROJECT_CATEGORY_COLORS[cat] || '#64748B'}" title="${CATEGORY_LABELS[cat] || cat}"></span>`).join('')
           : cats.map(cat => `<span class="sidebar-cat-badge" style="background:${PROJECT_CATEGORY_COLORS[cat] || '#64748B'}33; color:${PROJECT_CATEGORY_COLORS[cat] || '#64748B'}">${CATEGORY_LABELS[cat] || cat}</span>`).join('');
+      };
+
+      // "Move to group" options shown inside each project's dropdown
+      const moveTargetsHtml = (p) => {
+        const items = [`<button class="sidebar-dropdown-item" data-action="move-group" data-group-id="" data-project-id="${p.id}">&#11096; Ungrouped</button>`];
+        groups.forEach(g => {
+          if (g.id === p.groupId) return;
+          items.push(`<button class="sidebar-dropdown-item" data-action="move-group" data-group-id="${g.id}" data-project-id="${p.id}"><span class="sidebar-group-dot" style="background:${g.color}"></span> ${escapeHtml(g.name)}</button>`);
+        });
+        return items.join('');
+      };
+
+      const projectRowHtml = (p) => {
+        const catBadges = catBadgesHtml(p);
         return `<div class="sidebar-project-row" data-project="${p.id}">
           <button class="sidebar-item" data-project="${p.id}">
             <span class="sidebar-project-dot" style="background:${p.color}"></span>
@@ -42,9 +58,37 @@
             <button class="sidebar-dropdown-item" data-action="edit" data-project-id="${p.id}">&#9998; Edit</button>
             <button class="sidebar-dropdown-item" data-action="archive" data-project-id="${p.id}">&#128230; Archive</button>
             <button class="sidebar-dropdown-item sidebar-dropdown-danger" data-action="delete" data-project-id="${p.id}">&#128465; Delete</button>
+            <div class="sidebar-dropdown-divider"></div>
+            <div class="sidebar-dropdown-label">Move to</div>
+            ${moveTargetsHtml(p)}
           </div>
         </div>`;
-      }).join('');
+      };
+
+      let projHtml = '';
+      groups.forEach(g => {
+        const members = dataManager.projects.filter(p => p.groupId === g.id);
+        projHtml += `<div class="sidebar-group" data-group-id="${g.id}">
+          <div class="sidebar-group-header" data-group-id="${g.id}">
+            <span class="sidebar-group-arrow">${g.collapsed ? '&#9654;' : '&#9660;'}</span>
+            <span class="sidebar-group-dot" style="background:${g.color}"></span>
+            <span class="sidebar-group-name">${escapeHtml(g.name)}</span>
+            <span class="sidebar-group-count">${members.length}</span>
+            <button class="sidebar-group-menu" data-group-id="${g.id}" title="Group options">&#8226;&#8226;&#8226;</button>
+            <div class="sidebar-group-dropdown hidden" data-group-id="${g.id}">
+              <button class="sidebar-dropdown-item" data-action="edit-group" data-group-id="${g.id}">&#9998; Edit</button>
+              <button class="sidebar-dropdown-item" data-action="archive-group" data-group-id="${g.id}">&#128230; Archive</button>
+              <button class="sidebar-dropdown-item sidebar-dropdown-danger" data-action="delete-group" data-group-id="${g.id}">&#128465; Delete group</button>
+            </div>
+          </div>
+          <div class="sidebar-group-projects ${g.collapsed ? 'sidebar-collapsed' : ''}" data-group-id="${g.id}">
+            ${members.map(projectRowHtml).join('') || '<div class="sidebar-group-empty">Drop projects here</div>'}
+          </div>
+        </div>`;
+      });
+      const ungrouped = dataManager.projects.filter(p => !p.groupId || !groups.find(g => g.id === p.groupId));
+      projHtml += `<div class="sidebar-ungrouped" data-group-id="">${ungrouped.map(projectRowHtml).join('')}</div>`;
+      projContainer.innerHTML = projHtml;
 
       // Archived projects section
       const archiveWrapper = document.getElementById('sidebar-archive-section-wrapper');
@@ -91,18 +135,14 @@
           btn.classList.add('active');
 
           if (btn.dataset.project === 'all') {
-            // "All Projects" opens the projects overview as its own view
+            // "All Projects" is now a pure filter: show every project's items in
+            // whatever view is currently active (Notes, Calendar, Board, ...).
+            // The project OVERVIEW lives in its own "Projects" header tab.
             viewRenderer.selectedProject = 'all';
-            viewRenderer.currentView = 'projects';
-            // Deactivate header tabs since this is a sidebar-only view
-            document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
-            // Show the notes panel container (reused for project slates)
-            document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-            document.getElementById('view-notes').classList.add('active');
           } else {
-            // Selecting a specific project just re-filters the CURRENT tab
-            // (calendar stays calendar, board stays board, etc.). Only the
-            // "All Projects" overview drills into that project's notes.
+            // Selecting a specific project re-filters the CURRENT tab
+            // (calendar stays calendar, board stays board, etc.). From the
+            // Projects overview tab, picking a project drills into its notes.
             viewRenderer.selectedProject = btn.dataset.project;
             if (viewRenderer.currentView === 'projects') {
               viewRenderer.currentView = 'notes';
@@ -128,8 +168,10 @@
           viewRenderer.selectedProject = 'all-archived';
           viewRenderer.currentView = 'projects';
           document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+          const projTab = document.querySelector('.header-tab[data-view="projects"]');
+          if (projTab) projTab.classList.add('active');
           document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-          document.getElementById('view-notes').classList.add('active');
+          document.getElementById('view-projects').classList.add('active');
           updateContentHeader();
           renderCurrentView();
         });
@@ -147,9 +189,9 @@
         });
       });
 
-      // Bind sidebar dropdown actions
-      document.querySelectorAll('.sidebar-dropdown-item').forEach(item => {
-        item.addEventListener('click', (e) => {
+      // Bind sidebar project dropdown actions (scoped so group dropdowns don't double-bind)
+      document.querySelectorAll('.sidebar-project-dropdown .sidebar-dropdown-item, .sidebar-archived-row .sidebar-dropdown-item').forEach(item => {
+        item.addEventListener('click', async (e) => {
           e.stopPropagation();
           const projId = item.dataset.projectId;
           const action = item.dataset.action;
@@ -169,7 +211,43 @@
             window.dispatchEvent(new CustomEvent('unarchive-project', { detail: { id: projId } }));
           } else if (action === 'delete-archived') {
             window.dispatchEvent(new CustomEvent('delete-archived-project', { detail: { id: projId } }));
+          } else if (action === 'move-group') {
+            await dataManager.setProjectGroup(projId, item.dataset.groupId || null);
+            buildSidebar();
+            renderCurrentView();
           }
+        });
+      });
+
+      // Bind group header collapse, three-dots menu, and group dropdown actions
+      projContainer.querySelectorAll('.sidebar-group-header').forEach(header => {
+        header.addEventListener('click', async (e) => {
+          if (e.target.closest('.sidebar-group-menu') || e.target.closest('.sidebar-group-dropdown')) return;
+          const gid = header.dataset.groupId;
+          const g = dataManager.getProjectGroups().find(x => x.id === gid);
+          if (!g) return;
+          await dataManager.updateProjectGroup(gid, { collapsed: !g.collapsed });
+          buildSidebar();
+        });
+      });
+      projContainer.querySelectorAll('.sidebar-group-menu').forEach(menuBtn => {
+        menuBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          document.querySelectorAll('.sidebar-project-dropdown, .sidebar-group-dropdown').forEach(d => d.classList.add('hidden'));
+          menuBtn.parentElement.querySelector('.sidebar-group-dropdown').classList.toggle('hidden');
+        });
+      });
+      projContainer.querySelectorAll('.sidebar-group-dropdown .sidebar-dropdown-item').forEach(item => {
+        item.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          document.querySelectorAll('.sidebar-group-dropdown').forEach(d => d.classList.add('hidden'));
+          const gid = item.dataset.groupId;
+          const action = item.dataset.action;
+          const g = dataManager.getProjectGroups().find(x => x.id === gid);
+          if (!g) return;
+          if (action === 'edit-group') editGroupFlow(gid);
+          else if (action === 'archive-group') archiveGroupFlow(gid);
+          else if (action === 'delete-group') deleteGroupFlow(gid);
         });
       });
 
@@ -192,8 +270,33 @@
         );
       });
 
-      // Drag-to-reorder projects
+      // Drag projects to reorder AND to move between groups.
+      // After any drop we rebuild the projects array from the DOM: order follows the
+      // DOM order, and each project's groupId follows the container it now lives in.
       let dragRow = null;
+      const clearDragOver = () => {
+        projContainer.querySelectorAll('.sidebar-drag-over, .sidebar-group-drop')
+          .forEach(el => el.classList.remove('sidebar-drag-over', 'sidebar-group-drop'));
+      };
+      const commitSidebarOrder = () => {
+        const rows = [...projContainer.querySelectorAll('.sidebar-project-row')];
+        const newProjects = [];
+        rows.forEach(row => {
+          const p = dataManager.projects.find(pp => pp.id === row.dataset.project);
+          if (!p) return;
+          const zone = row.closest('.sidebar-group-projects');
+          p.groupId = zone ? (zone.dataset.groupId || null) : null;
+          newProjects.push(p);
+        });
+        // Safety: keep any project that wasn't represented in the DOM
+        dataManager.projects.forEach(p => { if (!newProjects.includes(p)) newProjects.push(p); });
+        dataManager.projects = newProjects;
+        assignRainbowColors(dataManager.projects);
+        dataManager._saveProjects();
+        buildSidebar();
+        renderCurrentView();
+      };
+
       projContainer.querySelectorAll('.sidebar-project-row').forEach(row => {
         row.draggable = true;
         row.addEventListener('dragstart', (e) => {
@@ -203,44 +306,75 @@
         });
         row.addEventListener('dragend', () => {
           row.classList.remove('sidebar-drag-active');
-          projContainer.querySelectorAll('.sidebar-project-row').forEach(r => r.classList.remove('sidebar-drag-over'));
+          clearDragOver();
           dragRow = null;
         });
         row.addEventListener('dragover', (e) => {
           e.preventDefault();
+          e.stopPropagation();
           e.dataTransfer.dropEffect = 'move';
           if (dragRow && row !== dragRow) {
-            projContainer.querySelectorAll('.sidebar-project-row').forEach(r => r.classList.remove('sidebar-drag-over'));
+            clearDragOver();
             row.classList.add('sidebar-drag-over');
           }
         });
-        row.addEventListener('dragleave', () => {
-          row.classList.remove('sidebar-drag-over');
-        });
         row.addEventListener('drop', (e) => {
           e.preventDefault();
+          e.stopPropagation();
           row.classList.remove('sidebar-drag-over');
           if (!dragRow || row === dragRow) return;
-          // Reorder in DOM
           const rows = [...projContainer.querySelectorAll('.sidebar-project-row')];
           const fromIdx = rows.indexOf(dragRow);
           const toIdx = rows.indexOf(row);
-          if (fromIdx < toIdx) {
-            row.after(dragRow);
-          } else {
-            row.before(dragRow);
+          if (fromIdx < toIdx) row.after(dragRow); else row.before(dragRow);
+          commitSidebarOrder();
+        });
+      });
+
+      // Group bodies + the ungrouped list are drop zones that change membership
+      projContainer.querySelectorAll('.sidebar-group-projects, .sidebar-ungrouped').forEach(zone => {
+        zone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          if (dragRow) { clearDragOver(); zone.classList.add('sidebar-group-drop'); }
+        });
+        zone.addEventListener('dragleave', (e) => {
+          if (!zone.contains(e.relatedTarget)) zone.classList.remove('sidebar-group-drop');
+        });
+        zone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          zone.classList.remove('sidebar-group-drop');
+          if (!dragRow) return;
+          const placeholder = zone.querySelector('.sidebar-group-empty');
+          if (placeholder) placeholder.remove();
+          zone.appendChild(dragRow);
+          commitSidebarOrder();
+        });
+      });
+
+      // Dropping onto a (possibly collapsed) group header drops into that group
+      projContainer.querySelectorAll('.sidebar-group-header').forEach(header => {
+        header.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (dragRow) { clearDragOver(); header.classList.add('sidebar-group-drop'); }
+        });
+        header.addEventListener('dragleave', () => header.classList.remove('sidebar-group-drop'));
+        header.addEventListener('drop', (e) => {
+          e.preventDefault();
+          header.classList.remove('sidebar-group-drop');
+          if (!dragRow) return;
+          const gid = header.dataset.groupId;
+          const zone = projContainer.querySelector(`.sidebar-group-projects[data-group-id="${gid}"]`);
+          if (zone) {
+            const placeholder = zone.querySelector('.sidebar-group-empty');
+            if (placeholder) placeholder.remove();
+            zone.appendChild(dragRow);
           }
-          // Reorder in data
-          const newOrder = [...projContainer.querySelectorAll('.sidebar-project-row')].map(r => r.dataset.project);
-          const reordered = newOrder.map(id => dataManager.projects.find(p => p.id === id)).filter(Boolean);
-          dataManager.projects = reordered;
-          assignRainbowColors(dataManager.projects);
-          dataManager._saveProjects();
-          buildSidebar();
-          renderCurrentView();
+          commitSidebarOrder();
         });
       });
     }
+
 
     // ============ SIDEBAR DOT UPDATE (cheap — no full rebuild) ============
     function updateSidebarDots() {
@@ -271,8 +405,9 @@
       if (isFullView) return;
 
       if (viewRenderer.currentView === 'projects') {
-        dayTitle.textContent = 'All Projects';
-        subtitle.textContent = 'Project Overview';
+        const archived = viewRenderer.selectedProject === 'all-archived';
+        dayTitle.textContent = archived ? 'Archived Projects' : 'All Projects';
+        subtitle.textContent = archived ? 'Archived project overview' : 'Project Overview';
       } else if (viewRenderer.selectedProject === 'all') {
         const viewLabels = { notes: 'All Notes', calendar: 'Calendar', timeline: 'Timeline', board: 'Board', purchasing: 'Purchasing' };
         dayTitle.textContent = viewLabels[viewRenderer.currentView] || 'All Notes';
@@ -348,11 +483,13 @@
         const view = tab.dataset.view;
         viewRenderer.currentView = view;
 
-        // Deactivate the "All Projects" sidebar selection when switching to a header tab
-        // (All Projects is its own separate view, not a header tab view)
-        if (viewRenderer.selectedProject === 'all' && view !== 'projects') {
-          // Keep selectedProject as 'all' to show all items, but deselect the sidebar highlight
-          // since we're now in a header tab view, not the All Projects overview
+        // The "all-archived" selection is only meaningful in the Projects overview.
+        // Leaving to any other tab would otherwise filter notes/calendar/etc. by a
+        // project id of 'all-archived' (matching nothing), so fall back to "all".
+        if (viewRenderer.selectedProject === 'all-archived' && view !== 'projects') {
+          viewRenderer.selectedProject = 'all';
+          document.querySelectorAll('#sidebar .sidebar-item[data-project]').forEach(b =>
+            b.classList.toggle('active', b.dataset.project === 'all'));
         }
 
         // Show/hide view panels
@@ -499,6 +636,155 @@
     document.getElementById('btn-add-project-header').addEventListener('click', () => {
       modalManager.openProjectModal();
     });
+
+    // ============ THEMED CONFIRM (replaces native confirm()) ============
+    // Returns a Promise<boolean>. Message supports newlines (rendered via pre-line).
+    function showConfirm({ title = 'Confirm', message = '', confirmText = 'OK', cancelText = 'Cancel', danger = false } = {}) {
+      return new Promise(resolve => {
+        const modal = document.getElementById('modal-confirm');
+        document.getElementById('modal-confirm-title').textContent = title;
+        document.getElementById('modal-confirm-message').textContent = message;
+        const okBtn = document.getElementById('btn-confirm-ok');
+        const cancelBtn = document.getElementById('btn-confirm-cancel');
+        okBtn.textContent = confirmText;
+        cancelBtn.textContent = cancelText;
+        okBtn.classList.toggle('btn-modal-danger', !!danger);
+        modal.classList.remove('hidden');
+
+        const cleanup = (result) => {
+          modal.classList.add('hidden');
+          okBtn.removeEventListener('click', onOk);
+          cancelBtn.removeEventListener('click', onCancel);
+          modal.removeEventListener('mousedown', onBackdrop);
+          document.removeEventListener('keydown', onKey);
+          resolve(result);
+        };
+        const onOk = () => cleanup(true);
+        const onCancel = () => cleanup(false);
+        const onBackdrop = (e) => { if (e.target === modal) cleanup(false); };
+        const onKey = (e) => {
+          if (e.key === 'Escape') cleanup(false);
+          else if (e.key === 'Enter') cleanup(true);
+        };
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        modal.addEventListener('mousedown', onBackdrop);
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => okBtn.focus(), 50);
+      });
+    }
+    window._showConfirm = showConfirm;
+
+    // ============ PROJECT GROUP MODAL (create / edit) ============
+    const GROUP_PALETTE = ['#6366F1', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#06B6D4'];
+    let _groupModalSelectedColor = GROUP_PALETTE[0];
+
+    function renderGroupSwatches() {
+      const wrap = document.getElementById('group-color-swatches');
+      wrap.innerHTML = GROUP_PALETTE.map(c =>
+        `<button type="button" class="group-swatch${c === _groupModalSelectedColor ? ' active' : ''}" data-color="${c}" style="background:${c}"></button>`
+      ).join('');
+      wrap.querySelectorAll('.group-swatch').forEach(btn => {
+        btn.addEventListener('click', () => {
+          _groupModalSelectedColor = btn.dataset.color;
+          wrap.querySelectorAll('.group-swatch').forEach(b => b.classList.toggle('active', b === btn));
+        });
+      });
+    }
+
+    function openGroupModal(editGroup = null) {
+      const modal = document.getElementById('modal-group');
+      const title = document.getElementById('modal-group-title');
+      const nameInput = document.getElementById('group-name-input');
+      const saveBtn = document.getElementById('btn-save-group');
+      const idInput = document.getElementById('group-edit-id');
+
+      if (editGroup) {
+        title.innerHTML = '&#9998; Edit Group';
+        saveBtn.textContent = 'Save Changes';
+        nameInput.value = editGroup.name || '';
+        idInput.value = editGroup.id;
+        _groupModalSelectedColor = /^#[0-9a-fA-F]{6}$/.test(editGroup.color || '') ? editGroup.color : GROUP_PALETTE[0];
+      } else {
+        title.innerHTML = '&#128193; New Group';
+        saveBtn.textContent = 'Create';
+        nameInput.value = '';
+        idInput.value = '';
+        _groupModalSelectedColor = GROUP_PALETTE[dataManager.getProjectGroups().length % GROUP_PALETTE.length];
+      }
+      renderGroupSwatches();
+      modal.classList.remove('hidden');
+      setTimeout(() => nameInput.focus(), 50);
+    }
+
+    async function saveGroupModal() {
+      const name = document.getElementById('group-name-input').value.trim();
+      if (!name) { document.getElementById('group-name-input').focus(); return; }
+      const id = document.getElementById('group-edit-id').value;
+      if (id) {
+        await dataManager.updateProjectGroup(id, { name, color: _groupModalSelectedColor });
+      } else {
+        await dataManager.addProjectGroup({ name, color: _groupModalSelectedColor });
+      }
+      document.getElementById('modal-group').classList.add('hidden');
+      buildSidebar();
+      renderCurrentView();
+    }
+
+    document.getElementById('btn-add-group').addEventListener('click', () => openGroupModal(null));
+    document.getElementById('btn-save-group').addEventListener('click', saveGroupModal);
+    document.getElementById('btn-cancel-group').addEventListener('click', () =>
+      document.getElementById('modal-group').classList.add('hidden'));
+    document.getElementById('group-name-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); saveGroupModal(); }
+    });
+    // ---- Centralized group action flows (shared by the sidebar + Projects page) ----
+    function editGroupFlow(id) {
+      const g = dataManager.getProjectGroups().find(x => x.id === id);
+      if (g) openGroupModal(g);
+    }
+    async function archiveGroupFlow(id) {
+      const g = dataManager.getProjectGroups().find(x => x.id === id);
+      if (!g) return;
+      const count = dataManager.projects.filter(p => p.groupId === id).length;
+      const ok = await showConfirm({
+        title: 'Archive group',
+        message: `Archive group "${g.name}"${count ? ` and its ${count} project${count > 1 ? 's' : ''}` : ''}?\n\n` +
+          'The projects and their notes, events, and orders move to the archive. You can unarchive the group later.',
+        confirmText: 'Archive',
+      });
+      if (!ok) return;
+      await dataManager.archiveProjectGroup(id);
+      buildSidebar();
+      renderCurrentView();
+    }
+    async function deleteGroupFlow(id) {
+      const g = dataManager.getProjectGroups().find(x => x.id === id);
+      if (!g) return;
+      const ok = await showConfirm({
+        title: 'Delete group',
+        message: `Delete group "${g.name}"?\n\nIts projects become ungrouped — the projects themselves are NOT deleted.`,
+        confirmText: 'Delete group',
+        danger: true
+      });
+      if (!ok) return;
+      await dataManager.deleteProjectGroup(id);
+      buildSidebar();
+      renderCurrentView();
+    }
+    async function unarchiveGroupFlow(id) {
+      await dataManager.unarchiveProjectGroup(id);
+      buildSidebar();
+      renderCurrentView();
+    }
+
+    // Expose so buildSidebar's group menu + the Projects page can drive these
+    window._openGroupModal = openGroupModal;
+    window.addEventListener('add-group', () => openGroupModal(null));
+    window.addEventListener('edit-group', (e) => editGroupFlow(e.detail?.id));
+    window.addEventListener('archive-group', (e) => archiveGroupFlow(e.detail?.id));
+    window.addEventListener('delete-group', (e) => deleteGroupFlow(e.detail?.id));
+    window.addEventListener('unarchive-group', (e) => unarchiveGroupFlow(e.detail?.id));
 
     // ============ OUTLOOK SYNC (Local Desktop) ============
     async function syncOutlook(silent = false) {
@@ -735,8 +1021,10 @@
         viewRenderer.selectedProject = 'all';
         viewRenderer.currentView = 'projects';
         document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+        const projTab = document.querySelector('.header-tab[data-view="projects"]');
+        if (projTab) projTab.classList.add('active');
         document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-        document.getElementById('view-notes').classList.add('active');
+        document.getElementById('view-projects').classList.add('active');
         updateContentHeader();
         buildSidebar();
         renderCurrentView();
@@ -753,8 +1041,10 @@
         viewRenderer.selectedProject = 'all';
         viewRenderer.currentView = 'projects';
         document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+        const projTab = document.querySelector('.header-tab[data-view="projects"]');
+        if (projTab) projTab.classList.add('active');
         document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-        document.getElementById('view-notes').classList.add('active');
+        document.getElementById('view-projects').classList.add('active');
         updateContentHeader();
         buildSidebar();
         renderCurrentView();
@@ -803,6 +1093,7 @@
     document.addEventListener('click', () => {
       document.querySelectorAll('.slate-dropdown').forEach(d => d.classList.add('hidden'));
       document.querySelectorAll('.sidebar-project-dropdown').forEach(d => d.classList.add('hidden'));
+      document.querySelectorAll('.sidebar-group-dropdown').forEach(d => d.classList.add('hidden'));
     });
 
     // ============ CLOUD SYNC ============
@@ -892,7 +1183,6 @@
     if (savedView === 'schedule') savedView = 'calendar';
     if (savedView === 'tasks') savedView = 'notes';
     if (savedView === 'printer' || savedView === 'slicer') savedView = 'engineering'; // merged into Engineering Utilities
-    if (savedView === 'projects') savedView = 'notes'; // projects view is sidebar-only, don't restore it
 
     if (savedView && savedView !== 'notes') {
       const tab = document.querySelector(`.header-tab[data-view="${savedView}"]`);

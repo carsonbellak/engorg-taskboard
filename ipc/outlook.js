@@ -19,6 +19,24 @@ const COM_SCRIPT = (daysBack, daysForward) => `
 $OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
+  # Guard: if classic Outlook has no mail profile configured, instantiating the
+  # Outlook COM object makes Outlook pop its "Create New Profile" dialog (which
+  # -NonInteractive cannot suppress, since Outlook is a separate process). Detect
+  # the absence of any profile via the registry and bail out silently instead.
+  $profilePaths = @(
+    'HKCU:\\Software\\Microsoft\\Office\\16.0\\Outlook\\Profiles',
+    'HKCU:\\Software\\Microsoft\\Office\\15.0\\Outlook\\Profiles',
+    'HKCU:\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows Messaging Subsystem\\Profiles'
+  )
+  $hasProfile = $false
+  foreach ($p in $profilePaths) {
+    if (Test-Path $p) {
+      $kids = @(Get-ChildItem $p -ErrorAction SilentlyContinue)
+      if ($kids.Count -gt 0) { $hasProfile = $true; break }
+    }
+  }
+  if (-not $hasProfile) { '[]'; exit 0 }
+
   $ol  = New-Object -ComObject Outlook.Application
   $ns  = $ol.GetNamespace('MAPI')
   $cal = $ns.GetDefaultFolder(9)

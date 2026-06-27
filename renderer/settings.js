@@ -1398,7 +1398,8 @@ function renderSettings() {
 // Hotbar editor — toggle which tabs show, and promote/demote engineering utilities.
 function bindHotbarEditor() {
   const MAIN_TABS = [
-    { view: 'notes', label: 'Notes' }, { view: 'calendar', label: 'Calendar' },
+    { view: 'notes', label: 'Notes' }, { view: 'projects', label: 'Projects' },
+    { view: 'calendar', label: 'Calendar' },
     { view: 'email', label: 'Email' }, { view: 'timeline', label: 'Timeline' },
     { view: 'timers', label: 'Timers' }, { view: 'board', label: 'Board' },
     { view: 'purchasing', label: 'Purchases' }, { view: 'stats', label: 'Stats' },

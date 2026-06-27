@@ -29,6 +29,7 @@
     <div class="header-brand">&#9881; EngOrg</div>
     <div class="header-tabs">
       <button class="header-tab active" data-view="notes">&#128204; Notes</button>
+      <button class="header-tab" data-view="projects">&#128193; Projects</button>
       <button class="header-tab" data-view="calendar">&#128197; Calendar</button>
       <button class="header-tab" data-view="email">&#9993; Email</button>
       <button class="header-tab" data-view="timeline">&#128200; Timeline</button>
@@ -57,6 +58,7 @@
         <div id="sidebar-active-section">
           <button class="sidebar-item active" data-project="all">&#128450; All Projects</button>
           <div id="sidebar-projects"></div>
+          <button class="sidebar-add-group-btn" id="btn-add-group" title="Create a project group">&#43; Group</button>
         </div>
       </div>
       <div class="sidebar-section" id="sidebar-archive-section-wrapper" style="display:none">
@@ -130,6 +132,7 @@
 
       <!-- View containers -->
       <div id="view-notes" class="view-panel active"></div>
+      <div id="view-projects" class="view-panel"></div>
       <div id="view-calendar" class="view-panel"></div>
       <div id="view-email" class="view-panel"></div>
       <div id="view-timeline" class="view-panel"></div>
@@ -380,6 +383,34 @@
       <div class="modal-actions">
         <button id="btn-cancel-project" class="btn-modal-cancel">Cancel</button>
         <button id="btn-save-project" class="btn-modal-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Generic themed confirm (replaces native confirm()) -->
+  <div id="modal-confirm" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2 id="modal-confirm-title">Confirm</h2>
+      <p id="modal-confirm-message" class="modal-confirm-message"></p>
+      <div class="modal-actions">
+        <button id="btn-confirm-cancel" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-confirm-ok" class="btn-modal-primary">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add/Edit Project Group -->
+  <div id="modal-group" class="modal hidden">
+    <div class="modal-box modal-sm">
+      <h2 id="modal-group-title">&#128193; New Group</h2>
+      <label class="field-label">Group Name</label>
+      <input type="text" id="group-name-input" placeholder="e.g. Robotics">
+      <label class="field-label">Color</label>
+      <div id="group-color-swatches" class="group-color-swatches"></div>
+      <input type="hidden" id="group-edit-id" value="">
+      <div class="modal-actions">
+        <button id="btn-cancel-group" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-save-group" class="btn-modal-primary">Create</button>
       </div>
     </div>
   </div>

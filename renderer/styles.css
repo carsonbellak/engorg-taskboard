@@ -1645,6 +1645,25 @@ body:has(.modal:not(.hidden)) #header {
   transform: translateY(-1px);
 }
 
+/* Danger variant of the primary modal button (themed confirm deletes) */
+.btn-modal-primary.btn-modal-danger {
+  background: linear-gradient(135deg, #EF4444, #DC2626);
+  box-shadow: 0 2px 8px rgba(239,68,68,0.3);
+}
+.btn-modal-primary.btn-modal-danger:hover {
+  background: linear-gradient(135deg, #DC2626, #B91C1C);
+  box-shadow: 0 4px 12px rgba(239,68,68,0.4);
+}
+
+/* Themed confirm dialog message */
+.modal-confirm-message {
+  white-space: pre-line;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary, #475569);
+  margin: 6px 0 4px;
+}
+
 /* === PROJECT CATEGORY CHECKBOXES === */
 .category-checkbox-group {
   display: flex;
@@ -1819,6 +1838,168 @@ body:has(.modal:not(.hidden)) #header {
 .sidebar-dropdown-item.sidebar-dropdown-danger:hover {
   background: rgba(239,68,68,0.08);
   color: #EF4444;
+}
+
+/* Dropdown divider + label (used for the "Move to group" section) */
+.sidebar-dropdown-divider {
+  height: 1px;
+  background: var(--border-color, #E2E8F0);
+  margin: 4px 2px;
+}
+.sidebar-dropdown-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted, #94A3B8);
+  padding: 3px 10px 2px;
+}
+
+/* Group modal color swatches */
+.group-color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 4px;
+}
+.group-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.group-swatch:hover { transform: scale(1.1); }
+.group-swatch.active {
+  border-color: var(--text-primary, #1E293B);
+  box-shadow: 0 0 0 2px var(--bg-card, #fff), 0 0 0 4px currentColor;
+}
+
+/* === PROJECT GROUPS (sidebar) === */
+.sidebar-add-group-btn {
+  width: 100%;
+  text-align: left;
+  margin-top: 4px;
+  padding: 6px 12px;
+  border: 1px dashed var(--border-color, #CBD5E1);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted, #94A3B8);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.sidebar-add-group-btn:hover {
+  background: var(--bg-hover, #F1F5F9);
+  color: var(--text-secondary, #334155);
+  border-color: var(--text-muted, #94A3B8);
+}
+
+.sidebar-group {
+  margin-bottom: 4px;
+}
+.sidebar-group-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.sidebar-group-header:hover {
+  background: var(--bg-hover, #F1F5F9);
+}
+.sidebar-group-header.sidebar-group-drop {
+  background: var(--accent-bg, #EFF6FF);
+  box-shadow: inset 0 0 0 1px #3B82F6;
+}
+.sidebar-group-arrow {
+  font-size: 8px;
+  width: 10px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-muted, #94A3B8);
+}
+.sidebar-group-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.sidebar-group-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--text-secondary, #334155);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sidebar-group-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #94A3B8);
+  flex-shrink: 0;
+}
+.sidebar-group-menu {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted, #64748B);
+  padding: 2px 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.sidebar-group-header:hover .sidebar-group-menu { opacity: 1; }
+.sidebar-group-menu:hover {
+  background: var(--accent-bg, #EFF6FF);
+  color: var(--accent-text, #2563EB);
+}
+.sidebar-group-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--bg-card, #FFFFFF);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  border: 1px solid var(--border-color, #E2E8F0);
+  z-index: 200;
+  min-width: 140px;
+  padding: 4px;
+  margin-top: 2px;
+}
+.sidebar-group-dropdown.hidden { display: none; }
+
+.sidebar-group-projects {
+  padding-left: 10px;
+  margin-left: 6px;
+  border-left: 1px solid var(--border-color, #E2E8F0);
+}
+.sidebar-group-projects.sidebar-group-drop,
+.sidebar-ungrouped.sidebar-group-drop {
+  background: var(--accent-bg, #EFF6FF);
+  border-radius: 8px;
+  outline: 1px dashed #3B82F6;
+}
+.sidebar-group-empty {
+  font-size: 11px;
+  color: var(--text-muted, #94A3B8);
+  padding: 8px 10px;
+  font-style: italic;
+}
+.sidebar-ungrouped {
+  min-height: 4px;
 }
 
 /* === DAY COMPLETION STATUS INDICATORS === */
@@ -2454,6 +2635,76 @@ body:has(.modal:not(.hidden)) #header {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
+}
+
+/* Toolbar above the Projects overview (holds + Group) */
+.projects-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+.projects-add-group-btn {
+  padding: 8px 14px;
+  border: 1px dashed var(--border-color, #CBD5E1);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.projects-add-group-btn:hover {
+  background: var(--bg-hover, #F1F5F9);
+  color: var(--text-primary, #1E293B);
+  border-color: var(--text-muted, #94A3B8);
+}
+
+/* Group sections within the Projects overview */
+.project-group-section {
+  margin-bottom: 26px;
+}
+.project-group-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary, #1E293B);
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-color, #E2E8F0);
+}
+.project-group-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-group-title-ungrouped {
+  color: var(--text-muted, #64748B);
+}
+.project-group-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.project-group-title-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted, #94A3B8);
+}
+/* The group header reuses .slate-menu-btn / .slate-dropdown; keep the button small here */
+.project-group-title .slate-menu-btn {
+  font-size: 16px;
+  padding: 1px 7px;
+}
+.project-group-empty {
+  font-size: 13px;
+  color: var(--text-muted, #94A3B8);
+  font-style: italic;
+  padding: 4px 2px 2px;
 }
 
 .project-slate {

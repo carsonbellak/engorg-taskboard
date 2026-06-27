@@ -577,23 +577,121 @@ class ViewRenderer {
     return groups;
   }
 
-  // ============ PROJECT SLATES (All Projects Dashboard) ============
+  // ============ PROJECT SLATES (All Projects Dashboard / Projects tab) ============
   renderProjectSlates() {
-    const container = document.getElementById('view-notes');
+    const container = document.getElementById('view-projects');
     const isArchiveView = this.selectedProject === 'all-archived';
     const projectList = isArchiveView ? this.data.archivedProjects : this.data.projects;
+    const allGroups = (this.data.getProjectGroups && this.data.getProjectGroups()) || this.data.settings?.projectGroups || [];
 
-    if (projectList.length === 0) {
-      container.innerHTML = isArchiveView
-        ? '<div class="empty-state"><div class="empty-state-icon">&#128451;</div><div class="empty-state-text">No archived projects.</div></div>'
-        : '<div class="empty-state"><div class="empty-state-icon">&#128450;</div><div class="empty-state-text">No projects yet. Create one to get started!</div></div>';
+    container.innerHTML = '';
+
+    const makeGrid = (projects) => {
+      const grid = document.createElement('div');
+      grid.className = 'project-slates-grid';
+      projects.forEach(project => grid.appendChild(this._createProjectSlate(project, isArchiveView)));
+      return grid;
+    };
+
+    // A group section: header (name + count + ••• menu) and its slate grid.
+    // The menu dispatches window CustomEvents handled centrally in app.js.
+    const buildGroupSection = (g, members, { archived }) => {
+      const section = document.createElement('div');
+      section.className = 'project-group-section';
+      const header = document.createElement('div');
+      header.className = 'project-group-title';
+      header.innerHTML = `
+        <span class="project-group-dot" style="background:${g.color}"></span>
+        <span class="project-group-name">${escapeHtml(g.name)}</span>
+        <span class="project-group-title-count">${members.length}</span>
+        <button class="slate-menu-btn" title="Group options">&#8226;&#8226;&#8226;</button>
+        <div class="slate-dropdown hidden">
+          ${archived ? `
+            <button class="slate-dropdown-item" data-action="unarchive-group">&#128230; Unarchive group</button>
+            <button class="slate-dropdown-item slate-dropdown-danger" data-action="delete-group">&#128465; Delete group</button>
+          ` : `
+            <button class="slate-dropdown-item" data-action="edit-group">&#9998; Edit</button>
+            <button class="slate-dropdown-item" data-action="archive-group">&#128230; Archive</button>
+            <button class="slate-dropdown-item slate-dropdown-danger" data-action="delete-group">&#128465; Delete group</button>
+          `}
+        </div>`;
+      const menuBtn = header.querySelector('.slate-menu-btn');
+      const dd = header.querySelector('.slate-dropdown');
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.querySelectorAll('.slate-dropdown').forEach(d => { if (d !== dd) d.classList.add('hidden'); });
+        dd.classList.toggle('hidden');
+      });
+      dd.querySelectorAll('.slate-dropdown-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dd.classList.add('hidden');
+          window.dispatchEvent(new CustomEvent(item.dataset.action, { detail: { id: g.id } }));
+        });
+      });
+      section.appendChild(header);
+      if (members.length) section.appendChild(makeGrid(members));
+      else section.insertAdjacentHTML('beforeend', '<div class="project-group-empty">No projects in this group.</div>');
+      return section;
+    };
+
+    const ungroupedSection = (members) => {
+      const section = document.createElement('div');
+      section.className = 'project-group-section';
+      section.innerHTML = `<div class="project-group-title project-group-title-ungrouped">Ungrouped <span class="project-group-title-count">${members.length}</span></div>`;
+      section.appendChild(makeGrid(members));
+      return section;
+    };
+
+    // ===== Archived overview: group archived projects by their group =====
+    if (isArchiveView) {
+      if (projectList.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128451;</div><div class="empty-state-text">No archived projects.</div></div>';
+        return;
+      }
+      allGroups.forEach(g => {
+        const members = projectList.filter(p => p.groupId === g.id);
+        // Show a section if the group has archived members, or it's an archived
+        // group with none (so an empty archived group can still be unarchived/deleted).
+        if (members.length || g.archived) {
+          container.appendChild(buildGroupSection(g, members, { archived: !!g.archived }));
+        }
+      });
+      const ungrouped = projectList.filter(p => !p.groupId || !allGroups.find(g => g.id === p.groupId));
+      if (ungrouped.length) {
+        container.appendChild(container.children.length ? ungroupedSection(ungrouped) : makeGrid(ungrouped));
+      }
       return;
     }
 
-    const grid = document.createElement('div');
-    grid.className = 'project-slates-grid';
+    // ===== Active overview: toolbar + a section per active group, then ungrouped =====
+    const activeGroups = (this.data.getActiveProjectGroups && this.data.getActiveProjectGroups()) || allGroups.filter(g => !g.archived);
 
-    projectList.forEach(project => {
+    const toolbar = document.createElement('div');
+    toolbar.className = 'projects-toolbar';
+    toolbar.innerHTML = `<button class="projects-add-group-btn" id="projects-add-group">&#43; Group</button>`;
+    toolbar.querySelector('#projects-add-group').addEventListener('click', () => window.dispatchEvent(new CustomEvent('add-group')));
+    container.appendChild(toolbar);
+
+    if (projectList.length === 0 && activeGroups.length === 0) {
+      container.insertAdjacentHTML('beforeend', '<div class="empty-state"><div class="empty-state-icon">&#128450;</div><div class="empty-state-text">No projects yet. Create one to get started!</div></div>');
+      return;
+    }
+
+    activeGroups.forEach(g => {
+      const members = projectList.filter(p => p.groupId === g.id);
+      container.appendChild(buildGroupSection(g, members, { archived: false }));
+    });
+
+    const ungrouped = projectList.filter(p => !p.groupId || !activeGroups.find(g => g.id === p.groupId));
+    if (ungrouped.length) {
+      container.appendChild(activeGroups.length ? ungroupedSection(ungrouped) : makeGrid(ungrouped));
+    }
+  }
+
+  // Build a single project slate card (used by the grouped + archived overviews)
+  _createProjectSlate(project, isArchiveView) {
+    {
       let notes, notesDone, events, purchases;
       if (isArchiveView) {
         notes = project._tasks || [];
@@ -697,11 +795,8 @@ class ViewRenderer {
         });
       }
 
-      grid.appendChild(card);
-    });
-
-    container.innerHTML = '';
-    container.appendChild(grid);
+      return card;
+    }
   }
 
   // ============ CALENDAR VIEW ============

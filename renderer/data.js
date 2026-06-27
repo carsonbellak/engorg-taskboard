@@ -57,6 +57,12 @@ class DataManager {
       settingsNeedsSave = true;
     }
 
+    // Ensure projectGroups always exists so it syncs to the PWA
+    if (!Array.isArray(this.settings.projectGroups)) {
+      this.settings.projectGroups = [];
+      settingsNeedsSave = true;
+    }
+
     // Load user categories into global APP_CATEGORIES
     if (this.settings.categories && this.settings.categories.length > 0) {
       APP_CATEGORIES = this.settings.categories;
@@ -265,6 +271,87 @@ class DataManager {
   async deleteArchivedProject(id) {
     this.archivedProjects = this.archivedProjects.filter(p => p.id !== id);
     await this._saveArchivedProjects();
+  }
+
+  // === Project Groups (stored in settings so they sync with everything else) ===
+  getProjectGroups() {
+    return this.settings.projectGroups || [];
+  }
+
+  // Non-archived groups (the ones shown in active sidebar + Projects overview)
+  getActiveProjectGroups() {
+    return (this.settings.projectGroups || []).filter(g => !g.archived);
+  }
+
+  async addProjectGroup({ name, color }) {
+    if (!Array.isArray(this.settings.projectGroups)) this.settings.projectGroups = [];
+    const group = {
+      id: this._genId('grp'),
+      name: name || 'New Group',
+      color: color || '#64748B',
+      collapsed: false,
+      createdAt: new Date().toISOString()
+    };
+    this.settings.projectGroups.push(group);
+    await this._saveSettings();
+    return group;
+  }
+
+  async updateProjectGroup(id, updates) {
+    const groups = this.settings.projectGroups || [];
+    const g = groups.find(x => x.id === id);
+    if (!g) return null;
+    Object.assign(g, updates);
+    await this._saveSettings();
+    return g;
+  }
+
+  async deleteProjectGroup(id) {
+    this.settings.projectGroups = (this.settings.projectGroups || []).filter(g => g.id !== id);
+    // Orphaned projects (active and archived) fall back to ungrouped
+    let projectsChanged = false, archivedChanged = false;
+    for (const p of this.projects) {
+      if (p.groupId === id) { p.groupId = null; projectsChanged = true; }
+    }
+    for (const p of this.archivedProjects) {
+      if (p.groupId === id) { p.groupId = null; archivedChanged = true; }
+    }
+    await this._saveSettings();
+    if (projectsChanged) await this._saveProjects();
+    if (archivedChanged) await this._saveArchivedProjects();
+  }
+
+  // Archive a whole group: archive each of its (active) projects, then mark the
+  // group archived. The group record is kept so archived projects still resolve
+  // their group name/color in the archived overview.
+  async archiveProjectGroup(id) {
+    const g = (this.settings.projectGroups || []).find(x => x.id === id);
+    if (!g) return;
+    const memberIds = this.projects.filter(p => p.groupId === id).map(p => p.id);
+    for (const pid of memberIds) await this.archiveProject(pid);
+    g.archived = true;
+    g.archivedAt = new Date().toISOString();
+    await this._saveSettings();
+  }
+
+  // Unarchive a group: restore each of its archived projects, then clear the flag.
+  async unarchiveProjectGroup(id) {
+    const g = (this.settings.projectGroups || []).find(x => x.id === id);
+    if (!g) return;
+    const memberIds = this.archivedProjects.filter(p => p.groupId === id).map(p => p.id);
+    for (const pid of memberIds) await this.unarchiveProject(pid);
+    g.archived = false;
+    delete g.archivedAt;
+    await this._saveSettings();
+  }
+
+  // Assign a project to a group (or null to ungroup). Does not reorder.
+  async setProjectGroup(projectId, groupId) {
+    const p = this.projects.find(x => x.id === projectId);
+    if (!p) return null;
+    p.groupId = groupId || null;
+    await this._saveProjects();
+    return p;
   }
 
   // === Purchases ===

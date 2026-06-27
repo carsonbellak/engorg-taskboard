@@ -413,6 +413,27 @@ function render() {
 
 function getProjectName(id) { return data.projects.find(p => p.id === id)?.name || ''; }
 function getProjectColor(id) { return data.projects.find(p => p.id === id)?.color || '#818CF8'; }
+
+// Build <option>/<optgroup> markup for project selectors, mirroring the desktop
+// project groups (settings.projectGroups + each project's groupId).
+function projectOptionGroups(selectedId) {
+  const groups = (data.settings.projectGroups || []).filter(g => !g.archived);
+  const opt = (p) => `<option value="${p.id}" ${p.id === selectedId ? 'selected' : ''}>${escapeHtml(p.name)}</option>`;
+  let html = '';
+  groups.forEach(g => {
+    const members = data.projects.filter(p => p.groupId === g.id);
+    if (!members.length) return;
+    html += `<optgroup label="${escapeHtml(g.name)}">${members.map(opt).join('')}</optgroup>`;
+  });
+  const ungrouped = data.projects.filter(p => !p.groupId || !groups.find(g => g.id === p.groupId));
+  const hasGroups = groups.some(g => data.projects.some(p => p.groupId === g.id));
+  if (ungrouped.length) {
+    html += hasGroups
+      ? `<optgroup label="Ungrouped">${ungrouped.map(opt).join('')}</optgroup>`
+      : ungrouped.map(opt).join('');
+  }
+  return html;
+}
 function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1242,8 +1263,7 @@ function openScheduleForm(editId = null) {
   const deleteBtn = document.getElementById('btn-delete-sched');
 
   const projSel = document.getElementById('sched-project');
-  projSel.innerHTML = `<option value="">No project</option>` +
-    data.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  projSel.innerHTML = `<option value="">No project</option>` + projectOptionGroups(null);
 
   if (editId) {
     const item = data.scheduleItems.find(i => i.id === editId);
@@ -1376,8 +1396,7 @@ function openPurchaseForm(editId = null) {
   const deleteBtn = document.getElementById('btn-delete-purch');
 
   const projSel = document.getElementById('purch-project');
-  projSel.innerHTML = `<option value="">No project</option>` +
-    data.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  projSel.innerHTML = `<option value="">No project</option>` + projectOptionGroups(null);
 
   if (editId) {
     const p = data.purchases.find(i => i.id === editId);
@@ -1528,10 +1547,9 @@ function populateProjectSelector() {
   const addSel = document.getElementById('add-project');
   const catSel = document.getElementById('add-category');
 
-  sel.innerHTML = `<option value="all">All Projects</option>` +
-    data.projects.map(p => `<option value="${p.id}" ${p.id === currentProject ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+  sel.innerHTML = `<option value="all">All Projects</option>` + projectOptionGroups(currentProject);
 
-  if (addSel) addSel.innerHTML = data.projects.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+  if (addSel) addSel.innerHTML = projectOptionGroups(null);
 
   if (catSel) {
     const cats = data.settings.categories || [];
