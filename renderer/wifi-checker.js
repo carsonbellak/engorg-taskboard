@@ -347,17 +347,25 @@ const wifiChecker = (() => {
   async function saveProfile(tab) {
     const selected = tab.meters.filter((m) => m.checked).map((m) => m.display);
     if (!selected.length) { alert('Please select at least one meter.'); return; }
-    const name = prompt('Profile name:');
-    if (!name) return;
+    const raw = await window._showPrompt({ title: '💾 Save Profile', placeholder: 'Profile name', confirmText: 'Save' });
+    if (!raw || !raw.trim()) return;
+    const name = raw.trim();
     const profiles = { ...getProfiles(), [name]: selected };
     await dataManager.updateSettings({ wifiProfiles: profiles });
     alert(`Profile "${name}" saved (${selected.length} meters).`);
   }
-  function loadProfile(tab) {
+  async function loadProfile(tab) {
     const profiles = getProfiles();
     const names = Object.keys(profiles);
     if (!names.length) { alert('No saved profiles yet.'); return; }
-    const name = prompt('Load which profile?\n\n' + names.join('\n'), names[0]);
+    const raw = await window._showPrompt({
+      title: '📂 Load Profile',
+      message: 'Saved profiles:\n' + names.join('\n'),
+      placeholder: 'Profile name',
+      defaultValue: names[0],
+      confirmText: 'Load',
+    });
+    const name = raw && raw.trim();
     if (!name || !profiles[name]) return;
     const want = new Set(profiles[name]);
     tab.meters.forEach((m) => { m.checked = want.has(m.display); });

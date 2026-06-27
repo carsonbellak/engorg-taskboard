@@ -675,6 +675,48 @@
     }
     window._showConfirm = showConfirm;
 
+    // Themed text-input prompt (replaces native prompt(), which returns null in Electron).
+    // Resolves the entered string on OK, or null on cancel.
+    function showPrompt({ title = 'Enter Value', message = '', placeholder = '', defaultValue = '', confirmText = 'OK', cancelText = 'Cancel' } = {}) {
+      return new Promise(resolve => {
+        const modal = document.getElementById('modal-prompt');
+        document.getElementById('modal-prompt-title').textContent = title;
+        const msgEl = document.getElementById('modal-prompt-message');
+        msgEl.textContent = message;
+        msgEl.style.display = message ? '' : 'none';
+        const input = document.getElementById('modal-prompt-input');
+        input.placeholder = placeholder;
+        input.value = defaultValue;
+        const okBtn = document.getElementById('btn-prompt-ok');
+        const cancelBtn = document.getElementById('btn-prompt-cancel');
+        okBtn.textContent = confirmText;
+        cancelBtn.textContent = cancelText;
+        modal.classList.remove('hidden');
+
+        const cleanup = (result) => {
+          modal.classList.add('hidden');
+          okBtn.removeEventListener('click', onOk);
+          cancelBtn.removeEventListener('click', onCancel);
+          modal.removeEventListener('mousedown', onBackdrop);
+          input.removeEventListener('keydown', onKey);
+          resolve(result);
+        };
+        const onOk = () => cleanup(input.value);
+        const onCancel = () => cleanup(null);
+        const onBackdrop = (e) => { if (e.target === modal) cleanup(null); };
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); cleanup(null); }
+          else if (e.key === 'Enter') { e.preventDefault(); cleanup(input.value); }
+        };
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        modal.addEventListener('mousedown', onBackdrop);
+        input.addEventListener('keydown', onKey);
+        setTimeout(() => { input.focus(); input.select(); }, 50);
+      });
+    }
+    window._showPrompt = showPrompt;
+
     // ============ PROJECT GROUP MODAL (create / edit) ============
     const GROUP_PALETTE = ['#6366F1', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316', '#06B6D4'];
     let _groupModalSelectedColor = GROUP_PALETTE[0];

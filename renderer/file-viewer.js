@@ -1340,7 +1340,7 @@ class FileViewer {
     document.getElementById('fv-btn-new-file').addEventListener('click', async () => {
       const dir = this.currentDir || this.rootDir;
       if (!dir) { fvToast('Open a folder first', 'error'); return; }
-      const name = prompt('New file name:');
+      const name = await window._showPrompt({ title: '📄 New File', placeholder: 'New file name', confirmText: 'Create' });
       if (!name || !name.trim()) return;
       const fullPath = dir + (dir.includes('/') ? '/' : '\\') + name.trim();
       try {
@@ -1354,7 +1354,7 @@ class FileViewer {
     document.getElementById('fv-btn-new-folder').addEventListener('click', async () => {
       const dir = this.currentDir || this.rootDir;
       if (!dir) { fvToast('Open a folder first', 'error'); return; }
-      const name = prompt('New folder name:');
+      const name = await window._showPrompt({ title: '📁 New Folder', placeholder: 'New folder name', confirmText: 'Create' });
       if (!name || !name.trim()) return;
       const fullPath = dir + (dir.includes('/') ? '/' : '\\') + name.trim();
       try {
