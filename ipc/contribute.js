@@ -57,6 +57,21 @@ function blobSha(buf) {
   return h.digest('hex');
 }
 
+// Detect binary content (NUL byte in the first chunk) the way git roughly does.
+function isBinary(buf) {
+  const n = Math.min(buf.length, 8000);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
+// Upstream text blobs are stored with LF (core.autocrlf), but the install checks
+// out CRLF on Windows. Without normalizing, every text file would falsely show as
+// "modified". Normalize CRLF→LF for text before hashing so the diff is accurate.
+function gitBlobSha(buf) {
+  const content = isBinary(buf) ? buf : Buffer.from(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return blobSha(content);
+}
+
 async function walk(dir, rel, out) {
   let entries;
   try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -102,20 +117,40 @@ module.exports = function registerContribute() {
         return { error: `Could not read upstream (${ref.status}).` };
       }
       const upstream = new Map();
-      for (const t of (ref.data.tree || [])) if (t.type === 'blob') upstream.set(t.path, t.sha);
+      const trackedTop = new Set();
+      for (const t of (ref.data.tree || [])) if (t.type === 'blob') {
+        upstream.set(t.path, t.sha);
+        trackedTop.add(t.path.split('/')[0]);
+      }
 
       const local = [];
       await walk(APP_ROOT, '', local);
       const localSet = new Set(local);
+      // Top-level areas the install actually ships. The install is a SUBSET of the
+      // repo (it omits .github/, firebase config, build scripts, etc.), so a repo
+      // file missing locally usually means "not shipped", not "deleted". Only treat
+      // a missing file as deleted when the install ships that top-level area.
+      const localTop = new Set(local.map(p => p.split('/')[0]));
 
       const changes = [];
       for (const p of local) {
         let buf; try { buf = await fsp.readFile(path.join(APP_ROOT, p)); } catch { continue; }
-        const sha = blobSha(buf);
-        if (!upstream.has(p)) changes.push({ path: p, status: 'added', size: buf.length });
-        else if (upstream.get(p) !== sha) changes.push({ path: p, status: 'modified', size: buf.length });
+        const sha = gitBlobSha(buf);
+        if (!upstream.has(p)) {
+          // Surface genuinely new source files: root-level files, or files inside a
+          // directory the repo already tracks. Skip stray files in untracked
+          // top-level dirs, and skip new binary blobs (e.g. installer artifacts).
+          const isRoot = !p.includes('/');
+          if ((isRoot || trackedTop.has(p.split('/')[0])) && !(isRoot && isBinary(buf))) {
+            changes.push({ path: p, status: 'added', size: buf.length });
+          }
+        } else if (upstream.get(p) !== sha) {
+          changes.push({ path: p, status: 'modified', size: buf.length });
+        }
       }
-      for (const p of upstream.keys()) if (!localSet.has(p)) changes.push({ path: p, status: 'deleted', size: 0 });
+      for (const p of upstream.keys()) {
+        if (!localSet.has(p) && localTop.has(p.split('/')[0])) changes.push({ path: p, status: 'deleted', size: 0 });
+      }
 
       changes.sort((a, b) => a.path.localeCompare(b.path));
       return { changes, repoUrl: config.CONTRIB_REPO_URL };

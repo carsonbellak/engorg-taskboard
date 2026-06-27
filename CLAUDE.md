@@ -16,6 +16,27 @@ Pure desktop-only concerns (Electron main process, IPC, OS/file/printer/slicer i
 
 ---
 
+## 🚀 Submitting changes (push / contribute) — use the script, not raw git
+
+This install directory is **not a git checkout**, so don't try to `git commit`/`push`
+from here. When the user asks to "push", "submit", or "contribute" changes, use the
+self-contained CLI:
+
+```bash
+node submit-changes.js --list          # safe: shows the real change set, commits nothing
+node submit-changes.js -m "<message>"  # commit + push to main (owner/collaborator)
+node submit-changes.js -m "..." --pr   # push to a branch and print a PR-compare link
+```
+
+The script keeps a cached clone at `~/.engorg-submit/<repo>`, mirrors your changed
+source files into it (git normalizes CRLF↔LF so only real edits show), commits, and
+pushes. It is **update-only** — it never deletes repo files the install doesn't ship.
+Always run `--list` first to confirm the change set. Full details: `CONTRIBUTING.md`.
+The in-app equivalent (for non-maintainers) is Settings → Contribute → "Submit Changes…"
+(`ipc/contribute.js`), which forks + opens a PR via GitHub sign-in.
+
+---
+
 ## File Map
 
 | File | Purpose |
