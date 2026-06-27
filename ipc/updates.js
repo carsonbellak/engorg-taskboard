@@ -17,8 +17,12 @@ const { ipcMain, app, shell, BrowserWindow } = require('electron');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const { execFile, spawn } = require('child_process');
 const config = require('../config');
+
+// Top-level entries that aren't part of the running app (never pulled/overwritten).
+const IGNORE = new Set(config.CONTRIB_IGNORE || ['.git', 'node_modules', 'appdata']);
 
 // Rolling release the CI publishes EngOrg-Setup.exe to on every push.
 const INSTALLER_URL = `${config.CONTRIB_REPO_URL}/releases/download/latest/EngOrg-Setup.exe`;
@@ -62,6 +66,38 @@ const isGitRepo = () => fs.existsSync(path.join(APP_ROOT, '.git'));
 async function localHead() {
   try { return (await execFilePromise('git', ['-C', APP_ROOT, 'rev-parse', 'HEAD'])).trim(); }
   catch { return null; }
+}
+
+// ---- File-level pull helpers (apply upstream changes without a git checkout) ----
+// git blob sha1: sha1("blob <bytelen>\0" + content)
+function blobSha(buf) {
+  const h = crypto.createHash('sha1');
+  h.update('blob ' + buf.length + '\0'); h.update(buf);
+  return h.digest('hex');
+}
+function isBinary(buf) {
+  const n = Math.min(buf.length, 8000);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+// Upstream text blobs are stored with LF; the local install may have CRLF. Normalize
+// before hashing so unchanged files aren't seen as different (and re-downloaded).
+function gitBlobSha(buf) {
+  const content = isBinary(buf) ? buf : Buffer.from(buf.toString('latin1').replace(/\r\n/g, '\n'), 'latin1');
+  return blobSha(content);
+}
+// The install is a subset of the repo; only touch top-level areas it actually ships.
+function shippedTopLevel() {
+  let names = [];
+  try { names = fs.readdirSync(APP_ROOT); } catch {}
+  return new Set(names.filter((n) => !IGNORE.has(n)));
+}
+async function fetchRaw(owner, repo, branch, p) {
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/` +
+    p.split('/').map(encodeURIComponent).join('/');
+  const r = await fetch(url, { cache: 'no-store', redirect: 'follow' });
+  if (!r.ok) throw new Error(`Download failed for ${p} (${r.status}).`);
+  return Buffer.from(await r.arrayBuffer());
 }
 
 module.exports = function registerUpdates() {
@@ -122,6 +158,63 @@ module.exports = function registerUpdates() {
       return { ok: true, output: out.trim() };
     } catch (e) {
       // Common causes: local uncommitted changes, non-fast-forward, or auth required.
+      return { error: e.message };
+    }
+  });
+
+  // No git checkout: "pull" by downloading just the changed upstream files in place.
+  // Diffs the repo tree against the install (CRLF-normalized blob compare), fetches
+  // every changed file into memory first (so a mid-download failure changes nothing),
+  // then writes them all. Reports file-count progress on the same channel the
+  // installer download uses. Advances the baseline so the prompt stops afterward.
+  ipcMain.handle('updates:pull', async () => {
+    const { owner, repo, branch } = config.CONTRIB_REPO;
+    const win = BrowserWindow.getAllWindows()[0];
+    try {
+      const tree = await gh(`/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, { timeoutMs: 15000 });
+      if (!tree.ok || !tree.data || !Array.isArray(tree.data.tree)) {
+        return { error: `Could not read the update file list (${tree.status || 'no response'}).` };
+      }
+      const head = await gh(`/repos/${owner}/${repo}/commits/${branch}`);
+      const latestSha = head.ok && head.data && head.data.sha;
+
+      const shipped = shippedTopLevel();
+
+      // Which upstream files differ from the local copy (within the install footprint)?
+      const toPull = [];
+      for (const t of tree.data.tree) {
+        if (t.type !== 'blob') continue;
+        if (!shipped.has(t.path.split('/')[0])) continue;
+        let localSha = null;
+        try { localSha = gitBlobSha(await fsp.readFile(path.join(APP_ROOT, t.path))); } catch { localSha = null; }
+        if (localSha !== t.sha) toPull.push(t.path);
+      }
+
+      if (toPull.length === 0) {
+        if (latestSha) await writeState({ baseline: latestSha });
+        return { ok: true, count: 0, files: [] };
+      }
+
+      // Phase 1 — download everything into memory (atomic-ish: nothing written yet).
+      const blobs = [];
+      let depsChanged = false;
+      for (let i = 0; i < toPull.length; i++) {
+        const p = toPull[i];
+        blobs.push({ path: p, buf: await fetchRaw(owner, repo, branch, p) });
+        if (p === 'package.json' || p === 'package-lock.json') depsChanged = true;
+        if (win) win.webContents.send('updates:progress', { received: i + 1, total: toPull.length, pct: Math.round(((i + 1) / toPull.length) * 100) });
+      }
+
+      // Phase 2 — write them all.
+      for (const b of blobs) {
+        const abs = path.join(APP_ROOT, b.path);
+        await fsp.mkdir(path.dirname(abs), { recursive: true });
+        await fsp.writeFile(abs, b.buf);
+      }
+
+      if (latestSha) await writeState({ baseline: latestSha });
+      return { ok: true, count: blobs.length, files: blobs.map((b) => b.path), depsChanged };
+    } catch (e) {
       return { error: e.message };
     }
   });

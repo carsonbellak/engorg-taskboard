@@ -1364,6 +1364,8 @@ body:has(.modal:not(.hidden)) #header {
 .update-skip-link { display: block; margin: 14px 0 0; background: none; border: none; cursor: pointer;
   font-size: 12px; color: var(--text-muted, #64748B); text-decoration: underline; padding: 0; }
 .update-skip-link:hover { color: var(--text-primary, #1E293B); }
+.update-deps-note { font-size: 12px !important; color: var(--text-muted, #64748B) !important;
+  background: var(--bg-input, rgba(148,163,184,0.12)); border-radius: 8px; padding: 8px 10px; }
 
 .modal-box h2 {
   margin: 0 0 16px;

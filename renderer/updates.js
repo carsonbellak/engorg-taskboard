@@ -56,7 +56,9 @@ const updateChecker = (() => {
     if (res.isGitRepo) {
       actions.push({ label: 'Update now', primary: true, onClick: (ov, box) => applyGitUpdate(ov, box, res) });
     } else {
-      actions.push({ label: 'Download & Install', primary: true, onClick: (ov, box) => downloadAndInstall(ov, box, res) });
+      // Pull just the changed files in-app (themed, no installer). The full
+      // installer remains available as a fallback on the result screen.
+      actions.push({ label: 'Update now', primary: true, onClick: (ov, box) => applyFilePull(ov, box, res) });
     }
 
     const { box } = buildModal({ title: 'Update available', bodyHtml, actions });
@@ -97,28 +99,71 @@ const updateChecker = (() => {
     }
   }
 
-  // Packaged-build update: download the latest installer in-app (with a progress
-  // bar) and run it — no trip to GitHub.
+  // Register the shared progress listener once (used by both the file-pull and the
+  // installer download — they emit on the same channel).
   let progressBound = false;
+  function bindProgress() {
+    if (progressBound) return;
+    progressBound = true;
+    window.api.updates.onProgress(({ pct }) => {
+      const bar = document.getElementById('update-progress-bar');
+      const pctEl = document.getElementById('update-progress-pct');
+      if (bar) bar.style.width = (pct || 0) + '%';
+      if (pctEl) pctEl.textContent = (pct != null ? pct : 0) + '%';
+    });
+  }
+
+  const progressHtml = (label) => `<p>${label}</p>
+    <div class="update-progress"><div class="update-progress-bar" id="update-progress-bar"></div></div>
+    <div class="update-progress-pct" id="update-progress-pct">0%</div>`;
+
+  // Packaged-build update via file pull: download just the changed files from the
+  // repo, in-app, and write them in place — no installer, stays fully themed.
+  async function applyFilePull(ov, box, res) {
+    const body = box.querySelector('.update-modal-body');
+    const actions = box.querySelector('.modal-actions');
+    const skipLink = box.querySelector('.update-skip-link');
+    if (skipLink) skipLink.remove();
+    body.innerHTML = progressHtml('Downloading the latest changes…');
+    actions.innerHTML = '';
+    bindProgress();
+
+    const r = await window.api.updates.pull();
+    if (r && r.ok) {
+      if (r.count === 0) {
+        body.innerHTML = `<p>You're already up to date.</p>`;
+        addActions(actions, [{ label: 'Close', primary: true, onClick: () => closeModal(ov) }]);
+        return;
+      }
+      const depsNote = r.depsChanged
+        ? `<p class="update-deps-note">This update touched dependencies. If anything misbehaves after restart, use <b>Full reinstall</b>.</p>`
+        : '';
+      body.innerHTML = `<p>Updated <b>${r.count}</b> file${r.count === 1 ? '' : 's'}. Restart to load the new version.</p>${depsNote}`;
+      addActions(actions, [
+        { label: 'Later', onClick: () => closeModal(ov) },
+        { label: 'Restart now', primary: true, onClick: () => window.api.updates.restart() },
+      ]);
+    } else {
+      const msg = (r && r.error) || 'The update could not be downloaded.';
+      body.innerHTML = `<p>Couldn't pull the update automatically:</p><pre class="update-output update-error">${esc(msg)}</pre>
+        <p>You can try a full reinstall instead.</p>`;
+      addActions(actions, [
+        { label: 'Close', onClick: () => closeModal(ov) },
+        { label: 'Full reinstall', primary: true, onClick: () => downloadAndInstall(ov, box, res) },
+      ]);
+    }
+  }
+
+  // Packaged-build update: download the latest installer in-app (with a progress
+  // bar) and run it — fallback when a file pull isn't enough (e.g. dependency changes).
   async function downloadAndInstall(ov, box, res) {
     const body = box.querySelector('.update-modal-body');
     const actions = box.querySelector('.modal-actions');
     const skipLink = box.querySelector('.update-skip-link');
     if (skipLink) skipLink.remove();
-    body.innerHTML = `<p>Downloading the latest version…</p>
-      <div class="update-progress"><div class="update-progress-bar" id="update-progress-bar"></div></div>
-      <div class="update-progress-pct" id="update-progress-pct">0%</div>`;
+    body.innerHTML = progressHtml('Downloading the latest version…');
     actions.innerHTML = '';
-
-    if (!progressBound) { // register the progress listener once
-      progressBound = true;
-      window.api.updates.onProgress(({ pct }) => {
-        const bar = document.getElementById('update-progress-bar');
-        const pctEl = document.getElementById('update-progress-pct');
-        if (bar) bar.style.width = (pct || 0) + '%';
-        if (pctEl) pctEl.textContent = (pct != null ? pct : 0) + '%';
-      });
-    }
+    bindProgress();
 
     const latest = res.latest || {};
     const r = await window.api.updates.download();

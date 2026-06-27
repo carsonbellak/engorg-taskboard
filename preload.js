@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('api', {
   updates: {
     check: () => ipcRenderer.invoke('updates:check'),
     apply: () => ipcRenderer.invoke('updates:apply'),
+    pull: () => ipcRenderer.invoke('updates:pull'),
     skip: (sha) => ipcRenderer.invoke('updates:skip', sha),
     openRepo: () => ipcRenderer.invoke('updates:openRepo'),
     download: () => ipcRenderer.invoke('updates:download'),
