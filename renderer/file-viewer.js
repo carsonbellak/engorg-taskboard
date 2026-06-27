@@ -1302,13 +1302,26 @@ class FileViewer {
     const resizer = document.getElementById('file-viewer-resizer');
     const sidebar = document.querySelector('.file-viewer-sidebar');
     let isResizing = false;
+    const endResize = () => {
+      if (!isResizing) return;
+      isResizing = false;
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
     resizer.addEventListener('mousedown', (e) => { isResizing = true; resizer.classList.add('dragging'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; e.preventDefault(); });
     document.addEventListener('mousemove', (e) => {
       if (!isResizing) return;
+      // If the button was released outside the window, the document mouseup never
+      // fired — detect the now-up button on re-entry and end the drag so the
+      // cursor / user-select overrides don't stick.
+      if (e.buttons === 0) { endResize(); return; }
       const layoutRect = document.querySelector('.file-viewer-layout').getBoundingClientRect();
       sidebar.style.width = Math.max(180, Math.min(500, e.clientX - layoutRect.left)) + 'px';
     });
-    document.addEventListener('mouseup', () => { if (isResizing) { isResizing = false; resizer.classList.remove('dragging'); document.body.style.cursor = ''; document.body.style.userSelect = ''; } });
+    document.addEventListener('mouseup', endResize);
+    // Releasing outside the window / losing focus mid-drag also ends the resize.
+    window.addEventListener('blur', endResize);
 
     // Close context menu on click
     document.addEventListener('click', () => { const m = document.querySelector('.fv-context-menu'); if (m) m.remove(); });

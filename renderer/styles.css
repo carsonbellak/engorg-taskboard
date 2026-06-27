@@ -1313,14 +1313,17 @@ body.theme-dark .sticky-note .note-link-chip:hover {
 
 /* Frameless-window drag-region fix: the title bar + header are draggable
    (-webkit-app-region: drag). Chromium hit-tests drag regions at the OS level
-   and IGNORES z-index, so a draggable header can swallow clicks on a modal
-   control rendered on top of it (e.g. the project-name input near the top of a
-   centered modal) — making it impossible to click/type "sometimes". Killing the
-   drag region whenever any modal is open removes the conflict entirely; there's
-   no reason to drag the window while a modal is up. */
-body:has(.modal:not(.hidden)) #titlebar,
-body:has(.modal:not(.hidden)) #titlebar .titlebar-drag,
-body:has(.modal:not(.hidden)) #header {
+   and IGNORES z-index, so a draggable header can swallow clicks on a control
+   rendered on top of it (e.g. an input near the top of a centered overlay) —
+   making it impossible to click/type "sometimes". Killing the drag region
+   whenever any blocking overlay is open removes the conflict entirely; there's
+   no reason to drag the window while one is up.
+   NOTE: every full-screen overlay that contains inputs must be listed here (or
+   use the `.modal` class). Currently: .modal, .wifi-modal-overlay (Contribute /
+   feature / wifi / uart prompts), .kicad-modal-overlay, and the .auth-gate. */
+body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-gate:not(.hidden)) #titlebar,
+body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-gate:not(.hidden)) #titlebar .titlebar-drag,
+body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-gate:not(.hidden)) #header {
   -webkit-app-region: no-drag;
 }
 
