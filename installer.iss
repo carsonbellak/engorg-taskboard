@@ -3,11 +3,16 @@
 
 #define MyAppName "EngOrg"
 ; CI passes /DBuildNumber=<run_number> (see the release workflow) so each build is
-; versioned 1.0.<run_number>; local builds default to 1.0.0.
+; versioned 1.0.<run_number>; local builds default to 1.0.0. For tagged releases the
+; workflow passes /DAppVersionFull=<semver> (e.g. 1.1.0) to stamp the real version.
 #ifndef BuildNumber
   #define BuildNumber 0
 #endif
-#define MyAppVersion "1.0." + Str(BuildNumber)
+#ifdef AppVersionFull
+  #define MyAppVersion AppVersionFull
+#else
+  #define MyAppVersion "1.0." + Str(BuildNumber)
+#endif
 #define MyAppPublisher "EngOrg"
 #define MyAppURL "https://assistant-taskboard.web.app"
 ; launch.vbs runs the app with no visible console window (see View > Show Console in-app)
