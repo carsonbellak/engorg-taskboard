@@ -1051,6 +1051,7 @@
     }
     window.addEventListener('tasks-changed', () => scheduleRender({ dots: true }));
     window.addEventListener('timers-changed', () => { if (viewRenderer.currentView === 'timers') renderTimers(); });
+    window.addEventListener('alarms-changed', () => { if (viewRenderer.currentView === 'timers') renderTimers(); });
     window.addEventListener('schedule-changed', () => scheduleRender({ dots: true }));
     window.addEventListener('purchases-changed', () => scheduleRender());
     window.addEventListener('projects-changed', () => scheduleRender({ sidebar: true }));

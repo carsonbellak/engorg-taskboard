@@ -160,6 +160,12 @@ let listeners = [];
 let editingNoteId = null;
 let timers = { active: [], recent: [] };
 let timerCountdownInterval = null;
+let timerTab = 'timers';          // 'timers' | 'alarms' | 'stopwatch'
+let editingAlarmId = null;
+let alarmDayDraft = [];
+let stopwatch = { running: false, startTs: 0, accumulated: 0, laps: [] };
+let swInterval = null;
+const notifiedTimerIds = new Set();
 let editingScheduleId = null;
 let editingPurchaseId = null;
 let calendarMonth = new Date();
@@ -1989,12 +1995,32 @@ function formatDurationLabel(seconds) {
   return `${seconds}s`;
 }
 
+const PWA_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const PWA_WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
 function renderTimers() {
+  let html = '<div class="timers-page">';
+
+  html += `<div class="timers-tabs">
+    ${[['timers', '⏱ Timers'], ['alarms', '⏰ Alarms'], ['stopwatch', '⏲ Stopwatch']]
+      .map(([id, label]) => `<button class="timers-tab-btn ${timerTab === id ? 'active' : ''}" data-ttab="${id}">${label}</button>`)
+      .join('')}
+  </div>`;
+
+  if (timerTab === 'timers')         html += renderTimersPane();
+  else if (timerTab === 'alarms')    html += renderAlarmsPane();
+  else if (timerTab === 'stopwatch') html += renderStopwatchPane();
+
+  html += '</div>';
+  return html;
+}
+
+function renderTimersPane() {
   const isPushGranted = typeof Notification !== 'undefined' && Notification.permission === 'granted';
   const isStandalone = window.navigator.standalone === true ||
     (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
 
-  let html = '<div class="timers-page">';
+  let html = '';
 
   if (!isPushGranted) {
     html += `<div class="timer-push-banner">
@@ -2019,6 +2045,7 @@ function renderTimers() {
       ${[5, 10, 15, 30].map(m => `<button class="timer-preset-btn" data-minutes="${m}">${m}m</button>`).join('')}
       ${[1, 2].map(h => `<button class="timer-preset-btn" data-minutes="${h * 60}">${h}h</button>`).join('')}
     </div>
+    <label class="timer-repeat-toggle"><input type="checkbox" id="timer-repeat"> &#128257; Repeat</label>
     <button class="btn-primary-full" id="btn-start-timer">Start Timer</button>
   </div>`;
 
@@ -2027,32 +2054,93 @@ function renderTimers() {
     for (const t of timers.active) {
       const secondsLeft = t.expiresAt ? Math.max(0, Math.round((t.expiresAt - Date.now()) / 1000)) : 0;
       html += `<div class="timer-card timer-card-active" data-timer-id="${t.id}">
-        <div class="timer-card-label">${escapeHtml(t.label)}</div>
+        <div class="timer-card-label">${escapeHtml(t.label)}${t.repeat ? ' &#128257;' : ''}</div>
         <div class="timer-countdown" data-expires="${t.expiresAt?.getTime?.() || 0}">${formatCountdown(secondsLeft)}</div>
         <div class="timer-card-meta">${formatDurationLabel(t.durationSeconds)}</div>
         <button class="timer-cancel-btn" data-id="${t.id}">Cancel</button>
       </div>`;
     }
-  }
-
-  if (timers.recent.length > 0) {
-    html += '<div class="timer-section-title">Recent</div>';
-    for (const t of timers.recent) {
-      const statusLabel = { expired: 'Done', dismissed: 'Dismissed', cancelled: 'Cancelled' }[t.status] || t.status;
-      html += `<div class="timer-card timer-card-${t.status}">
-        <div class="timer-card-label">${escapeHtml(t.label)}</div>
-        <div class="timer-card-meta">${formatDurationLabel(t.durationSeconds)} &middot; ${statusLabel}</div>
-      </div>`;
-    }
-  }
-
-  if (timers.active.length === 0 && timers.recent.length === 0) {
+  } else {
     html += `<div class="empty-state">
       <div class="empty-icon">&#9201;</div>
-      <div class="empty-text">No timers yet.<br>Start one above or say<br><strong>"Hey Siri, Quick Timer"</strong></div>
+      <div class="empty-text">No active timers.<br>Start one above or say<br><strong>"Hey Siri, Quick Timer"</strong></div>
     </div>`;
   }
 
+  return html;
+}
+
+function renderAlarmsPane() {
+  const alarms = getPwaAlarms();
+  let html = '';
+
+  const editing = editingAlarmId && alarms.find(a => a.id === editingAlarmId);
+  if (!editing) editingAlarmId = null;
+  const draftTime = editing ? editing.time : '08:00';
+  const draftLabel = editing ? (editing.label || '') : '';
+
+  html += `<div class="timer-create-card">
+    <h2 class="timer-create-title">${editing ? 'Edit Alarm' : 'New Alarm'}</h2>
+    <input type="time" id="alarm-time" class="form-input alarm-time-input" value="${draftTime}">
+    <input type="text" id="alarm-label" class="form-input" placeholder="Label (optional)" maxlength="100" value="${escapeHtml(draftLabel)}">
+    <div class="alarm-day-pills">
+      ${PWA_WEEKDAY_INITIALS.map((d, i) => `<button class="alarm-day-pill ${alarmDayDraft.includes(i) ? 'active' : ''}" data-day="${i}">${d}</button>`).join('')}
+    </div>
+    <div class="timer-presets">
+      <button class="alarm-preset" data-preset="daily">Every day</button>
+      <button class="alarm-preset" data-preset="weekdays">Weekdays</button>
+      <button class="alarm-preset" data-preset="weekends">Weekends</button>
+      <button class="alarm-preset" data-preset="once">Once</button>
+    </div>
+    <button class="btn-primary-full" id="alarm-save-btn">${editing ? 'Save Alarm' : '+ Add Alarm'}</button>
+    ${editing ? '<button class="btn-secondary-full" id="alarm-cancel-edit">Cancel</button>' : ''}
+  </div>`;
+
+  if (alarms.length > 0) {
+    const sorted = [...alarms].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    html += '<div class="timer-section-title">Alarms</div>';
+    for (const a of sorted) {
+      const next = pwaNextAlarm(a);
+      html += `<div class="alarm-row ${a.enabled ? '' : 'alarm-row-off'}" data-id="${a.id}">
+        <div class="alarm-time">${pwaFmt12(a.time)}</div>
+        <div class="alarm-info">
+          <div class="alarm-label">${escapeHtml(a.label || 'Alarm')}</div>
+          <div class="alarm-meta"><span>${pwaDaysSummary(a.days)}</span>${a.enabled && next ? `<span class="alarm-next"> &middot; ${pwaFmtNext(next)}</span>` : ''}</div>
+        </div>
+        <label class="alarm-switch"><input type="checkbox" class="alarm-toggle" data-id="${a.id}" ${a.enabled ? 'checked' : ''}><span class="alarm-switch-track"></span></label>
+        <button class="alarm-act alarm-edit" data-id="${a.id}">&#9998;</button>
+        <button class="alarm-act alarm-delete" data-id="${a.id}">&#128465;</button>
+      </div>`;
+    }
+  } else {
+    html += `<div class="empty-state">
+      <div class="empty-icon">&#9200;</div>
+      <div class="empty-text">No alarms yet.<br>Set a time above and add one.</div>
+    </div>`;
+  }
+
+  return html;
+}
+
+function renderStopwatchPane() {
+  const running = stopwatch.running;
+  const hasTime = swElapsed() > 0 || running;
+  let html = `<div class="stopwatch-panel">
+    <div class="sw-display" id="sw-display">${fmtStopwatch(swElapsed())}</div>
+    <div class="sw-controls">
+      <button class="sw-btn ${running ? 'sw-stop' : 'sw-start'}" id="sw-toggle">${running ? '⏸ Stop' : '▶ Start'}</button>
+      <button class="sw-btn sw-lap" id="sw-lap" ${running ? '' : 'disabled'}>⚐ Lap</button>
+      <button class="sw-btn sw-reset" id="sw-reset" ${hasTime ? '' : 'disabled'}>↺ Reset</button>
+    </div>`;
+  if (stopwatch.laps.length > 0) {
+    html += '<div class="sw-laps">';
+    let prev = 0;
+    stopwatch.laps.forEach((total, i) => {
+      const split = total - prev; prev = total;
+      html += `<div class="sw-lap-row"><span class="sw-lap-num">Lap ${i + 1}</span><span class="sw-lap-split">${fmtStopwatch(split)}</span><span class="sw-lap-total">${fmtStopwatch(total)}</span></div>`;
+    });
+    html += '</div>';
+  }
   html += '</div>';
   return html;
 }
@@ -2069,7 +2157,28 @@ function startTimerCountdown() {
   }, 1000);
 }
 
+async function pwaStartTimer(label, totalSeconds, repeat) {
+  const apiToken = await getApiToken();
+  const r = await fetch('/api/startTimer', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ label, duration: `${totalSeconds} seconds`, repeat: !!repeat })
+  });
+  const result = await r.json();
+  if (!result.success) throw new Error(result.error || 'Failed');
+}
+
 function bindTimerEvents() {
+  document.querySelectorAll('.timers-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => { timerTab = btn.dataset.ttab; render(); });
+  });
+
+  if (timerTab === 'timers')    bindTimersPaneEvents();
+  else if (timerTab === 'alarms')    bindAlarmEvents();
+  else if (timerTab === 'stopwatch') { bindStopwatchEvents(); swTick(); }
+}
+
+function bindTimersPaneEvents() {
   document.querySelectorAll('.timer-preset-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const mins = parseInt(btn.dataset.minutes);
@@ -2090,6 +2199,7 @@ function bindTimerEvents() {
     const label = (document.getElementById('timer-label-input').value.trim()) || 'Timer';
     const mins = parseInt(document.getElementById('timer-minutes').value) || 0;
     const secs = parseInt(document.getElementById('timer-seconds').value) || 0;
+    const repeat = document.getElementById('timer-repeat')?.checked || false;
     const totalSeconds = mins * 60 + secs;
 
     if (totalSeconds < 5) { alert('Please set a duration of at least 5 seconds.'); return; }
@@ -2098,17 +2208,11 @@ function bindTimerEvents() {
     btn.disabled = true; btn.textContent = 'Starting…';
 
     try {
-      const apiToken = await getApiToken();
-      const r = await fetch('/api/startTimer', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + apiToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label, duration: `${totalSeconds} seconds` })
-      });
-      const result = await r.json();
-      if (!result.success) throw new Error(result.error || 'Failed');
+      await pwaStartTimer(label, totalSeconds, repeat);
       document.getElementById('timer-label-input').value = '';
       document.getElementById('timer-minutes').value = '';
       document.getElementById('timer-seconds').value = '';
+      document.getElementById('timer-repeat').checked = false;
     } catch (err) {
       alert('Could not start timer: ' + err.message);
     } finally {
@@ -2133,3 +2237,236 @@ function bindTimerEvents() {
     }
   });
 }
+
+// ── PWA Alarms ──────────────────────────────────────────────────
+function getPwaAlarms() {
+  if (!Array.isArray(data.settings.alarms)) data.settings.alarms = [];
+  return data.settings.alarms;
+}
+async function savePwaAlarms() {
+  const { _updatedAt, _source, ...rest } = data.settings;
+  await saveCollection('settings', rest);
+}
+
+function bindAlarmEvents() {
+  document.querySelectorAll('.alarm-day-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const d = parseInt(btn.dataset.day);
+      if (alarmDayDraft.includes(d)) alarmDayDraft = alarmDayDraft.filter(x => x !== d);
+      else alarmDayDraft = [...alarmDayDraft, d].sort();
+      btn.classList.toggle('active');
+    });
+  });
+
+  document.querySelectorAll('.alarm-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = btn.dataset.preset;
+      if (p === 'daily')         alarmDayDraft = [0, 1, 2, 3, 4, 5, 6];
+      else if (p === 'weekdays') alarmDayDraft = [1, 2, 3, 4, 5];
+      else if (p === 'weekends') alarmDayDraft = [0, 6];
+      else                       alarmDayDraft = [];
+      document.querySelectorAll('.alarm-day-pill').forEach(pill => {
+        pill.classList.toggle('active', alarmDayDraft.includes(parseInt(pill.dataset.day)));
+      });
+    });
+  });
+
+  document.getElementById('alarm-save-btn')?.addEventListener('click', async () => {
+    const time = document.getElementById('alarm-time').value;
+    if (!time) { alert('Please pick a time.'); return; }
+    const label = document.getElementById('alarm-label').value.trim() || 'Alarm';
+    const days = [...alarmDayDraft];
+    const list = getPwaAlarms();
+    if (editingAlarmId) {
+      const a = list.find(x => x.id === editingAlarmId);
+      if (a) Object.assign(a, { time, label, days, enabled: true, lastFired: null });
+      editingAlarmId = null;
+    } else {
+      list.push({ id: 'alarm_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label, time, days, enabled: true, lastFired: null, createdAt: new Date().toISOString() });
+    }
+    alarmDayDraft = [];
+    await savePwaAlarms();
+    render();
+  });
+
+  document.getElementById('alarm-cancel-edit')?.addEventListener('click', () => {
+    editingAlarmId = null; alarmDayDraft = []; render();
+  });
+
+  document.querySelectorAll('.alarm-toggle').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const a = getPwaAlarms().find(x => x.id === cb.dataset.id);
+      if (a) { a.enabled = cb.checked; if (cb.checked) a.lastFired = null; }
+      await savePwaAlarms();
+      render();
+    });
+  });
+
+  document.querySelectorAll('.alarm-edit').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const a = getPwaAlarms().find(x => x.id === btn.dataset.id);
+      if (!a) return;
+      editingAlarmId = a.id;
+      alarmDayDraft = Array.isArray(a.days) ? [...a.days] : [];
+      render();
+    });
+  });
+
+  document.querySelectorAll('.alarm-delete').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this alarm?')) return;
+      if (editingAlarmId === btn.dataset.id) editingAlarmId = null;
+      data.settings.alarms = getPwaAlarms().filter(x => x.id !== btn.dataset.id);
+      await savePwaAlarms();
+      render();
+    });
+  });
+}
+
+function pwaNextAlarm(a) {
+  if (!a || !a.enabled || !a.time) return null;
+  const [h, m] = a.time.split(':').map(Number);
+  const now = new Date();
+  const recurring = Array.isArray(a.days) && a.days.length > 0;
+  for (let i = 0; i < 8; i++) {
+    const d = new Date(now); d.setDate(now.getDate() + i); d.setHours(h, m, 0, 0);
+    if (d <= now) continue;
+    if (!recurring) return d;
+    if (a.days.includes(d.getDay())) return d;
+  }
+  return null;
+}
+function pwaDaysSummary(days) {
+  if (!Array.isArray(days) || days.length === 0) return 'Once';
+  const set = [...days].sort();
+  if (set.length === 7) return 'Every day';
+  if (set.length === 5 && [1, 2, 3, 4, 5].every(d => set.includes(d))) return 'Weekdays';
+  if (set.length === 2 && set.includes(0) && set.includes(6)) return 'Weekends';
+  return set.map(d => PWA_WEEKDAYS[d]).join(', ');
+}
+function pwaFmt12(time) {
+  if (!time) return '';
+  const [h, m] = time.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+function pwaFmtNext(d) {
+  const diff = d - Date.now();
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return 'in <1 min';
+  if (mins < 60) return `in ${mins} min`;
+  if (d.toDateString() === new Date().toDateString()) {
+    const hrs = Math.floor(mins / 60), rem = mins % 60;
+    return `in ${hrs}h${rem ? ' ' + rem + 'm' : ''}`;
+  }
+  const wd = d.toLocaleDateString(undefined, { weekday: 'short' });
+  const tm = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${wd} ${tm}`;
+}
+
+// ── PWA Stopwatch ───────────────────────────────────────────────
+function swElapsed() {
+  return stopwatch.accumulated + (stopwatch.running ? Date.now() - stopwatch.startTs : 0);
+}
+function fmtStopwatch(ms) {
+  const cs = Math.floor((ms % 1000) / 10);
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600), m = Math.floor((totalSec % 3600) / 60), s = totalSec % 60;
+  const base = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${base}.${String(cs).padStart(2, '0')}`;
+}
+function swTick() {
+  const el = document.getElementById('sw-display');
+  if (el) el.textContent = fmtStopwatch(swElapsed());
+}
+function bindStopwatchEvents() {
+  document.getElementById('sw-toggle')?.addEventListener('click', () => {
+    if (stopwatch.running) {
+      stopwatch.accumulated = swElapsed();
+      stopwatch.running = false;
+      if (swInterval) { clearInterval(swInterval); swInterval = null; }
+    } else {
+      stopwatch.startTs = Date.now();
+      stopwatch.running = true;
+      if (!swInterval) swInterval = setInterval(swTick, 50);
+    }
+    render();
+  });
+  document.getElementById('sw-lap')?.addEventListener('click', () => {
+    if (!stopwatch.running) return;
+    stopwatch.laps.push(swElapsed());
+    render();
+  });
+  document.getElementById('sw-reset')?.addEventListener('click', () => {
+    stopwatch = { running: false, startTs: 0, accumulated: 0, laps: [] };
+    if (swInterval) { clearInterval(swInterval); swInterval = null; }
+    render();
+  });
+  if (stopwatch.running && !swInterval) swInterval = setInterval(swTick, 50);
+}
+
+// ── PWA always-on watcher: timer repeat + alarm firing ──────────
+function pwaTimerBeep(freq, count, gap, dur, vol) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'sine'; osc.frequency.value = freq;
+    osc.connect(gain); gain.connect(ctx.destination);
+    const t0 = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, t0);
+    for (let i = 0; i < count; i++) {
+      const s = t0 + i * gap;
+      gain.gain.setValueAtTime(vol, s);
+      gain.gain.exponentialRampToValueAtTime(0.0001, s + dur);
+    }
+    osc.start(t0); osc.stop(t0 + count * gap + 0.1);
+    osc.onended = () => { try { ctx.close(); } catch {} };
+  } catch {}
+}
+function pwaFireNotify(title, body) {
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+  } catch {}
+}
+async function pwaCheckTimersAndAlarms() {
+  const now = Date.now();
+  // Repeating timers: when one elapses, roll it over.
+  for (const t of (timers.active || [])) {
+    const expMs = t.expiresAt ? (t.expiresAt.getTime ? t.expiresAt.getTime() : +new Date(t.expiresAt)) : 0;
+    if (expMs && expMs <= now && t.id && !notifiedTimerIds.has(t.id)) {
+      notifiedTimerIds.add(t.id);
+      if (t.repeat && t.durationSeconds) {
+        try {
+          await pwaStartTimer(t.label || 'Timer', t.durationSeconds, true);
+          await db.collection('timers').doc(t.id).update({ status: 'expired' });
+        } catch {}
+      }
+    }
+  }
+  // Alarms
+  if (!data.settings) return;
+  const alarms = Array.isArray(data.settings.alarms) ? data.settings.alarms : [];
+  if (!alarms.length) return;
+  const d = new Date();
+  const cur = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dow = d.getDay();
+  let changed = false;
+  for (const a of alarms) {
+    if (!a.enabled || a.time !== cur || a.lastFired === today) continue;
+    const recurring = Array.isArray(a.days) && a.days.length > 0;
+    if (recurring && !a.days.includes(dow)) continue;
+    a.lastFired = today;
+    if (!recurring) a.enabled = false;
+    changed = true;
+    pwaFireNotify('⏰ Alarm', a.label || 'Alarm');
+    pwaTimerBeep(740, 6, 0.45, 0.34, 0.25);
+  }
+  if (changed) {
+    await savePwaAlarms();
+    if (currentView === 'timers') render();
+  }
+}
+setInterval(() => { pwaCheckTimersAndAlarms(); }, 1000);

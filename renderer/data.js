@@ -466,6 +466,40 @@ class DataManager {
     await this._saveSettings();
   }
 
+  // === Alarms (stored in settings so they sync across devices) ===
+  getAlarms() {
+    if (!Array.isArray(this.settings.alarms)) this.settings.alarms = [];
+    return this.settings.alarms;
+  }
+  async addAlarm(alarm) {
+    const list = this.getAlarms();
+    const a = {
+      id: this._genId('alarm'),
+      label: alarm.label || 'Alarm',
+      time: alarm.time || '08:00',          // "HH:MM" 24h
+      days: Array.isArray(alarm.days) ? alarm.days : [], // [] = one-shot
+      enabled: alarm.enabled !== false,
+      sound: alarm.sound || 'classic',
+      lastFired: null,                       // "YYYY-MM-DD"
+      createdAt: new Date().toISOString(),
+    };
+    list.push(a);
+    await this._saveSettings();
+    return a;
+  }
+  async updateAlarm(id, patch) {
+    const list = this.getAlarms();
+    const a = list.find(x => x.id === id);
+    if (!a) return null;
+    Object.assign(a, patch);
+    await this._saveSettings();
+    return a;
+  }
+  async deleteAlarm(id) {
+    this.settings.alarms = this.getAlarms().filter(x => x.id !== id);
+    await this._saveSettings();
+  }
+
   // === Save methods (local + cloud sync) ===
   async _saveTasks() {
     await window.api.saveData('tasks.json', { tasks: this.tasks });
