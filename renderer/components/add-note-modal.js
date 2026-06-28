@@ -58,11 +58,14 @@ class ModalManager {
         <input type="checkbox" value="${c.id}" class="project-cat-checkbox" ${selectedCategories.includes(c.id) ? 'checked' : ''}>
         <span class="category-chip" style="background:${c.color}22;color:${c.color};border:1px solid ${c.color}44">${escapeHtml(c.label)}</span>
       </label>`
-    ).join('');
+    ).join('') +
+      `<button type="button" id="btn-new-category-project" class="btn-new-category" title="New Category">+</button>`;
     // Rebind auto-color
     container.querySelectorAll('.project-cat-checkbox').forEach(cb => {
       cb.addEventListener('change', () => this._updateProjectColorFromCategories());
     });
+    // "+" add a new category right from the project modal (keeps categories in sync app-wide).
+    container.querySelector('#btn-new-category-project').addEventListener('click', () => this._openNewCategoryModal('project'));
   }
 
   // ============ PRIORITY PICKER ============
@@ -197,6 +200,12 @@ class ModalManager {
     this._applyAutoColor();
 
     document.getElementById('modal-add-note').classList.remove('hidden');
+    // Spell-check the note fields (attach once; re-check after populating values).
+    if (typeof Spellcheck !== 'undefined') {
+      const nt = document.getElementById('note-text'), nd = document.getElementById('note-description');
+      Spellcheck.attach(nt); Spellcheck.attach(nd);
+      setTimeout(() => { if (nt._scCheck) nt._scCheck(); if (nd._scCheck) nd._scCheck(); if (nt._scSync) nt._scSync(); if (nd._scSync) nd._scSync(); }, 60);
+    }
     // Delay focus to ensure the modal is fully rendered (Electron timing issue)
     setTimeout(() => document.getElementById('note-text').focus(), 50);
   }
@@ -509,11 +518,15 @@ class ModalManager {
 
     this._closeModal('modal-new-category');
 
-    // Refresh the dropdown if we came from note modal
+    // Refresh whichever modal we came from, selecting the new category.
     if (this._catReturnTo === 'note') {
       this._populateCategorySelect('note-category');
       document.getElementById('note-category').value = id;
       this._applyAutoColor();
+    } else if (this._catReturnTo === 'project') {
+      const checked = Array.from(document.querySelectorAll('.project-cat-checkbox:checked')).map(cb => cb.value);
+      this._populateProjectCategories([...checked, id]);
+      this._updateProjectColorFromCategories();
     }
 
     window.dispatchEvent(new CustomEvent('categories-changed'));

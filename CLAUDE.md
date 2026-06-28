@@ -48,6 +48,7 @@ The in-app equivalent (for non-maintainers) is Settings → Contribute → "Subm
 | `preload.js` | Exposes `window.api` to renderer via contextBridge. **Add new IPC channels here when adding features.** |
 | `ipc/data.js` | `data:load`, `data:save`, `shell:openExternal`, `shell:openPath`, `dialog:openFiles`, `installer:build` |
 | `ipc/outlook.js` | `outlook:fetchLocal` — reads Outlook calendar via PowerShell COM |
+| `ipc/spell.js` | `spell:check/suggest/add` — self-contained offline spell checker. Lazy-loads a bundled word list (`renderer/lib/words-en.txt`, ~370k words) into a Set; Norvig-style suggestions; user dictionary persisted to `appdata/spell_user.json`. Chromium's built-in checker is disabled (`webPreferences.spellcheck:false`) so it doesn't double-underline. Renderer side: `renderer/spellcheck.js`. |
 | `ipc/github.js` | `github:*` — Linked-account GitHub. PAT encrypted at rest via `safeStorage` in `GITHUB_TOKEN_FILE` (`appdata/github.json`), decrypted only in main, never sent to renderer. `github:fetchActivity` lists owned repos (sorted by pushed) and their recent commits → cached by the renderer in `settings.gitActivity` for the **Timeline**. |
 | `ipc/files.js` | All `files:*` handlers — readdir, read/write, rename, delete, search, watch, KiCad SVG/GLB export |
 | `ipc/git.js` | `git:status`, `git:stage`, `git:unstage`, `git:commit`, `git:diff`, `git:isRepo` |
@@ -157,6 +158,10 @@ All data is loaded/cached by `renderer/data.js` (`DataManager`, the global `data
 
 ### Outlook
 - `outlook:fetchLocal(daysBack, daysForward)` → `[{ subject, startTime, endTime, location, body, isAllDay, entryId }]`
+
+### Spell check (note fields)
+- `spell:check(text)` → `[{ word, start, end }]` misspelled ranges · `spell:suggest(word)` → `[string]` · `spell:add(word)` → true (user dictionary)
+- `renderer/spellcheck.js` `Spellcheck.attach(textarea)` overlays red wavy underlines (a mirrored backdrop behind a transparent-bg textarea) and shows a **hover** suggestions popup; click to replace. Attached to `#note-text`/`#note-description` on note-modal open.
 
 ### GitHub (Linked Accounts → Timeline)
 - `github:status()` → `{ connected, username, name }` (never returns the token)

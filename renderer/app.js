@@ -331,10 +331,12 @@
           e.stopPropagation();
           row.classList.remove('sidebar-drag-over');
           if (!dragRow || row === dragRow) return;
-          const rows = [...projContainer.querySelectorAll('.sidebar-project-row')];
-          const fromIdx = rows.indexOf(dragRow);
-          const toIdx = rows.indexOf(row);
-          if (fromIdx < toIdx) row.after(dragRow); else row.before(dragRow);
+          // Insert relative to where the cursor actually dropped within the target row
+          // (its vertical midpoint), not the drag direction — otherwise dropping while
+          // dragging downward always lands one slot too low.
+          const rect = row.getBoundingClientRect();
+          if (e.clientY > rect.top + rect.height / 2) row.after(dragRow);
+          else row.before(dragRow);
           commitSidebarOrder();
         });
       });

@@ -11187,6 +11187,43 @@ body.theme-light .syn-builtin { color: #059669; }
 .gm-list-actions { display:flex; gap:4px; }
 .gm-tagnew { margin-bottom:4px; }
 
+/* ===== Spell check overlay ============================================== */
+.sc-wrap { position: relative; }
+.sc-wrap .sc-textarea { position: relative; z-index: 1; background: transparent; }
+.sc-backdrop {
+  position: absolute; top: 0; left: 0; z-index: 0;
+  margin: 0; overflow: hidden; pointer-events: none;
+  color: transparent; box-sizing: border-box;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;
+}
+.sc-backdrop .sc-bad {
+  text-decoration: underline wavy #EF4444;
+  text-decoration-skip-ink: none;
+  text-underline-offset: 2px;
+}
+.sc-popup {
+  position: fixed; z-index: 12000; min-width: 160px; max-width: 280px;
+  background: var(--bg-card, #fff); border: 1px solid var(--border-color, #E2E8F0);
+  border-radius: 10px; box-shadow: var(--card-shadow, 0 12px 30px rgba(0,0,0,.22));
+  padding: 6px; font-size: 13px; color: var(--text-primary, #1E293B);
+}
+.sc-popup.hidden { display: none; }
+.sc-popup-word { font-size: 11px; color: var(--text-muted, #94A3B8); padding: 2px 8px 6px; font-style: italic; }
+.sc-popup-loading, .sc-popup-none { padding: 6px 8px; color: var(--text-muted, #94A3B8); font-size: 12px; }
+.sc-sug-list { display: flex; flex-direction: column; }
+.sc-sug {
+  text-align: left; padding: 6px 8px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text-primary, #1E293B); font-size: 13px;
+  font-weight: 600; font-family: inherit; cursor: pointer;
+}
+.sc-sug:hover { background: var(--accent-bg, var(--bg-hover, #EFF6FF)); color: var(--accent-text, var(--accent, #2563EB)); }
+.sc-popup-actions { display: flex; gap: 4px; margin-top: 4px; border-top: 1px solid var(--border-color, #E2E8F0); padding-top: 5px; }
+.sc-act {
+  flex: 1; padding: 5px 6px; border: none; border-radius: 6px; background: transparent;
+  color: var(--text-secondary, #475569); font-size: 11.5px; font-family: inherit; cursor: pointer;
+}
+.sc-act:hover { background: var(--bg-hover, #F1F5F9); }
+
 /* Files-tab git diff modal (reuses .gm-diff line styles) */
 .fv-gitdiff { max-height:62vh; overflow:auto; border:1px solid var(--border-color,#E2E8F0); border-radius:8px; padding:4px 0; background:var(--bg-secondary,#F8FAFC); }
 

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, MenuItem, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
@@ -16,6 +16,7 @@ const registerSlicer  = require('./ipc/slicer');
 const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
 const registerGithub  = require('./ipc/github');
+const registerSpell   = require('./ipc/spell');
 const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
 const registerWifiChecker   = require('./ipc/wifi-checker');
@@ -45,13 +46,29 @@ function createWindow() {
       nodeIntegration: false,
       // Split Window renders the app inside same-origin <iframe>s. This makes the
       // preload (and thus window.api via contextBridge) load in those subframes too.
-      nodeIntegrationInSubFrames: true
+      nodeIntegrationInSubFrames: true,
+      // Custom offline spell checker (ipc/spell.js + renderer/spellcheck.js) handles
+      // note fields with hover suggestions; Chromium's built-in checker is left off
+      // so the two don't double-underline.
+      spellcheck: false
     },
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     title: 'Engineering Task Board'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Native edit context menu for editable fields (spelling is handled by the custom
+  // offline checker in the renderer, so no spelling items here).
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (!params.isEditable) return; // non-editable right-clicks use the app's own menus
+    const menu = new Menu();
+    menu.append(new MenuItem({ role: 'cut', enabled: params.editFlags.canCut }));
+    menu.append(new MenuItem({ role: 'copy', enabled: params.editFlags.canCopy }));
+    menu.append(new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }));
+    menu.append(new MenuItem({ role: 'selectAll' }));
+    menu.popup();
+  });
   // Keep the application menu registered (for keyboard accelerators) but hidden —
   // the custom titlebar reproduces the menu items visually.
   mainWindow.setMenuBarVisibility(false);
@@ -129,6 +146,7 @@ app.whenReady().then(() => {
   registerEmail(getMainWindow);
   registerCalendar();
   registerGithub();
+  registerSpell();
   registerKicadImporter(getMainWindow);
   registerUtilityStore();
   registerWifiChecker(getMainWindow);

@@ -181,6 +181,12 @@ const __api = {
   calendar: {
     fetchFeed: (url, source) => ipcRenderer.invoke('calendar:fetchFeed', url, source),
   },
+  // Offline spell checker for note fields (see ipc/spell.js + renderer/spellcheck.js).
+  spell: {
+    check: (text) => ipcRenderer.invoke('spell:check', text),
+    suggest: (word) => ipcRenderer.invoke('spell:suggest', word),
+    add: (word) => ipcRenderer.invoke('spell:add', word),
+  },
   // GitHub account link → commits on owned repos surface on the Timeline.
   github: {
     status: () => ipcRenderer.invoke('github:status'),
