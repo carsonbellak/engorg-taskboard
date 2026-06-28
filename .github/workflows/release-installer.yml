@@ -6,6 +6,11 @@ name: Build & Release Installer
 #                              with the real semver and attached as an asset.
 # The large bundled runtimes (nodejs/ + tools/) are not in the repo — they're
 # restored from the one-time "build-deps" prerelease asset and cached between runs.
+#
+# After each build the "Prune old version releases" step keeps only the newest
+# vX.Y.Z release and deletes the rest (+their tags), so the Releases page stays
+# tidy. The functional "latest" (in-app updater source) and "build-deps" (CI
+# runtimes) releases are never touched.
 
 on:
   push:
@@ -106,3 +111,22 @@ jobs:
             # it as current (not "N commits since this release").
             gh api -X PATCH "repos/$REPO/git/refs/tags/latest" -f sha="$GITHUB_SHA" -F force=true >/dev/null || true
           fi
+
+      - name: Prune old version releases
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="$GITHUB_REPOSITORY"
+          # Every semver version release (vX.Y.Z). Keep the newest, delete the rest
+          # (and their tags). "latest" and "build-deps" don't match, so they stay.
+          ALL=$(gh release list -R "$REPO" --limit 200 --json tagName --jq '.[].tagName' \
+                | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          if [ -z "$ALL" ]; then echo "No version releases to prune."; exit 0; fi
+          KEEP=$(printf '%s\n' "$ALL" | sort -V | tail -1)
+          echo "Keeping newest version release: $KEEP"
+          for TAG in $ALL; do
+            [ "$TAG" = "$KEEP" ] && continue
+            echo "Deleting old release $TAG"
+            gh release delete "$TAG" -R "$REPO" --cleanup-tag --yes || echo "  (could not delete $TAG, continuing)"
+          done
