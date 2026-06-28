@@ -287,6 +287,10 @@
     </main>
   </div>
 
+  <!-- Split Window: grid of app instances (iframes). Shown only when this window
+       is the split shell; window-split.js fills it and hides #header / #app-body. -->
+  <div id="split-root"></div>
+
   <!-- Modal: Add/Edit Note -->
   <div id="modal-add-note" class="modal hidden">
     <div class="modal-box">
@@ -569,6 +573,7 @@
   <script src="email.js"></script>
   <script src="theme-fx.js"></script>
   <script src="updates.js"></script>
+  <script src="window-split.js"></script>
   <script src="titlebar.js"></script>
   <script src="app.js"></script>
 </body>

@@ -97,6 +97,42 @@ body {
 .tb-item:hover { background: var(--bg-hover, #F1F5F9); }
 .tb-item .tb-accel { color: var(--text-muted, #94A3B8); font-size: 11px; }
 .tb-sep { height: 1px; background: var(--border-color, #E2E8F0); margin: 4px 6px; }
+.tb-haschild .tb-accel { font-size: 12px; }
+.tb-submenu { max-height: 70vh; overflow-y: auto; border-top: 1px solid var(--border-color, #E2E8F0); border-radius: 8px; }
+
+/* === Split Window === */
+#split-root { display: none; }
+/* In the shell, the panes ARE the app — hide this window's own titlebar/header so
+   there's no redundant "main" bar above the per-pane File/Edit/View bars. */
+body.split-shell #titlebar,
+body.split-shell #header,
+body.split-shell #app-body,
+body.split-shell .auth-gate { display: none !important; }
+body.split-shell #split-root {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  gap: 0;                     /* no padding between panes */
+  background: var(--bg-primary, #0F172A);
+}
+.split-frame {
+  width: 100%; height: 100%;
+  border: none;
+  background: var(--bg-secondary, #0F172A);
+}
+/* Window controls live in a small floating cluster (top-right) since the shell
+   titlebar is hidden. The left padding is a drag-grab strip to move the window. */
+#split-winctrls {
+  position: fixed; top: 0; right: 0; height: 28px; z-index: 2000;
+  display: flex; align-items: center; padding-left: 64px;
+  -webkit-app-region: drag;
+}
+#split-winctrls .tb-btn { -webkit-app-region: no-drag; }
+/* Embedded (in-pane) instances: keep the menu (for per-pane View → Set Theme)
+   but drop the OS window controls — the floating cluster handles those. */
+html.is-embedded .titlebar-controls { display: none; }
+html.is-embedded #titlebar,
+html.is-embedded .titlebar-drag { -webkit-app-region: no-drag; }
 
 /* === MANDATORY SIGN-IN GATE === */
 .auth-gate {

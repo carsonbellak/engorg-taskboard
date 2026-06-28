@@ -2,6 +2,14 @@
 
 (async function initApp() {
   try {
+    // Split Window: when this window is the split *shell* (a grid of app iframes),
+    // window-split.js has already rendered the grid — skip the whole app init so
+    // we don't load data, Firebase, or the auth gate behind the panes.
+    if (window.windowSplit && window.windowSplit.isShell()) return;
+    // Embedded panes are full app instances, but must NOT duplicate background
+    // services (Outlook/calendar sync, printer camera bridge, update checks).
+    const EMB = !!(window.windowSplit && window.windowSplit.EMBEDDED);
+
     await dataManager.init();
 
     // Assign rainbow gradient colors to projects on startup
@@ -891,17 +899,19 @@
       await syncOutlook(false);
     });
 
-    // Auto-sync every 30 minutes (silent — no popups)
-    setInterval(async () => {
-      try { await syncOutlook(true); } catch (e) {
-        console.warn('Outlook auto-sync failed:', e.message);
-      }
-    }, 30 * 60 * 1000);
+    // Auto-sync every 30 minutes (silent — no popups). Skipped in split panes.
+    if (!EMB) {
+      setInterval(async () => {
+        try { await syncOutlook(true); } catch (e) {
+          console.warn('Outlook auto-sync failed:', e.message);
+        }
+      }, 30 * 60 * 1000);
 
-    // Initial sync on app startup (silent, after a short delay)
-    setTimeout(() => {
-      syncOutlook(true).catch(e => console.warn('Initial Outlook sync failed:', e.message));
-    }, 3000);
+      // Initial sync on app startup (silent, after a short delay)
+      setTimeout(() => {
+        syncOutlook(true).catch(e => console.warn('Initial Outlook sync failed:', e.message));
+      }, 3000);
+    }
 
     // ============ EXTERNAL CALENDAR SYNC (ICS feeds + email invites) ============
     // Pulls Brightspace (and any other ICS feed) + meeting invites found in email accounts.
@@ -925,8 +935,10 @@
     }
     window.syncCalendars = syncCalendars; // allow Settings to trigger a sync after adding a feed
 
-    setTimeout(() => { syncCalendars().catch(e => console.warn('Initial calendar sync failed:', e.message)); }, 4000);
-    setInterval(() => { syncCalendars().catch(() => {}); }, 15 * 60 * 1000); // every 15 min
+    if (!EMB) {
+      setTimeout(() => { syncCalendars().catch(e => console.warn('Initial calendar sync failed:', e.message)); }, 4000);
+      setInterval(() => { syncCalendars().catch(() => {}); }, 15 * 60 * 1000); // every 15 min
+    }
 
     // ============ QUICK FILTERS ============
     const activeFilters = { priority: null, overdue: false, category: null };
@@ -1215,7 +1227,7 @@
     // Always-on printer camera bridge: whenever the printer is enabled, keep it
     // connected and streaming to the PWA in the background — regardless of which
     // tab is active or whether the printer tab has ever been opened.
-    if (dataManager.settings.printerEnabled) {
+    if (dataManager.settings.printerEnabled && !EMB) {
       printerController.startBackground();
       printerInitialized = true; // bridge already rendered + polling; don't re-init on first tab visit
     }
@@ -1237,7 +1249,7 @@
 
     // Scan the canonical repo for newer commits and prompt to update. Non-blocking,
     // silent on errors / when up to date. Opt out via Settings → Check for updates.
-    if (dataManager.settings.autoCheckUpdates !== false && typeof updateChecker !== 'undefined') {
+    if (dataManager.settings.autoCheckUpdates !== false && typeof updateChecker !== 'undefined' && !EMB) {
       setTimeout(() => updateChecker.run(), 1500);
     }
 

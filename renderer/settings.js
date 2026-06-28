@@ -1637,6 +1637,10 @@ function initTheme() {
   let theme = dataManager.settings.theme || 'default';
   // The old single 'glass' theme was split into Liquid Glass light/dark.
   if (theme === 'glass') { theme = 'glassDark'; dataManager.settings.theme = theme; }
+  // A local (non-synced) per-window theme override wins for display only — set via
+  // View → Set Theme, stored in localStorage (top window) or passed to split panes.
+  const override = window.windowSplit && window.windowSplit.startupThemeOverride && window.windowSplit.startupThemeOverride();
+  if (override && COLOR_THEMES[override]) theme = override;
   applyTheme(theme);
   const noteSize = dataManager.settings.noteSize || 'medium';
   document.body.dataset.noteSize = noteSize;

@@ -41,7 +41,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Split Window renders the app inside same-origin <iframe>s. This makes the
+      // preload (and thus window.api via contextBridge) load in those subframes too.
+      nodeIntegrationInSubFrames: true
     },
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     title: 'Engineering Task Board'

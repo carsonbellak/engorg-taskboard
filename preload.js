@@ -1,6 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('api', {
+// nodeIntegrationInSubFrames runs this preload in EVERY subframe (so Split Window
+// panes get window.api). But the sandboxed remote-utility / email iframes must
+// stay privilege-free — so only expose the bridge in our real app frames
+// (the top window and split panes both load `renderer/index.html`).
+const __isAppFrame = /\/renderer\/index\.html$/i.test(location.pathname || '');
+
+const __api = {
   loadData: (filename) => ipcRenderer.invoke('data:load', filename),
   saveData: (filename, data) => ipcRenderer.invoke('data:save', filename, data),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
@@ -246,4 +252,6 @@ contextBridge.exposeInMainWorld('api', {
     // raw cli
     raw: (dir, commandLine) => ipcRenderer.invoke('git:raw', dir, commandLine),
   }
-});
+};
+
+if (__isAppFrame) contextBridge.exposeInMainWorld('api', __api);
