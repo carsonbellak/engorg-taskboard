@@ -127,9 +127,12 @@
     applyLayout(type);
   }
 
+  function themeChanged() { try { window.dispatchEvent(new CustomEvent('theme-changed')); } catch {} }
+
   function setLocalTheme(themeId) {
     runtimeTheme = themeId;
     applyThemeSafe(themeId);
+    themeChanged();
     if (EMBEDDED) { try { parent.postMessage({ type: 'split-theme', index: PANE_INDEX, theme: themeId }, '*'); } catch {} }
     else { try { localStorage.setItem(LS_LOCAL_THEME, themeId); } catch {} }
   }
@@ -138,6 +141,7 @@
     runtimeTheme = null;
     const synced = (window.dataManager && dataManager.settings && dataManager.settings.theme) || 'default';
     applyThemeSafe(synced);
+    themeChanged();
     if (EMBEDDED) { try { parent.postMessage({ type: 'split-theme', index: PANE_INDEX, theme: null }, '*'); } catch {} }
     else { try { localStorage.removeItem(LS_LOCAL_THEME); } catch {} }
   }

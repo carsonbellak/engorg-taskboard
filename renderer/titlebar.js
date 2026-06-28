@@ -71,6 +71,8 @@
       { label: 'Minimize', action: 'minimize' },
       { label: 'Close', action: 'close' },
     ] },
+    // Direct-action button (no dropdown): opens the companion web app in the browser.
+    { label: '🌐 Web App', onClick: () => api.openExternal('https://assistant-taskboard.firebaseapp.com') },
   ];
 
   const bar = document.getElementById('titlebar');
@@ -150,6 +152,14 @@
     const btn = document.createElement('button');
     btn.className = 'tb-menu-btn';
     btn.textContent = menu.label;
+    if (menu.onClick) {
+      // Direct-action button — runs immediately, no dropdown.
+      btn.classList.add('tb-menu-action');
+      btn.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); menu.onClick(); });
+      btn.addEventListener('mouseenter', () => { if (menuActive) closeMenu(); });
+      menuRoot.appendChild(btn);
+      return;
+    }
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       if (btn.classList.contains('open')) closeMenu();

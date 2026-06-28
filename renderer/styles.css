@@ -8036,37 +8036,9 @@ body.style-mono #main-content::before {
  * designed for maximum readability. Focus rings pulse. The vignette
  * draws your eye to the center.
  */
-body.style-highcontrast #main-content { position: relative; }
-/* vignette + scanning radar sweep */
-body.style-highcontrast #main-content::before {
-  content: '';
-  position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,0.5) 100%);
-  pointer-events: none;
-  z-index: 0;
-}
-body.style-highcontrast #main-content::after {
-  content: '';
-  position: fixed;
-  top: 50%; left: 50%;
-  width: 200vmax; height: 200vmax;
-  margin-top: -100vmax; margin-left: -100vmax;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(0,191,255,0.03) 5deg,
-    transparent 15deg,
-    transparent 360deg
-  );
-  animation: radar-sweep 8s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-@keyframes radar-sweep {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
+/* High Contrast keeps a plain solid background — no vignette/radar-sweep effect.
+   A darkening vignette + moving sweep fights the whole point of the theme
+   (maximum, even readability), so it's intentionally omitted. */
 
 /* Glass style - frosted translucent panels */
 body.style-glass #titlebar,

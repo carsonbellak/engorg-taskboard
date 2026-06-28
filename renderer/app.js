@@ -1050,6 +1050,9 @@
     window.addEventListener('purchases-changed', () => scheduleRender());
     window.addEventListener('projects-changed', () => scheduleRender({ sidebar: true }));
     window.addEventListener('categories-changed', () => { buildSidebar(); updateFilterCategories(); });
+    // Note/sidebar colors are baked in at render time and vary by light/dark theme,
+    // so re-render the whole view when the theme changes.
+    window.addEventListener('theme-changed', () => scheduleRender({ sidebar: true, dots: true }));
 
     // Click a project slate to navigate into that project (switch to notes view)
     window.addEventListener('select-project', (e) => {

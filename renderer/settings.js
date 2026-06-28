@@ -1175,6 +1175,7 @@ function renderSettings() {
       const themeId = card.dataset.theme;
       applyTheme(themeId);
       dataManager.updateSettings({ theme: themeId });
+      window.dispatchEvent(new CustomEvent('theme-changed')); // re-render notes/sidebar with new colors
       renderSettings(); // re-render to update active state
     });
   });
