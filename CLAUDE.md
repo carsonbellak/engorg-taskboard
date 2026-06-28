@@ -32,6 +32,21 @@ The script keeps a cached clone at `~/.engorg-submit/<repo>`, mirrors your chang
 source files into it (git normalizes CRLF↔LF so only real edits show), commits, and
 pushes. It is **update-only** — it never deletes repo files the install doesn't ship.
 Always run `--list` first to confirm the change set. Full details: `CONTRIBUTING.md`.
+
+### Cutting a versioned release — one command
+
+```bash
+node release.js               # patch bump (1.1.2 → 1.1.3)
+node release.js minor -m "…"  # 1.1.2 → 1.2.0 with notes
+node release.js 1.4.0         # explicit version
+```
+
+`release.js` bumps `package.json` + `package-lock.json`, pushes the bump to main
+(via `submit-changes.js`), then pushes a `vX.Y.Z` tag. CI
+(`.github/workflows/release-installer.yml`) then **builds `EngOrg-Setup.exe` and
+attaches it to that GitHub Release automatically** — no manual download/upload, no
+polling. A plain `submit-changes.js` push only updates the rolling `latest` build;
+a numbered release requires the tag, which is exactly what `release.js` automates.
 The in-app equivalent (for non-maintainers) is Settings → Contribute → "Submit Changes…"
 (`ipc/contribute.js`), which forks + opens a PR via GitHub sign-in.
 
