@@ -1150,6 +1150,12 @@ function renderSettings() {
         <h3 class="settings-section-title">Version</h3>
         <div id="settings-version-body" class="settings-version-body">Loading…</div>
       </div>
+      <div class="settings-section">
+        <h3 class="settings-section-title">Tour &amp; Tips</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update.</p>
+        <button id="settings-replay-tour" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Take the tour</button>
+        <button id="settings-replay-whatsnew" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">What's new</button>
+      </div>
       <!-- App Distribution (Build Installer) -->
       <div class="settings-section">
         <h3 class="settings-section-title">App Distribution</h3>
@@ -1202,6 +1208,10 @@ function renderSettings() {
 
   // Linked Accounts hub (Cloud / GitHub / Email)
   refreshLinkedAccounts();
+
+  // Replay the guided tour / What's New (onboarding.js closes Settings first)
+  container.querySelector('#settings-replay-tour')?.addEventListener('click', () => window.onboarding?.replayFirstRun());
+  container.querySelector('#settings-replay-whatsnew')?.addEventListener('click', () => window.onboarding?.replayWhatsNew());
 
   // Version (local + GitHub-synced)
   refreshVersionInfo();

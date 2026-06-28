@@ -209,12 +209,31 @@ auth.onAuthStateChanged(user => {
     setupListeners(user.uid);
     updateUserMenu(user);
     initPushNotifications(user.uid);
+    maybeRunPwaTour();
   } else {
     appScreen.classList.remove('active');
     loginScreen.classList.add('active');
     removeListeners();
   }
 });
+
+// First-run guided tour (once per device, after first sign-in).
+function pwaFirstRunSteps() {
+  return [
+    { emoji: '⚙️', title: 'Welcome to EngOrg', body: "Your tasks, projects, calendar, timers and more — synced with the desktop app. Here's a quick tour." },
+    { target: '#bottom-nav', placement: 'top', title: 'Get around', body: 'Tap along the bottom bar to switch between Notes, Board, Calendar, Timers and more.' },
+    { target: '#project-selector', placement: 'bottom', title: 'Projects', body: 'Filter by project here, or tap + to start a new one.' },
+    { target: '#fab-add', placement: 'left', title: 'Add anything', body: 'The + button adds a note or task to the current view.' },
+    { target: '#btn-user-menu', placement: 'bottom', title: 'Account & sync', body: 'Your data syncs automatically. Manage your account from here.' },
+    { emoji: '🚀', title: "You're all set", body: 'Everything you do here shows up on the desktop app too. Enjoy!' },
+  ];
+}
+function maybeRunPwaTour() {
+  if (localStorage.getItem('engorg_pwa_onboarded')) return;
+  if (typeof appTour === 'undefined') return;
+  localStorage.setItem('engorg_pwa_onboarded', '1');
+  setTimeout(() => appTour.run(pwaFirstRunSteps(), { finishLabel: 'Get started' }), 900);
+}
 
 document.getElementById('btn-google-login').addEventListener('click', async () => {
   try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }

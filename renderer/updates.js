@@ -53,6 +53,11 @@ const updateChecker = (() => {
     const bodyHtml = `<p>${headline}</p>${latestLine}${commitList(res)}`;
 
     const actions = [];
+    // Walk through what's changed in the offered version (curated notes if we have
+    // them for this version, otherwise the commit list).
+    if (window.onboarding && typeof window.onboarding.showChanges === 'function') {
+      actions.push({ label: 'View changes', onClick: (ov) => { closeModal(ov); window.onboarding.showChanges(res); } });
+    }
     actions.push({ label: 'Later', onClick: (ov) => closeModal(ov) });
 
     if (res.isGitRepo) {
@@ -202,6 +207,8 @@ const updateChecker = (() => {
   async function run() {
     try {
       if (!window.api || !window.api.updates) return;
+      // Don't stack the update prompt on top of an onboarding / what's-new tour.
+      if (window.appTour && window.appTour.isActive()) { setTimeout(run, 2500); return; }
       const res = await window.api.updates.check();
       if (!res || res.error || !res.updatesAvailable || res.skipped) {
         if (res && res.error) console.warn('[Updates] check failed:', res.error);

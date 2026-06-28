@@ -639,6 +639,7 @@
       settingsBtn.classList.remove('active');
     }
     window.openSettings = openSettings;  // let other modules open settings
+    window.closeSettings = closeSettings; // let onboarding close it before a tour
     settingsBtn.addEventListener('click', openSettings);
     document.getElementById('settings-modal-close').addEventListener('click', closeSettings);
     settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
@@ -1276,6 +1277,17 @@
     }
 
     console.log('EngOrg initialized:', dataManager.tasks.length, 'notes,', dataManager.scheduleItems.length, 'events,', dataManager.purchases.length, 'purchases');
+
+    // Onboarding: first-run guided tour (once per device); otherwise show the
+    // What's New walkthrough after the app has updated to a version with notes.
+    if (!EMB && typeof onboarding !== 'undefined') {
+      setTimeout(async () => {
+        try {
+          const ranTour = await onboarding.maybeRunFirstRun();
+          if (!ranTour) await onboarding.maybeShowWhatsNew();
+        } catch (e) { console.warn('[Onboarding]', e.message); }
+      }, 700);
+    }
 
     // Scan the canonical repo for newer commits and prompt to update. Non-blocking,
     // silent on errors / when up to date. Opt out via Settings → Check for updates.
