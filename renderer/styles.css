@@ -7003,6 +7003,14 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
 .acct-empty { font-size: 13px; color: var(--text-muted, #94A3B8); padding: 6px 2px; }
 .settings-btn-sm { padding: 6px 12px; font-size: 12.5px; }
 
+/* Version (About tab) */
+.settings-version-row { display: flex; align-items: center; gap: 16px; }
+.settings-version-info { flex: 1; min-width: 0; }
+.settings-version-num { font-size: 15px; }
+.settings-version-sub { font-size: 12.5px; color: var(--text-muted, #94A3B8); margin-top: 3px; }
+.settings-version-sub.ok { color: #16A34A; }
+.settings-version-sub.update { color: var(--warn, #D97706); }
+
 /* ── Settings popup (modal) ─────────────────────────────────────────────── */
 .settings-modal-overlay {
   position: fixed; inset: 0; z-index: 1500;

@@ -1134,6 +1134,10 @@ function renderSettings() {
       </section>
       <section class="settings-tab-panel" data-panel="about">
       <div class="settings-section">
+        <h3 class="settings-section-title">Version</h3>
+        <div id="settings-version-body" class="settings-version-body">Loading…</div>
+      </div>
+      <div class="settings-section">
         <h3 class="settings-section-title">Request a Feature</h3>
         <p class="settings-toggle-desc" style="margin-bottom:12px">Have an idea? Send a feature request straight to the developer. It opens a GitHub issue on the project for tracking. <b>Sign in with GitHub</b> in your browser — no access token needed.</p>
         <button id="settings-feature-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Request a Feature…</button>
@@ -1177,6 +1181,9 @@ function renderSettings() {
 
   // Linked Accounts hub (Cloud / GitHub / Email)
   refreshLinkedAccounts();
+
+  // Version (local + GitHub-synced)
+  refreshVersionInfo();
 
   // ── Calendar feeds (Brightspace / ICS) ──
   (function bindCalendarFeeds() {
@@ -1875,6 +1882,39 @@ function bindLinkedAccounts(body) {
     }
   };
   body.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', (e) => { e.preventDefault(); onClick(el.dataset.act, el); }));
+}
+
+// ── Version (synced with the repo's package.json on GitHub) ─────────────────
+async function refreshVersionInfo() {
+  const el = document.getElementById('settings-version-body');
+  if (!el) return;
+  let local = '—';
+  try { if (window.api && window.api.updates) local = (await window.api.updates.version()).version || '—'; } catch {}
+  el.innerHTML = `
+    <div class="settings-version-row">
+      <div class="settings-version-info">
+        <div class="settings-version-num">EngOrg <strong>v${escapeHtmlS(local)}</strong></div>
+        <div class="settings-version-sub" id="settings-version-sub">Checking GitHub…</div>
+      </div>
+      <button class="settings-btn settings-btn-sm" id="settings-version-check">Check for updates</button>
+    </div>`;
+  const sub = el.querySelector('#settings-version-sub');
+  const btn = el.querySelector('#settings-version-check');
+  const runCheck = async () => {
+    sub.textContent = 'Checking GitHub…';
+    btn.disabled = true;
+    try {
+      const r = await window.api.updates.check();
+      if (r.error) { sub.textContent = 'Could not reach GitHub: ' + r.error; }
+      else if (r.latestVersion && r.versionBehind) { sub.innerHTML = `🔔 Update available — <strong>v${escapeHtmlS(r.latestVersion)}</strong> is on GitHub.`; sub.className = 'settings-version-sub update'; }
+      else if (r.latestVersion) { sub.innerHTML = `✓ Up to date with GitHub (v${escapeHtmlS(r.latestVersion)}).`; sub.className = 'settings-version-sub ok'; }
+      else if (r.updatesAvailable) { sub.textContent = 'Newer changes are available on GitHub.'; sub.className = 'settings-version-sub update'; }
+      else { sub.textContent = '✓ Up to date.'; sub.className = 'settings-version-sub ok'; }
+    } catch (e) { sub.textContent = 'Could not check: ' + e.message; }
+    btn.disabled = false;
+  };
+  btn.addEventListener('click', runCheck);
+  runCheck();
 }
 
 // Apply saved theme on load

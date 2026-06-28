@@ -100,6 +100,7 @@ const __api = {
   // App updates — check the canonical repo for newer commits on startup
   updates: {
     check: () => ipcRenderer.invoke('updates:check'),
+    version: () => ipcRenderer.invoke('updates:version'),
     apply: () => ipcRenderer.invoke('updates:apply'),
     pull: () => ipcRenderer.invoke('updates:pull'),
     skip: (sha) => ipcRenderer.invoke('updates:skip', sha),

@@ -100,8 +100,22 @@ async function fetchRaw(owner, repo, branch, p) {
   return Buffer.from(await r.arrayBuffer());
 }
 
+// ---- Version sync: the repo's package.json version is the source of truth. ----
+// Compare local app.getVersion() against the upstream package.json version (semver)
+// so the in-app version always reflects what's published on GitHub.
+function cmpSemver(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < 3; i++) { if ((pa[i] || 0) > (pb[i] || 0)) return 1; if ((pa[i] || 0) < (pb[i] || 0)) return -1; }
+  return 0;
+}
+async function upstreamVersion(owner, repo, branch) {
+  try { return JSON.parse((await fetchRaw(owner, repo, branch, 'package.json')).toString('utf8')).version || null; }
+  catch { return null; }
+}
+
 module.exports = function registerUpdates() {
-  ipcMain.handle('updates:check', async () => {
+  async function checkForUpdates() {
     const { owner, repo, branch } = config.CONTRIB_REPO;
     try {
       const head = await gh(`/repos/${owner}/${repo}/commits/${branch}`);
@@ -147,7 +161,24 @@ module.exports = function registerUpdates() {
     } catch (e) {
       return { error: e.message };
     }
+  }
+
+  // Wrap the commit-level check with version info synced from the repo's package.json.
+  ipcMain.handle('updates:check', async () => {
+    const res = await checkForUpdates();
+    if (res && !res.error) {
+      try {
+        const { owner, repo, branch } = config.CONTRIB_REPO;
+        res.currentVersion = app.getVersion();
+        res.latestVersion = await upstreamVersion(owner, repo, branch);
+        res.versionBehind = res.latestVersion ? cmpSemver(res.latestVersion, res.currentVersion) > 0 : false;
+      } catch {}
+    }
+    return res;
   });
+
+  // Cheap local-version read for display (Settings → About).
+  ipcMain.handle('updates:version', () => ({ version: app.getVersion() }));
 
   // git checkout only — fast-forward pull in place.
   ipcMain.handle('updates:apply', async () => {

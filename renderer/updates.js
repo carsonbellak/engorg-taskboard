@@ -42,9 +42,11 @@ const updateChecker = (() => {
 
   function showAvailable(res) {
     const latest = res.latest || {};
-    const headline = res.isGitRepo && res.behindBy
-      ? `You're <b>${res.behindBy}</b> commit${res.behindBy === 1 ? '' : 's'} behind the latest version.`
-      : `A newer version of the app is available.`;
+    const headline = (res.versionBehind && res.latestVersion)
+      ? `<b>v${esc(res.latestVersion)}</b> is available${res.currentVersion ? ` — you're on v${esc(res.currentVersion)}` : ''}.`
+      : res.isGitRepo && res.behindBy
+        ? `You're <b>${res.behindBy}</b> commit${res.behindBy === 1 ? '' : 's'} behind the latest version.`
+        : `A newer version of the app is available.`;
     const latestLine = latest.shortSha
       ? `<div class="update-latest">Latest: <code>${esc(latest.shortSha)}</code> — ${esc(latest.message || '')}</div>`
       : '';
