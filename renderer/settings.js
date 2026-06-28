@@ -877,15 +877,29 @@ function applyTheme(themeId) {
   if (window.ThemeFx) window.ThemeFx.init(themeId);
 }
 
+let _settingsTab = 'appearance'; // remembered across re-renders of the Settings page
+
 function renderSettings() {
   const container = document.getElementById('view-settings');
   const currentTheme = dataManager.settings.theme || 'default';
   const noteSize = dataManager.settings.noteSize || 'medium';
 
   container.innerHTML = `
-    <div class="settings-page">
-      <h2 class="settings-title">Settings</h2>
+    <div class="settings-page settings-tabbed">
+      <nav class="settings-nav">
+        <div class="settings-nav-title">Settings</div>
+        <button class="settings-nav-item" data-tab="appearance"><span class="settings-nav-ico">🎨</span> Appearance</button>
+        <button class="settings-nav-item" data-tab="general"><span class="settings-nav-ico">⚙️</span> General</button>
+        <button class="settings-nav-item" data-tab="accounts"><span class="settings-nav-ico">🔗</span> Linked Accounts</button>
+        <button class="settings-nav-item" data-tab="calendar"><span class="settings-nav-ico">📅</span> Calendar</button>
+        <button class="settings-nav-item" data-tab="integrations"><span class="settings-nav-ico">🧩</span> Integrations</button>
+        <button class="settings-nav-item" data-tab="mobile"><span class="settings-nav-ico">📱</span> Mobile &amp; Sharing</button>
+        <button class="settings-nav-item" data-tab="data"><span class="settings-nav-ico">💾</span> Data</button>
+        <button class="settings-nav-item" data-tab="about"><span class="settings-nav-ico">ℹ️</span> About</button>
+      </nav>
+      <div class="settings-content">
 
+      <section class="settings-tab-panel" data-panel="appearance">
       <!-- Theme Selection -->
       <div class="settings-section">
         <h3 class="settings-section-title">Color Theme</h3>
@@ -937,6 +951,8 @@ function renderSettings() {
         </div>
       </div>
 
+      </section>
+      <section class="settings-tab-panel" data-panel="general">
       <!-- General Settings -->
       <div class="settings-section">
         <h3 class="settings-section-title">General</h3>
@@ -969,6 +985,8 @@ function renderSettings() {
         </div>
       </div>
 
+      </section>
+      <section class="settings-tab-panel" data-panel="integrations">
       <!-- Engineering Utilities -->
       <div class="settings-section">
         <h3 class="settings-section-title">Engineering Utilities</h3>
@@ -985,6 +1003,27 @@ function renderSettings() {
         <span id="settings-digikey-status" class="settings-inline-status"></span>
       </div>
 
+      <!-- Hotbar (moved into Integrations) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Hotbar</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:10px">Choose which tabs show in the top bar. Drag tabs in the bar to reorder. Promote an engineering utility to give it its own top-bar tab.</p>
+        <div style="font-weight:600;font-size:13px;margin:6px 0;color:var(--text-secondary)">Tabs</div>
+        <div id="hotbar-tabs" class="hotbar-edit-grid"></div>
+        <div style="font-weight:600;font-size:13px;margin:14px 0 6px;color:var(--text-secondary)">Engineering utilities in the hotbar</div>
+        <div id="hotbar-utils" class="hotbar-edit-grid"></div>
+      </div>
+
+      </section>
+      <section class="settings-tab-panel" data-panel="accounts">
+      <!-- Linked Accounts (unified hub) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Linked Accounts</h3>
+        <p class="settings-section-desc">Connect the services this app works with. The <strong>list</strong> of linked accounts syncs across your devices — but for security each device authorizes its own credentials (encrypted locally with the OS keystore, never uploaded).</p>
+        <div id="settings-accounts-body" class="settings-accounts-grid">Loading…</div>
+      </div>
+
+      </section>
+      <section class="settings-tab-panel" data-panel="data">
       <!-- Data -->
       <div class="settings-section">
         <h3 class="settings-section-title">Data</h3>
@@ -1008,6 +1047,8 @@ function renderSettings() {
         </div>
       </div>
 
+      </section>
+      <section class="settings-tab-panel" data-panel="calendar">
       <!-- Apple Calendar Sync -->
       <div class="settings-section">
         <h3 class="settings-section-title">Apple Calendar Sync</h3>
@@ -1053,6 +1094,8 @@ function renderSettings() {
         <span id="settings-feed-status" style="display:block;margin-top:10px;font-size:13px;color:var(--text-muted)"></span>
       </div>
 
+      </section>
+      <section class="settings-tab-panel" data-panel="mobile">
       <!-- Mobile Access -->
       <div class="settings-section">
         <h3 class="settings-section-title">Mobile Access</h3>
@@ -1088,15 +1131,8 @@ function renderSettings() {
         <span id="settings-installer-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
       </div>
 
-      <div class="settings-section">
-        <h3 class="settings-section-title">Hotbar</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:10px">Choose which tabs show in the top bar. Drag tabs in the bar to reorder. Promote an engineering utility to give it its own top-bar tab.</p>
-        <div style="font-weight:600;font-size:13px;margin:6px 0;color:var(--text-secondary)">Tabs</div>
-        <div id="hotbar-tabs" class="hotbar-edit-grid"></div>
-        <div style="font-weight:600;font-size:13px;margin:14px 0 6px;color:var(--text-secondary)">Engineering utilities in the hotbar</div>
-        <div id="hotbar-utils" class="hotbar-edit-grid"></div>
-      </div>
-
+      </section>
+      <section class="settings-tab-panel" data-panel="about">
       <div class="settings-section">
         <h3 class="settings-section-title">Request a Feature</h3>
         <p class="settings-toggle-desc" style="margin-bottom:12px">Have an idea? Send a feature request straight to the developer. It opens a GitHub issue on the project for tracking. <b>Sign in with GitHub</b> in your browser — no access token needed.</p>
@@ -1109,8 +1145,25 @@ function renderSettings() {
         <button id="settings-contrib-open" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Submit Changes…</button>
         <a href="#" id="settings-contrib-repo" style="margin-left:12px;font-size:13px;color:var(--accent)">View repository</a>
       </div>
+      </section>
+
+      </div><!-- /settings-content -->
     </div>
   `;
+
+  // Tabbed nav wiring
+  (function bindSettingsTabs() {
+    const items = container.querySelectorAll('.settings-nav-item');
+    const panels = container.querySelectorAll('.settings-tab-panel');
+    const show = (tab) => {
+      if (![...panels].some(p => p.dataset.panel === tab)) tab = 'appearance';
+      items.forEach(i => i.classList.toggle('active', i.dataset.tab === tab));
+      panels.forEach(p => p.classList.toggle('active', p.dataset.panel === tab));
+      _settingsTab = tab;
+    };
+    items.forEach(i => i.addEventListener('click', () => show(i.dataset.tab)));
+    show(_settingsTab || 'appearance');
+  })();
 
   // Theme click handlers
   container.querySelectorAll('.settings-theme-card').forEach(card => {
@@ -1121,6 +1174,9 @@ function renderSettings() {
       renderSettings(); // re-render to update active state
     });
   });
+
+  // Linked Accounts hub (Cloud / GitHub / Email)
+  refreshLinkedAccounts();
 
   // ── Calendar feeds (Brightspace / ICS) ──
   (function bindCalendarFeeds() {
@@ -1631,6 +1687,195 @@ async function openContributeModal() {
 // Engineering Utilities tab, so there are no dedicated tabs to show/hide.
 // Kept as a no-op for backward-compatible call sites.
 function updatePrinterTabVisibility() {}
+
+// ── Linked Accounts hub ─────────────────────────────────────────────────────
+// One aesthetic card grid covering cloud sync, GitHub, and email accounts. The
+// registry of linked accounts lives in synced settings (`linkedAccounts`) so it
+// shows on every device; secrets stay device-local (OS keystore) and each device
+// reconnects its own — which is why some cards show "Reconnect on this device".
+function escapeHtmlS(str) { const d = document.createElement('div'); d.textContent = str == null ? '' : str; return d.innerHTML; }
+
+function getLinkedRegistry() {
+  const r = dataManager.settings.linkedAccounts;
+  return (r && typeof r === 'object') ? r : {};
+}
+async function setLinkedRegistry(patch) {
+  await dataManager.updateSettings({ linkedAccounts: { ...getLinkedRegistry(), ...patch } });
+}
+
+function accountCard({ icon, name, sub, status, statusClass, actions }) {
+  return `
+    <div class="acct-card">
+      <div class="acct-icon">${icon}</div>
+      <div class="acct-main">
+        <div class="acct-name">${escapeHtmlS(name)}</div>
+        <div class="acct-sub">${sub || ''}</div>
+      </div>
+      <div class="acct-side">
+        <span class="acct-status ${statusClass || ''}">${status || ''}</span>
+        <div class="acct-actions">${actions || ''}</div>
+      </div>
+    </div>`;
+}
+
+async function refreshLinkedAccounts() {
+  const body = document.getElementById('settings-accounts-body');
+  if (!body) return;
+  const reg = getLinkedRegistry();
+
+  // --- gather state ---
+  const cloudUser = (typeof firebaseSync !== 'undefined' && firebaseSync.user) ? firebaseSync.user : null;
+
+  let gh = { connected: false };
+  try { if (window.api && window.api.github) gh = await window.api.github.status(); } catch {}
+  const ghReg = reg.github || null;
+
+  let emailAccts = [];
+  try { if (window.api && window.api.email) emailAccts = await window.api.email.listAccounts() || []; } catch {}
+  // Mirror local email accounts into the synced registry (metadata only).
+  mirrorEmailRegistry(emailAccts, reg);
+
+  // --- Cloud Sync card ---
+  let cloudCard;
+  if (cloudUser) {
+    cloudCard = accountCard({
+      icon: '<span class="acct-emoji">☁️</span>',
+      name: cloudUser.displayName || cloudUser.email || 'Cloud account',
+      sub: `<span class="acct-sub-line">${escapeHtmlS(cloudUser.email || '')} · syncs your data across devices</span>`,
+      status: 'Connected', statusClass: 'ok',
+      actions: '<button class="settings-btn settings-btn-sm settings-btn-danger" data-act="cloud-out">Sign out</button>',
+    });
+  } else {
+    cloudCard = accountCard({
+      icon: '<span class="acct-emoji">☁️</span>',
+      name: 'Cloud Sync (Google)',
+      sub: '<span class="acct-sub-line">Sign in to sync your board and linked-account list across devices.</span>',
+      status: 'Not signed in', statusClass: 'warn',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="cloud-in">Sign in</button>',
+    });
+  }
+
+  // --- GitHub card ---
+  let githubCard;
+  if (gh.connected) {
+    const n = (dataManager.settings.gitActivity || []).length;
+    githubCard = accountCard({
+      icon: '<span class="acct-emoji">🐙</span>',
+      name: `GitHub · ${escapeHtmlS(gh.username || '')}`,
+      sub: `<span class="acct-sub-line">${n} commit${n === 1 ? '' : 's'} on your Timeline${dataManager.settings.gitLastSync ? ' · synced ' + new Date(dataManager.settings.gitLastSync).toLocaleString() : ''}</span>`,
+      status: 'Connected', statusClass: 'ok',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gh-refresh">Refresh</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="gh-out">Disconnect</button>',
+    });
+  } else if (ghReg && ghReg.username) {
+    githubCard = accountCard({
+      icon: '<span class="acct-emoji">🐙</span>',
+      name: `GitHub · ${escapeHtmlS(ghReg.username)}`,
+      sub: '<span class="acct-sub-line acct-reconnect">Linked on another device — reconnect here to load commits.</span>'
+        + '<div class="acct-inline-form"><input type="password" class="settings-input acct-input" id="gh-token" placeholder="Paste a GitHub token" autocomplete="off"></div>',
+      status: 'Reconnect', statusClass: 'warn',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gh-connect">Connect</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="gh-forget">Remove</button>',
+    });
+  } else {
+    githubCard = accountCard({
+      icon: '<span class="acct-emoji">🐙</span>',
+      name: 'GitHub',
+      sub: '<span class="acct-sub-line">Show commits from the repos you own on your Timeline.</span>'
+        + '<div class="acct-inline-form"><input type="password" class="settings-input acct-input" id="gh-token" placeholder="Personal access token (ghp_… / github_pat_…)" autocomplete="off">'
+        + '<a href="#" class="acct-help" data-act="gh-help">Create one ↗</a></div>'
+        + '<p class="settings-field-hint">Needs read access to your repos (classic: <code>repo</code>; fine-grained: Contents + Metadata → Read).</p>',
+      status: 'Not linked', statusClass: '',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gh-connect">Connect</button>',
+    });
+  }
+
+  // --- Email cards ---
+  const provIcon = (p) => ({ gmail: '📧', outlook: '📨', office365: '📨', yahoo: '📬', icloud: '✉️' }[(p || '').toLowerCase()] || '✉️');
+  const localEmails = new Set(emailAccts.map(a => (a.email || a.user || '').toLowerCase()));
+  let emailCards = emailAccts.map(a => accountCard({
+    icon: `<span class="acct-emoji">${provIcon(a.provider)}</span>`,
+    name: a.name || a.email || a.user,
+    sub: `<span class="acct-sub-line">${escapeHtmlS(a.email || a.user || '')} · ${escapeHtmlS(a.provider || 'IMAP')}${a.authType === 'oauth' ? ' · OAuth' : ''}</span>`,
+    status: 'Connected', statusClass: 'ok',
+    actions: '<button class="settings-btn settings-btn-sm" data-act="email-manage">Manage</button>',
+  })).join('');
+  // Registry email accounts that aren't set up on this device.
+  (reg.email || []).filter(e => !localEmails.has((e.email || '').toLowerCase())).forEach(e => {
+    emailCards += accountCard({
+      icon: `<span class="acct-emoji">${provIcon(e.provider)}</span>`,
+      name: e.name || e.email,
+      sub: `<span class="acct-sub-line acct-reconnect">${escapeHtmlS(e.email || '')} · set up on another device</span>`,
+      status: 'Reconnect', statusClass: 'warn',
+      actions: `<button class="settings-btn settings-btn-sm" data-act="email-add">Set up here</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="email-forget" data-email="${escapeHtmlS(e.email || '')}">Remove</button>`,
+    });
+  });
+
+  body.innerHTML = `
+    <div class="acct-group-label">Cloud</div>
+    ${cloudCard}
+    <div class="acct-group-label">Developer</div>
+    ${githubCard}
+    <div class="acct-group-label">Email <button class="settings-btn settings-btn-sm acct-add-btn" data-act="email-add">+ Add account</button></div>
+    ${emailCards || '<div class="acct-empty">No email accounts linked yet.</div>'}
+    <div id="acct-status" class="settings-inline-status"></div>`;
+
+  bindLinkedAccounts(body);
+}
+
+// Keep the synced registry's email list in step with what's set up locally.
+function mirrorEmailRegistry(localAccts, reg) {
+  const existing = Array.isArray(reg.email) ? reg.email : [];
+  const byEmail = new Map(existing.map(e => [(e.email || '').toLowerCase(), e]));
+  let changed = false;
+  for (const a of localAccts) {
+    const key = (a.email || a.user || '').toLowerCase();
+    if (!key) continue;
+    const meta = { email: a.email || a.user, name: a.name || a.email || a.user, provider: a.provider || 'imap' };
+    const prev = byEmail.get(key);
+    if (!prev || prev.name !== meta.name || prev.provider !== meta.provider) { byEmail.set(key, meta); changed = true; }
+  }
+  if (changed) setLinkedRegistry({ email: [...byEmail.values()] });
+}
+
+function bindLinkedAccounts(body) {
+  const st = (m) => { const s = document.getElementById('acct-status'); if (s) s.textContent = m || ''; };
+  const goEmailTab = () => { const t = document.querySelector('.header-tab[data-view="email"]'); if (t) t.click(); };
+  const onClick = async (act, el) => {
+    if (act === 'cloud-in') { try { await firebaseSync.signInWithGoogle(); } catch (e) { st('Sign-in failed: ' + e.message); } refreshLinkedAccounts(); }
+    else if (act === 'cloud-out') { try { await firebaseSync.signOut(); } catch {} refreshLinkedAccounts(); }
+    else if (act === 'gh-help') { window.api.openExternal('https://github.com/settings/tokens'); }
+    else if (act === 'gh-refresh') { st('Syncing…'); try { if (window.syncGitHub) await window.syncGitHub(); } catch (e) { st('Failed: ' + e.message); } refreshLinkedAccounts(); }
+    else if (act === 'gh-out') {
+      try { await window.api.github.disconnect(); } catch {}
+      await setLinkedRegistry({ github: null });
+      await dataManager.updateSettings({ gitActivity: [] });
+      if (typeof viewRenderer !== 'undefined' && viewRenderer.currentView === 'timeline') viewRenderer.renderTimeline();
+      refreshLinkedAccounts();
+    }
+    else if (act === 'gh-forget') { await setLinkedRegistry({ github: null }); refreshLinkedAccounts(); }
+    else if (act === 'gh-connect') {
+      const token = (document.getElementById('gh-token') || {}).value;
+      if (!token || !token.trim()) { st('Enter a token.'); return; }
+      st('Connecting…');
+      try {
+        const res = await window.api.github.connect(token.trim());
+        if (res.error) { st('Failed: ' + res.error); return; }
+        await setLinkedRegistry({ github: { username: res.username, addedAt: new Date().toISOString() } });
+        st('Connected — syncing commits…');
+        if (window.syncGitHub) await window.syncGitHub();
+        if (typeof viewRenderer !== 'undefined' && viewRenderer.currentView === 'timeline') viewRenderer.renderTimeline();
+        refreshLinkedAccounts();
+      } catch (e) { st('Failed: ' + (e.message || e)); }
+    }
+    else if (act === 'email-add' || act === 'email-manage') { goEmailTab(); }
+    else if (act === 'email-forget') {
+      const email = (el.dataset.email || '').toLowerCase();
+      const list = (getLinkedRegistry().email || []).filter(e => (e.email || '').toLowerCase() !== email);
+      await setLinkedRegistry({ email: list });
+      refreshLinkedAccounts();
+    }
+  };
+  body.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', (e) => { e.preventDefault(); onClick(el.dataset.act, el); }));
+}
 
 // Apply saved theme on load
 function initTheme() {

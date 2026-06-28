@@ -180,6 +180,13 @@ const __api = {
   calendar: {
     fetchFeed: (url, source) => ipcRenderer.invoke('calendar:fetchFeed', url, source),
   },
+  // GitHub account link → commits on owned repos surface on the Timeline.
+  github: {
+    status: () => ipcRenderer.invoke('github:status'),
+    connect: (token) => ipcRenderer.invoke('github:connect', token),
+    disconnect: () => ipcRenderer.invoke('github:disconnect'),
+    fetchActivity: (days) => ipcRenderer.invoke('github:fetchActivity', days),
+  },
   // Git integration
   git: {
     // inspection

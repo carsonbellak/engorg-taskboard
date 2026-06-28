@@ -35,6 +35,7 @@ module.exports = {
 
   // Email hub — encrypted account store (app passwords encrypted via safeStorage)
   EMAIL_ACCOUNTS_FILE: path.join('C:\\Assistant\\appdata', 'email_accounts.json'),
+  GITHUB_TOKEN_FILE: path.join('C:\\Assistant\\appdata', 'github.json'),
   EMAIL_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'email_attachments'),
 
   // Microsoft OAuth (modern auth) for Outlook / Microsoft 365 mail accounts.

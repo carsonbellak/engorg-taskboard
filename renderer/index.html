@@ -283,13 +283,20 @@
           </div>
         </div>
       </div>
-      <div id="view-settings" class="view-panel"></div>
     </main>
   </div>
 
   <!-- Split Window: grid of app instances (iframes). Shown only when this window
        is the split shell; window-split.js fills it and hides #header / #app-body. -->
   <div id="split-root"></div>
+
+  <!-- Settings: opens as a popup over the current view (rendered by settings.js into #view-settings). -->
+  <div id="settings-modal" class="settings-modal-overlay hidden">
+    <div class="settings-modal-box">
+      <button class="settings-modal-close" id="settings-modal-close" title="Close (Esc)">&times;</button>
+      <div id="view-settings"></div>
+    </div>
+  </div>
 
   <!-- Modal: Add/Edit Note -->
   <div id="modal-add-note" class="modal hidden">

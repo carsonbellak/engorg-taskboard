@@ -1518,6 +1518,24 @@ class ViewRenderer {
       });
     });
 
+    // GitHub commits (linked account → repos you own). Not project-scoped, so
+    // only shown in the "All Projects" view to avoid cluttering project timelines.
+    if (this.selectedProject === 'all') {
+      (dataManager.settings.gitActivity || []).forEach(c => {
+        if (!c.date) return;
+        events.push({
+          date: c.date,
+          type: 'git-commit',
+          icon: '\u{1F517}',
+          title: c.message || '(no message)',
+          subtitle: c.repo + (c.author ? ' · ' + c.author : ''),
+          color: '#8957E5',
+          repo: c.repo,
+          url: c.url,
+        });
+      });
+    }
+
     // Sort newest first
     events.sort((a, b) => new Date(b.date) - new Date(a.date));
 
@@ -1577,6 +1595,10 @@ class ViewRenderer {
         <div class="timeline-stat-num">${totalEvents}</div>
         <div class="timeline-stat-label">Events</div>
       </div>
+      ${(dataManager.settings.gitActivity || []).length ? `<div class="timeline-stat-card">
+        <div class="timeline-stat-num" style="color:#8957E5">${dataManager.settings.gitActivity.length}</div>
+        <div class="timeline-stat-label">Commits</div>
+      </div>` : ''}
       <div class="timeline-stat-card">
         <div class="timeline-stat-num">${totalPurchases}</div>
         <div class="timeline-stat-label">Orders</div>
@@ -1623,13 +1645,16 @@ class ViewRenderer {
           metaHtml = `<span class="tl-badge tl-status-change">${ev.fromLabel} \u2192 ${ev.toLabel}</span>`;
         } else if (ev.type === 'weekly-summary') {
           metaHtml = `<span class="tl-badge tl-weekly">\u{1F4CB} ${ev.subtitle}</span>`;
+        } else if (ev.type === 'git-commit') {
+          metaHtml = `<span class="tl-badge tl-commit">${escapeHtml(ev.repo)}</span>`;
         }
 
         const isCompleted = ev.completed;
         const dotColor = isCompleted ? '#22C55E' : ev.color;
         const completedClass = isCompleted ? ' timeline-item-done' : '';
 
-        html += `<div class="timeline-item${completedClass}">
+        const linkAttr = ev.url ? ` data-open-url="${escapeHtml(ev.url)}"` : '';
+        html += `<div class="timeline-item${completedClass}${ev.url ? ' timeline-item-link' : ''}"${linkAttr}>
           <div class="timeline-dot" style="background:${dotColor}"></div>
           <div class="timeline-item-content${isCompleted ? ' timeline-content-done' : ''}">
             <div class="timeline-item-header">
@@ -1647,6 +1672,10 @@ class ViewRenderer {
     html += '</div></div>';
 
     container.innerHTML = html;
+
+    // Commit (and other linked) items open externally on click.
+    container.querySelectorAll('[data-open-url]').forEach(el =>
+      el.addEventListener('click', () => window.api.openExternal(el.dataset.openUrl)));
   }
 
   // ============ UPDATE PROGRESS BAR ============

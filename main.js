@@ -15,6 +15,7 @@ const registerPrinter = require('./ipc/printer');
 const registerSlicer  = require('./ipc/slicer');
 const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
+const registerGithub  = require('./ipc/github');
 const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
 const registerWifiChecker   = require('./ipc/wifi-checker');
@@ -127,6 +128,7 @@ app.whenReady().then(() => {
   registerSlicer(getMainWindow);
   registerEmail(getMainWindow);
   registerCalendar();
+  registerGithub();
   registerKicadImporter(getMainWindow);
   registerUtilityStore();
   registerWifiChecker(getMainWindow);

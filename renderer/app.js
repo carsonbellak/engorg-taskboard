@@ -624,21 +624,23 @@
       }
     });
 
-    // ============ SETTINGS BUTTON ============
-    document.getElementById('btn-settings-header').addEventListener('click', () => {
-      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
-      document.getElementById('btn-settings-header').classList.add('active');
-      viewRenderer.currentView = 'settings';
-      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-      document.getElementById('view-settings').classList.add('active');
-      updateContentHeader();
-      renderCurrentView();
-    });
-
-    // Deactivate settings button when any tab is clicked
-    document.querySelectorAll('.header-tab').forEach(tab => {
-      tab.addEventListener('click', () => document.getElementById('btn-settings-header').classList.remove('active'));
-    });
+    // ============ SETTINGS (popup) ============
+    const settingsModal = document.getElementById('settings-modal');
+    const settingsBtn = document.getElementById('btn-settings-header');
+    function openSettings() {
+      renderSettings();                 // render fresh each open
+      settingsModal.classList.remove('hidden');
+      settingsBtn.classList.add('active');
+    }
+    function closeSettings() {
+      settingsModal.classList.add('hidden');
+      settingsBtn.classList.remove('active');
+    }
+    window.openSettings = openSettings;  // let other modules open settings
+    settingsBtn.addEventListener('click', openSettings);
+    document.getElementById('settings-modal-close').addEventListener('click', closeSettings);
+    settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettings(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !settingsModal.classList.contains('hidden')) closeSettings(); });
 
     // ============ PROJECT BUTTON ============
     document.getElementById('btn-add-project-header').addEventListener('click', () => {
@@ -938,6 +940,25 @@
     if (!EMB) {
       setTimeout(() => { syncCalendars().catch(e => console.warn('Initial calendar sync failed:', e.message)); }, 4000);
       setInterval(() => { syncCalendars().catch(() => {}); }, 15 * 60 * 1000); // every 15 min
+    }
+
+    // ============ GITHUB ACTIVITY SYNC (linked account → Timeline) ============
+    // Pulls commits on the repos you own and caches them in settings (local + sync),
+    // so the Timeline can render them. Token lives encrypted in the main process.
+    async function syncGitHub() {
+      if (!window.api.github) return;
+      const status = await window.api.github.status();
+      if (!status.connected) return;
+      const res = await window.api.github.fetchActivity(90);
+      if (res.error) { console.warn('GitHub sync failed:', res.error); return; }
+      await dataManager.updateSettings({ gitActivity: res.commits || [], gitLastSync: new Date().toISOString() });
+      if (viewRenderer.currentView === 'timeline') viewRenderer.renderTimeline();
+    }
+    window.syncGitHub = syncGitHub; // Settings "Connect"/"Refresh" call this
+
+    if (!EMB) {
+      setTimeout(() => { syncGitHub().catch(e => console.warn('Initial GitHub sync failed:', e.message)); }, 5000);
+      setInterval(() => { syncGitHub().catch(() => {}); }, 30 * 60 * 1000); // every 30 min
     }
 
     // ============ QUICK FILTERS ============

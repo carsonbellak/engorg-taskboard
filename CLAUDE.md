@@ -48,6 +48,7 @@ The in-app equivalent (for non-maintainers) is Settings → Contribute → "Subm
 | `preload.js` | Exposes `window.api` to renderer via contextBridge. **Add new IPC channels here when adding features.** |
 | `ipc/data.js` | `data:load`, `data:save`, `shell:openExternal`, `shell:openPath`, `dialog:openFiles`, `installer:build` |
 | `ipc/outlook.js` | `outlook:fetchLocal` — reads Outlook calendar via PowerShell COM |
+| `ipc/github.js` | `github:*` — Linked-account GitHub. PAT encrypted at rest via `safeStorage` in `GITHUB_TOKEN_FILE` (`appdata/github.json`), decrypted only in main, never sent to renderer. `github:fetchActivity` lists owned repos (sorted by pushed) and their recent commits → cached by the renderer in `settings.gitActivity` for the **Timeline**. |
 | `ipc/files.js` | All `files:*` handlers — readdir, read/write, rename, delete, search, watch, KiCad SVG/GLB export |
 | `ipc/git.js` | `git:status`, `git:stage`, `git:unstage`, `git:commit`, `git:diff`, `git:isRepo` |
 | `ipc/auth.js` | `auth:googleSignIn` — opens child BrowserWindow to hosted auth page, polls for token |
@@ -70,7 +71,7 @@ The in-app equivalent (for non-maintainers) is Settings → Contribute → "Subm
 | `slicer.js` | Slicer tab — model select, profile picker, slice and send |
 | `cad-viewer.js` | 3D model viewer — STL/OBJ/GLTF via Three.js, KiCad SVG/GLB via kicad-cli |
 | `file-viewer.js` | File browser — directory tree, text/binary viewer, batch rename, content search, and **Git integration**: branch indicator, commit panel, per-file status badges (incl. conflicts), and a right-click git menu (status-aware Stage/Unstage, View Diff modal, Discard, **Open in Git Manager** → `gitManager.openRepo`). Badges/menu read `window.api.git.status` (cached as `gitStatus`/`gitFileMap`). |
-| `settings.js` | Settings tab — persists to `settings.json` |
+| `settings.js` | Settings — persists to `settings.json`. Opens as a **popup modal** (`#settings-modal` in `index.html`; the gear button calls `window.openSettings()` which renders into `#view-settings` and shows the overlay — Esc / backdrop / × closes). It is no longer a full view. **Tabbed layout** (`renderSettings` builds a left-rail `.settings-nav` + `.settings-tab-panel` sections: Appearance / General / Linked Accounts / Calendar / Integrations / Mobile & Sharing / Data / About; active tab kept in module var `_settingsTab`). **Linked Accounts hub** (`refreshLinkedAccounts`) — unified cards for Cloud Sync (Google/Firebase), GitHub, and Email (Gmail/Outlook/IMAP via `api.email.listAccounts`). The account *registry* (`settings.linkedAccounts`) syncs across devices; secrets stay device-local (OS keystore), so cards can show "Reconnect on this device". |
 | `stats.js` | Stats/analytics tab |
 | `noteboard.js` | Sticky notes board |
 | `timers.js` | Countdown timers |
@@ -113,7 +114,7 @@ All data is loaded/cached by `renderer/data.js` (`DataManager`, the global `data
 | `scheduleItems` (calendar events) | `schedule.json` | `id, title, projectId, date, day, startTime, endTime, completed, source` (`outlook`/ICS), `outlookId`/`extId` for dedup. |
 | `purchases` | `purchases.json` | `id, item, projectId, status` (`toPlace`/…), `trackingNumber, carrier` (auto-detected), `cost, quantity`. |
 | `todos` | `todos.json` | `id, projectId, done`. |
-| `settings` | `settings.json` | `activeView, theme, categories[], projectGroups[], hiddenTabs[], hotbarUtilities[], tabOrder[], tabsLocked, printerEnabled, autoCheckUpdates`, DigiKey/utility overrides, etc. |
+| `settings` | `settings.json` | `activeView, theme, categories[], projectGroups[], hiddenTabs[], hotbarUtilities[], tabOrder[], tabsLocked, printerEnabled, autoCheckUpdates`, DigiKey/utility overrides, `gitRepos`/`gitLastRepo`/`gitAutoFetch` (Git Manager), `gitActivity[]`/`gitLastSync` (cached GitHub commits → Timeline), `linkedAccounts` (synced registry of linked accounts — `{ github:{username}, email:[{email,name,provider}] }`; secrets are NOT here, they stay device-local), etc. (Local-only `localTheme`/`splitLayout` live in **localStorage**, not here.) |
 
 ---
 
@@ -156,6 +157,12 @@ All data is loaded/cached by `renderer/data.js` (`DataManager`, the global `data
 
 ### Outlook
 - `outlook:fetchLocal(daysBack, daysForward)` → `[{ subject, startTime, endTime, location, body, isAllDay, entryId }]`
+
+### GitHub (Linked Accounts → Timeline)
+- `github:status()` → `{ connected, username, name }` (never returns the token)
+- `github:connect(token)` → validates via `/user`, encrypts+stores the PAT → `{ username, name }` or `{ error }`
+- `github:disconnect()` → deletes the stored token
+- `github:fetchActivity(days=90)` → `{ commits: [{ sha, repo, message, date, url, author }] }` — commits on **owned** repos within the window. The renderer (`app.js` `syncGitHub`, on startup + every 30 min) caches the result in `settings.gitActivity` (+ `gitLastSync`); `taskboard.js` `renderTimeline()` renders them as `git-commit` items (only in the "All Projects" view; click opens the commit).
 
 ### Files
 - `files:selectFolder()` → path or null
