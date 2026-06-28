@@ -166,6 +166,29 @@ let calendarMonth = new Date();
 let filters = { priority: '', category: '', overdue: false };
 let noteSortMode = 'priority';
 let noteColorMode = 'category';
+
+// Tertiary note-sort tie-breaker (mirrors desktop Settings → noteTertiarySort):
+// age-based unless the primary sort is already date-based, else alphabetical.
+function tertiaryCompare(a, b) {
+  const tert = (data.settings && data.settings.noteTertiarySort) || 'alpha';
+  if (tert !== 'alpha' && noteSortMode !== 'created' && noteSortMode !== 'created-asc' && noteSortMode !== 'due') {
+    const d = tert === 'oldest'
+      ? new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+      : new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+    if (d !== 0) return d;
+  }
+  return (a.title || '').localeCompare(b.title || '');
+}
+
+// Project display order = sidebar tree order (active groups → their projects →
+// ungrouped), so "Sort: Project" matches the desktop sidebar / Projects page.
+function projectTreeRank() {
+  const groups = (data.settings.projectGroups || []).filter(g => !g.archived);
+  const m = new Map(); let i = 0;
+  groups.forEach(g => (data.projects || []).filter(p => p.groupId === g.id).forEach(p => m.set(p.id, i++)));
+  (data.projects || []).filter(p => !p.groupId || !groups.find(g => g.id === p.groupId)).forEach(p => m.set(p.id, i++));
+  return m;
+}
 let completedShown = 10;
 let completedObserver = null;
 
@@ -554,6 +577,8 @@ function renderNotes() {
   const priorityOrder = { High: 0, Medium: 1, Low: 2 };
 
   // Sort
+  const prank = projectTreeRank();
+  const projOf = (pid) => (prank.has(pid) ? prank.get(pid) : 1e9);
   tasks.sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
     let primary = 0;
@@ -567,17 +592,15 @@ function renderNotes() {
       }
       case 'alpha': primary = (a.title || '').localeCompare(b.title || ''); break;
       case 'category': primary = (a.category || '').localeCompare(b.category || ''); break;
-      case 'project': {
-        const pa = getProjectName(a.projectId) || '';
-        const pb = getProjectName(b.projectId) || '';
-        primary = pa.localeCompare(pb); break;
-      }
+      case 'project': primary = projOf(a.projectId) - projOf(b.projectId); break;
       case 'priority':
       default: primary = (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1); break;
     }
     if (primary !== 0) return primary;
-    // Secondary: color index
-    return resolveNoteColorIdx(a) - resolveNoteColorIdx(b);
+    // Secondary: color index, then configurable tertiary tie-break.
+    const secondary = resolveNoteColorIdx(a) - resolveNoteColorIdx(b);
+    if (secondary !== 0) return secondary;
+    return tertiaryCompare(a, b);
   });
 
   const active = tasks.filter(t => !t.completed);
@@ -675,11 +698,14 @@ function renderNotes() {
         const pid = n.projectId || '_none';
         if (!projMap[pid]) {
           const proj = data.projects.find(p => p.id === pid);
-          projMap[pid] = { label: proj ? proj.name : 'No Project', color: proj?.color || '#94A3B8', notes: [] };
+          projMap[pid] = { pid, label: proj ? proj.name : 'No Project', color: proj?.color || '#94A3B8', notes: [] };
         }
         projMap[pid].notes.push(n);
       }
-      groups = Object.values(projMap).sort((a, b) => a.label.localeCompare(b.label));
+      // Order project groups by the sidebar tree order, not alphabetically.
+      const prank = projectTreeRank();
+      const r = (k) => (prank.has(k) ? prank.get(k) : 1e9);
+      groups = Object.values(projMap).sort((a, b) => r(a.pid) - r(b.pid));
       break;
     }
   }
@@ -779,6 +805,8 @@ function bindNoteEvents() {
 // board column can be sorted individually.
 function sortTasksByMode(arr) {
   const priorityOrder = { High: 0, Medium: 1, Low: 2 };
+  const prank = projectTreeRank();
+  const projOf = (pid) => (prank.has(pid) ? prank.get(pid) : 1e9);
   return arr.sort((a, b) => {
     let primary = 0;
     switch (noteSortMode) {
@@ -791,16 +819,14 @@ function sortTasksByMode(arr) {
       }
       case 'alpha': primary = (a.title || '').localeCompare(b.title || ''); break;
       case 'category': primary = (a.category || '').localeCompare(b.category || ''); break;
-      case 'project': {
-        const pa = getProjectName(a.projectId) || '';
-        const pb = getProjectName(b.projectId) || '';
-        primary = pa.localeCompare(pb); break;
-      }
+      case 'project': primary = projOf(a.projectId) - projOf(b.projectId); break;
       case 'priority':
       default: primary = (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1); break;
     }
     if (primary !== 0) return primary;
-    return resolveNoteColorIdx(a) - resolveNoteColorIdx(b);
+    const secondary = resolveNoteColorIdx(a) - resolveNoteColorIdx(b);
+    if (secondary !== 0) return secondary;
+    return tertiaryCompare(a, b);
   });
 }
 

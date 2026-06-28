@@ -160,15 +160,35 @@ html.is-embedded .titlebar-drag { -webkit-app-region: no-drag; }
 .auth-gate-loading { font-size: 14px; color: var(--text-muted, #94A3B8); padding: 20px 0; }
 
 /* === HOTBAR EDITOR (Settings) === */
-.hotbar-edit-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; }
-.hotbar-edit-row {
-  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-  border: 1px solid var(--border-color); border-radius: 8px;
-  background: var(--bg-input, var(--bg-secondary)); color: var(--text-primary);
-  font-size: 13px; cursor: pointer;
+/* Hotbar editor (Settings → Hotbar) */
+.hotbar-actions { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.hotbar-lock { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text-secondary, #475569); cursor: pointer; }
+.hotbar-lock input { accent-color: var(--accent, #3B82F6); cursor: pointer; }
+.hotbar-sublabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted, #94A3B8); margin: 14px 0 6px; }
+.hotbar-hint { font-weight: 600; text-transform: none; letter-spacing: 0; opacity: .85; }
+.hotbar-list { display: flex; flex-direction: column; gap: 6px; }
+.hotbar-list-muted { opacity: .92; }
+.hotbar-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border: 1px solid var(--border-color, #E2E8F0); border-radius: 10px;
+  background: var(--bg-card, #fff); color: var(--text-primary, #1E293B); font-size: 13px;
 }
-.hotbar-edit-row input { cursor: pointer; flex-shrink: 0; }
-.hotbar-edit-sub { margin-left: auto; font-size: 11px; color: var(--text-muted); }
+.hotbar-item.dragging { opacity: .5; border-style: dashed; }
+.hotbar-list:not(.locked) .hotbar-item { cursor: grab; }
+.hotbar-list.locked .hotbar-grip { opacity: .25; }
+.hotbar-grip { color: var(--text-muted, #94A3B8); font-size: 13px; letter-spacing: -2px; cursor: grab; user-select: none; }
+.hotbar-item-ico { font-size: 15px; width: 20px; text-align: center; }
+.hotbar-item-name { flex: 1; font-weight: 600; }
+.hotbar-item-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted, #94A3B8); background: var(--bg-secondary, #F1F5F9); padding: 2px 7px; border-radius: 999px; }
+.hotbar-item-remove, .hotbar-item-add {
+  border: none; border-radius: 7px; background: transparent; font-family: inherit; cursor: pointer;
+}
+.hotbar-item-remove { color: var(--text-muted, #94A3B8); font-size: 13px; padding: 3px 7px; }
+.hotbar-item-remove:hover { background: rgba(220,38,38,.12); color: var(--danger, #DC2626); }
+.hotbar-item-add { color: var(--accent-text, var(--accent, #2563EB)); font-size: 12px; font-weight: 700; padding: 4px 9px; }
+.hotbar-item-add:hover { background: var(--accent-bg, var(--bg-hover, #EFF6FF)); }
+.hotbar-item-avail { background: var(--bg-secondary, #F8FAFC); }
+.hotbar-empty { font-size: 12.5px; color: var(--text-muted, #94A3B8); padding: 8px 2px; }
 .header-tab-util { /* promoted engineering-utility tab, styled like a normal tab */ }
 
 /* === HEADER === */
@@ -7111,6 +7131,11 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
 .settings-toggle-desc { flex: 1; font-size: 11px; color: var(--text-muted, #64748B); }
 .settings-checkbox {
   width: 18px; height: 18px; accent-color: var(--accent, #3B82F6); cursor: pointer; flex-shrink: 0;
+}
+.settings-select {
+  flex-shrink: 0; padding: 6px 10px; border: 1px solid var(--border-color, #E2E8F0);
+  border-radius: 8px; background: var(--bg-input, var(--bg-secondary, #F8FAFC));
+  color: var(--text-primary, #1E293B); font-family: inherit; font-size: 12px; cursor: pointer;
 }
 
 /* Data stats */

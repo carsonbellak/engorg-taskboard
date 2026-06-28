@@ -253,6 +253,37 @@ class FirebaseSync {
       this.listeners.push(unsub);
     }
 
+    // Settings — sync only the shared/account-level keys (project groups, categories,
+    // note sort/color, display prefs) so they propagate across devices. Device-local
+    // keys (printer, installed utilities, hotbar layout, git repos, etc.) are left
+    // untouched, and `localTheme`/`splitLayout` live in localStorage by design.
+    const SYNCED_SETTINGS = ['projectGroups', 'categories', 'noteSortMode',
+      'noteColorMode', 'noteTertiarySort', 'calendarFeeds', 'linkedAccounts'];
+    const settingsUnsub = base.doc('settings').onSnapshot(snapshot => {
+      if (!snapshot.exists || snapshot.metadata.hasPendingWrites) return;
+      const data = snapshot.data();
+      let changed = false, catsChanged = false;
+      for (const k of SYNCED_SETTINGS) {
+        if (!(k in data)) continue;
+        if (JSON.stringify(data[k]) !== JSON.stringify(dataManager.settings[k])) {
+          dataManager.settings[k] = data[k];
+          changed = true;
+          if (k === 'categories') catsChanged = true;
+        }
+      }
+      if (!changed) return;
+      console.log('Firebase: Received settings update from', data._source || 'unknown');
+      this._skipSync = true;
+      dataManager._saveSettings().then(() => { this._skipSync = false; });
+      // Rebuild the UI that depends on these (sidebar groups/order, category chips).
+      if (catsChanged && typeof APP_CATEGORIES !== 'undefined' && Array.isArray(dataManager.settings.categories)) {
+        APP_CATEGORIES = dataManager.settings.categories;
+      }
+      window.dispatchEvent(new CustomEvent('projects-changed'));
+      if (catsChanged) window.dispatchEvent(new CustomEvent('categories-changed'));
+    });
+    this.listeners.push(settingsUnsub);
+
     // Timers — top-level collection, not nested under users/{uid}/data/.
     // No orderBy: a bare uid equality query uses Firestore's automatic
     // single-field index, so it works even if the composite (uid, expiresAt)

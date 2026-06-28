@@ -91,6 +91,13 @@ class NotesBoard {
     const colorCache = new Map();
     notes.forEach(n => colorCache.set(n, resolveAutoColor(n, colorMode, projects)));
 
+    // Project order = sidebar tree order (groups → their projects → ungrouped).
+    const pgroups = (this.data.getActiveProjectGroups && this.data.getActiveProjectGroups()) || [];
+    const projIdx = new Map(); let _pi = 0;
+    pgroups.forEach(g => projects.filter(p => p.groupId === g.id).forEach(p => projIdx.set(p.id, _pi++)));
+    projects.filter(p => !p.groupId || !pgroups.find(g => g.id === p.groupId)).forEach(p => projIdx.set(p.id, _pi++));
+    const projRank = (pid) => (projIdx.has(pid) ? projIdx.get(pid) : 1e9);
+
     notes.sort((a, b) => {
       let primary = 0;
       switch (sortMode) {
@@ -110,9 +117,7 @@ class NotesBoard {
         case 'category':
           primary = (a.category || '').localeCompare(b.category || ''); break;
         case 'project': {
-          const pa = projects.find(p => p.id === a.projectId);
-          const pb = projects.find(p => p.id === b.projectId);
-          primary = (pa?.name || '').localeCompare(pb?.name || ''); break;
+          primary = projRank(a.projectId) - projRank(b.projectId); break;
         }
         case 'priority':
         default:
@@ -121,6 +126,14 @@ class NotesBoard {
       if (primary !== 0) return primary;
       const secondary = colorCache.get(a) - colorCache.get(b);
       if (secondary !== 0) return secondary;
+      // Tertiary sort (configurable in Settings; alphabetical when sorting by date).
+      const tert = (dataManager.settings && dataManager.settings.noteTertiarySort) || this.tertiarySort || 'alpha';
+      if (tert !== 'alpha' && sortMode !== 'created' && sortMode !== 'created-asc' && sortMode !== 'due') {
+        const d = tert === 'oldest'
+          ? new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+          : new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        if (d !== 0) return d;
+      }
       return (a.title || '').localeCompare(b.title || '');
     });
 

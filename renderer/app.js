@@ -971,10 +971,13 @@
     // Initialize color mode and sort mode from settings
     const savedColorMode = dataManager.settings.noteColorMode || 'category';
     const savedSortMode = dataManager.settings.noteSortMode || 'priority';
+    const savedTertiary = dataManager.settings.noteTertiarySort || 'alpha';
     viewRenderer.colorMode = savedColorMode;
     viewRenderer.sortMode = savedSortMode;
+    viewRenderer.tertiarySort = savedTertiary;
     notesBoard.colorMode = savedColorMode;
     notesBoard.sortMode = savedSortMode;
+    notesBoard.tertiarySort = savedTertiary;
     document.getElementById('filter-color-mode').value = savedColorMode;
     document.getElementById('filter-sort').value = savedSortMode;
 

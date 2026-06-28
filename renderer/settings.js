@@ -893,7 +893,8 @@ function renderSettings() {
         <button class="settings-nav-item" data-tab="accounts"><span class="settings-nav-ico">🔗</span> Linked Accounts</button>
         <button class="settings-nav-item" data-tab="calendar"><span class="settings-nav-ico">📅</span> Calendar</button>
         <button class="settings-nav-item" data-tab="integrations"><span class="settings-nav-ico">🧩</span> Integrations</button>
-        <button class="settings-nav-item" data-tab="mobile"><span class="settings-nav-ico">📱</span> Mobile &amp; Sharing</button>
+        <button class="settings-nav-item" data-tab="hotbar"><span class="settings-nav-ico">🧰</span> Hotbar</button>
+        <button class="settings-nav-item" data-tab="mobile"><span class="settings-nav-ico">📱</span> Mobile</button>
         <button class="settings-nav-item" data-tab="data"><span class="settings-nav-ico">💾</span> Data</button>
         <button class="settings-nav-item" data-tab="about"><span class="settings-nav-ico">ℹ️</span> About</button>
       </nav>
@@ -958,9 +959,23 @@ function renderSettings() {
         <h3 class="settings-section-title">General</h3>
         <div class="settings-list">
           <label class="settings-toggle-row">
-            <span class="settings-toggle-label">Stale task animations</span>
-            <span class="settings-toggle-desc">Shake/shiver notes that haven't been touched</span>
+            <span class="settings-toggle-label">Note wiggle</span>
+            <span class="settings-toggle-desc">Shake/shiver notes that haven't been touched in a while</span>
             <input type="checkbox" class="settings-checkbox" id="settings-stale-anim" ${dataManager.settings.staleAnimations !== false ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Askew notes</span>
+            <span class="settings-toggle-desc">Tilt notes slightly for a sticky-note look (off = straight)</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-askew-notes" ${dataManager.settings.askewNotes !== false ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Tertiary note sort</span>
+            <span class="settings-toggle-desc">Tie-breaker after the Sort &amp; Color you pick in the notes bar (ignored when sorting by date)</span>
+            <select class="settings-select" id="settings-tertiary-sort">
+              <option value="alpha" ${(dataManager.settings.noteTertiarySort || 'alpha') === 'alpha' ? 'selected' : ''}>Alphabetical</option>
+              <option value="newest" ${dataManager.settings.noteTertiarySort === 'newest' ? 'selected' : ''}>Newest first</option>
+              <option value="oldest" ${dataManager.settings.noteTertiarySort === 'oldest' ? 'selected' : ''}>Oldest first</option>
+            </select>
           </label>
           <label class="settings-toggle-row">
             <span class="settings-toggle-label">Show day completion dots</span>
@@ -1003,14 +1018,20 @@ function renderSettings() {
         <span id="settings-digikey-status" class="settings-inline-status"></span>
       </div>
 
-      <!-- Hotbar (moved into Integrations) -->
+      </section>
+      <section class="settings-tab-panel" data-panel="hotbar">
+      <!-- Hotbar -->
       <div class="settings-section">
         <h3 class="settings-section-title">Hotbar</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:10px">Choose which tabs show in the top bar. Drag tabs in the bar to reorder. Promote an engineering utility to give it its own top-bar tab.</p>
-        <div style="font-weight:600;font-size:13px;margin:6px 0;color:var(--text-secondary)">Tabs</div>
-        <div id="hotbar-tabs" class="hotbar-edit-grid"></div>
-        <div style="font-weight:600;font-size:13px;margin:14px 0 6px;color:var(--text-secondary)">Engineering utilities in the hotbar</div>
-        <div id="hotbar-utils" class="hotbar-edit-grid"></div>
+        <p class="settings-section-desc">Pick which tabs and engineering utilities live in the top bar, and drag to reorder them. Changes apply instantly.</p>
+        <div class="hotbar-actions">
+          <label class="hotbar-lock"><input type="checkbox" id="hotbar-lock"> Lock order</label>
+          <button class="settings-btn settings-btn-sm" id="hotbar-reset">Reset to defaults</button>
+        </div>
+        <div class="hotbar-sublabel">In your top bar <span class="hotbar-hint">— drag&nbsp;to&nbsp;reorder</span></div>
+        <div id="hotbar-active" class="hotbar-list"></div>
+        <div class="hotbar-sublabel">Available <span class="hotbar-hint">— click to add</span></div>
+        <div id="hotbar-available" class="hotbar-list hotbar-list-muted"></div>
       </div>
 
       </section>
@@ -1123,19 +1144,18 @@ function renderSettings() {
         </div>
       </div>
 
-      <!-- App Distribution -->
-      <div class="settings-section">
-        <h3 class="settings-section-title">App Distribution</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">Build a self-extracting installer (EngOrg-Setup.exe) that you can share with others.</p>
-        <button id="settings-build-installer" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Build Installer</button>
-        <span id="settings-installer-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
-      </div>
-
       </section>
       <section class="settings-tab-panel" data-panel="about">
       <div class="settings-section">
         <h3 class="settings-section-title">Version</h3>
         <div id="settings-version-body" class="settings-version-body">Loading…</div>
+      </div>
+      <!-- App Distribution (Build Installer) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">App Distribution</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Build a self-extracting installer (EngOrg-Setup.exe) that you can share with others.</p>
+        <button id="settings-build-installer" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Build Installer</button>
+        <span id="settings-installer-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
       </div>
       <div class="settings-section">
         <h3 class="settings-section-title">Request a Feature</h3>
@@ -1252,6 +1272,17 @@ function renderSettings() {
   document.getElementById('settings-stale-anim').addEventListener('change', (e) => {
     dataManager.updateSettings({ staleAnimations: e.target.checked });
     document.body.classList.toggle('no-stale-anim', !e.target.checked);
+  });
+  document.getElementById('settings-askew-notes').addEventListener('change', (e) => {
+    dataManager.updateSettings({ askewNotes: e.target.checked });
+    window.dispatchEvent(new CustomEvent('tasks-changed')); // re-render notes straight/tilted
+  });
+  document.getElementById('settings-tertiary-sort').addEventListener('change', (e) => {
+    const mode = e.target.value;
+    dataManager.updateSettings({ noteTertiarySort: mode });
+    if (typeof viewRenderer !== 'undefined') viewRenderer.tertiarySort = mode;
+    if (typeof notesBoard !== 'undefined') notesBoard.tertiarySort = mode;
+    window.dispatchEvent(new CustomEvent('tasks-changed'));
   });
   document.getElementById('settings-day-dots').addEventListener('change', (e) => {
     dataManager.updateSettings({ dayDots: e.target.checked });
@@ -1459,54 +1490,129 @@ function renderSettings() {
   bindHotbarEditor();
 }
 
-// Hotbar editor — toggle which tabs show, and promote/demote engineering utilities.
-function bindHotbarEditor() {
-  const MAIN_TABS = [
-    { view: 'notes', label: 'Notes' }, { view: 'projects', label: 'Projects' },
-    { view: 'calendar', label: 'Calendar' },
-    { view: 'email', label: 'Email' }, { view: 'timeline', label: 'Timeline' },
-    { view: 'timers', label: 'Timers' }, { view: 'board', label: 'Board' },
-    { view: 'purchasing', label: 'Purchases' }, { view: 'stats', label: 'Stats' },
-    { view: 'files', label: 'Files' }, { view: 'engineering', label: 'Engineering Utilities' },
-  ];
-  const tabsEl = document.getElementById('hotbar-tabs');
-  const utilsEl = document.getElementById('hotbar-utils');
-  if (!tabsEl || !utilsEl) return;
-  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
-  const row = (checked, label, sub) => `<label class="hotbar-edit-row"><input type="checkbox" ${checked ? 'checked' : ''}><span>${esc(label)}</span>${sub ? `<span class="hotbar-edit-sub">${esc(sub)}</span>` : ''}</label>`;
+// Hotbar editor — an ordered, drag-reorderable list of the tabs + utilities in the
+// top bar, with show/hide and promote/demote, plus lock + reset. Mirrors exactly
+// what the bar renders (hiddenTabs / hotbarUtilities / tabOrder / tabsLocked).
+const HOTBAR_MAIN_TABS = [
+  { view: 'notes', label: 'Notes', icon: '📌' }, { view: 'projects', label: 'Projects', icon: '📁' },
+  { view: 'calendar', label: 'Calendar', icon: '📅' }, { view: 'email', label: 'Email', icon: '✉️' },
+  { view: 'timeline', label: 'Timeline', icon: '📈' }, { view: 'timers', label: 'Timers', icon: '⏱' },
+  { view: 'board', label: 'Board', icon: '📋' }, { view: 'purchasing', label: 'Purchases', icon: '📦' },
+  { view: 'stats', label: 'Stats', icon: '📊' }, { view: 'files', label: 'Files', icon: '📁' },
+  { view: 'engineering', label: 'Engineering Utilities', icon: '🔧' },
+];
 
-  function renderTabs() {
-    const hidden = dataManager.settings.hiddenTabs || [];
-    tabsEl.innerHTML = MAIN_TABS.map(t => row(!hidden.includes(t.view), t.label)).join('');
-    tabsEl.querySelectorAll('.hotbar-edit-row input').forEach((cb, i) => {
-      cb.addEventListener('change', () => {
-        let h = (dataManager.settings.hiddenTabs || []).slice();
-        const v = MAIN_TABS[i].view;
-        if (cb.checked) h = h.filter(x => x !== v); else if (!h.includes(v)) h.push(v);
+function bindHotbarEditor() {
+  const activeEl = document.getElementById('hotbar-active');
+  const availEl = document.getElementById('hotbar-available');
+  const lockCb = document.getElementById('hotbar-lock');
+  const resetBtn = document.getElementById('hotbar-reset');
+  if (!activeEl || !availEl) return;
+  const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; };
+  const S = () => dataManager.settings;
+  const utilMetas = () => (typeof engineeringUtilities !== 'undefined' && engineeringUtilities.listInstalled) ? engineeringUtilities.listInstalled() : [];
+  const apply = () => { if (window.applyHotbar) window.applyHotbar(); };
+  let drag = null; // currently-dragged row (shared by row + container handlers)
+
+  // Items currently in the bar (visible tabs + promoted utilities), ordered by tabOrder.
+  function inBar() {
+    const hidden = S().hiddenTabs || [], promoted = S().hotbarUtilities || [], metas = utilMetas();
+    const items = [];
+    HOTBAR_MAIN_TABS.forEach(t => { if (!hidden.includes(t.view)) items.push({ kind: 'tab', id: t.view, key: t.view, name: t.label, icon: t.icon }); });
+    promoted.forEach(id => { const m = metas.find(x => x.id === id) || { id, name: id }; items.push({ kind: 'util', id, key: 'util:' + id, name: m.name, icon: m.icon || '🧩' }); });
+    const order = S().tabOrder || [];
+    items.sort((a, b) => { const ia = order.indexOf(a.key), ib = order.indexOf(b.key); return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib); });
+    return items;
+  }
+  function available() {
+    const hidden = S().hiddenTabs || [], promoted = S().hotbarUtilities || [];
+    const items = [];
+    HOTBAR_MAIN_TABS.forEach(t => { if (hidden.includes(t.view)) items.push({ kind: 'tab', id: t.view, name: t.label, icon: t.icon }); });
+    utilMetas().forEach(m => { if (!promoted.includes(m.id)) items.push({ kind: 'util', id: m.id, name: m.name, icon: m.icon || '🧩' }); });
+    return items;
+  }
+
+  function render() {
+    const locked = !!S().tabsLocked;
+    if (lockCb) lockCb.checked = locked;
+    const items = inBar();
+    activeEl.classList.toggle('locked', locked);
+    activeEl.innerHTML = items.map(it => `
+      <div class="hotbar-item" draggable="${locked ? 'false' : 'true'}" data-key="${esc(it.key)}" data-kind="${it.kind}" data-id="${esc(it.id)}">
+        <span class="hotbar-grip" title="Drag to reorder">⋮⋮</span>
+        <span class="hotbar-item-ico">${it.icon || ''}</span>
+        <span class="hotbar-item-name">${esc(it.name)}</span>
+        <span class="hotbar-item-tag">${it.kind === 'util' ? 'utility' : 'tab'}</span>
+        <button class="hotbar-item-remove" title="${it.kind === 'util' ? 'Remove from bar' : 'Hide tab'}" data-remove>✕</button>
+      </div>`).join('') || '<div class="hotbar-empty">Nothing in the bar.</div>';
+
+    const avail = available();
+    availEl.innerHTML = avail.length ? avail.map(it => `
+      <div class="hotbar-item hotbar-item-avail" data-kind="${it.kind}" data-id="${esc(it.id)}">
+        <span class="hotbar-item-ico">${it.icon || ''}</span>
+        <span class="hotbar-item-name">${esc(it.name)}</span>
+        <span class="hotbar-item-tag">${it.kind === 'util' ? 'utility' : 'tab'}</span>
+        <button class="hotbar-item-add" title="Add to bar" data-add>＋ Add</button>
+      </div>`).join('') : '<div class="hotbar-empty">Everything is in the bar.</div>';
+
+    bind();
+  }
+
+  function bind() {
+    // Remove (hide tab / demote utility)
+    activeEl.querySelectorAll('[data-remove]').forEach(btn => btn.addEventListener('click', (e) => {
+      const el = e.target.closest('.hotbar-item');
+      if (el.dataset.kind === 'tab') {
+        const h = (S().hiddenTabs || []).slice(); if (!h.includes(el.dataset.id)) h.push(el.dataset.id);
         dataManager.updateSettings({ hiddenTabs: h });
-        if (window.applyHotbar) window.applyHotbar();
-      });
-    });
-  }
-  function renderUtils() {
-    const promoted = dataManager.settings.hotbarUtilities || [];
-    const metas = (typeof engineeringUtilities !== 'undefined' && engineeringUtilities.listInstalled)
-      ? engineeringUtilities.listInstalled() : [];
-    if (!metas.length) { utilsEl.innerHTML = '<div class="settings-toggle-desc">No utilities installed yet — add some from the Utility Store.</div>'; return; }
-    utilsEl.innerHTML = metas.map(m => row(promoted.includes(m.id), (m.icon ? m.icon + ' ' : '') + m.name, promoted.includes(m.id) ? 'in hotbar' : 'in Engineering')).join('');
-    utilsEl.querySelectorAll('.hotbar-edit-row input').forEach((cb, i) => {
-      cb.addEventListener('change', () => {
-        let p = (dataManager.settings.hotbarUtilities || []).slice();
-        const id = metas[i].id;
-        if (cb.checked) { if (!p.includes(id)) p.push(id); } else p = p.filter(x => x !== id);
+      } else {
+        const p = (S().hotbarUtilities || []).filter(x => x !== el.dataset.id);
         dataManager.updateSettings({ hotbarUtilities: p });
-        if (window.applyHotbar) window.applyHotbar();
-        renderUtils();
+      }
+      apply(); render();
+    }));
+    // Add (show tab / promote utility)
+    availEl.querySelectorAll('[data-add]').forEach(btn => btn.addEventListener('click', (e) => {
+      const el = e.target.closest('.hotbar-item');
+      if (el.dataset.kind === 'tab') {
+        const h = (S().hiddenTabs || []).filter(x => x !== el.dataset.id);
+        dataManager.updateSettings({ hiddenTabs: h });
+      } else {
+        const p = (S().hotbarUtilities || []).slice(); if (!p.includes(el.dataset.id)) p.push(el.dataset.id);
+        dataManager.updateSettings({ hotbarUtilities: p });
+      }
+      apply(); render();
+    }));
+    // Drag-reorder the active list (row handlers; the container drop is bound once below).
+    activeEl.querySelectorAll('.hotbar-item').forEach(row => {
+      row.addEventListener('dragstart', () => { if (S().tabsLocked) return; drag = row; row.classList.add('dragging'); });
+      row.addEventListener('dragend', () => { row.classList.remove('dragging'); drag = null; });
+      row.addEventListener('dragover', (e) => {
+        if (!drag || drag === row || S().tabsLocked) return;
+        e.preventDefault();
+        const r = row.getBoundingClientRect();
+        if (e.clientY > r.top + r.height / 2) row.after(drag); else row.before(drag);
       });
     });
   }
-  renderTabs();
-  renderUtils();
+
+  if (lockCb) lockCb.addEventListener('change', () => { dataManager.updateSettings({ tabsLocked: lockCb.checked }); apply(); render(); });
+  if (resetBtn) resetBtn.addEventListener('click', async () => {
+    await dataManager.updateSettings({ hiddenTabs: [], hotbarUtilities: [], tabOrder: [], tabsLocked: false });
+    apply(); render();
+  });
+
+  // Container-level drag plumbing (bound once; rows are re-created on each render).
+  activeEl.addEventListener('dragover', (e) => { if (drag && !S().tabsLocked) e.preventDefault(); });
+  activeEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!drag) return;
+    const keys = [...activeEl.querySelectorAll('.hotbar-item')].map(r => r.dataset.key);
+    dataManager.updateSettings({ tabOrder: keys });
+    apply();
+  });
+
+  render();
 }
 
 function bindContribute() {

@@ -90,6 +90,11 @@ class ViewRenderer {
     const colorCache = new Map();
     notes.forEach(n => colorCache.set(n, resolveAutoColor(n, colorMode, projects)));
 
+    // Project display order = the sidebar tree order (groups, then their projects,
+    // then ungrouped) — so "Sort: Project" matches the sidebar & Projects page.
+    const projIdx = this._projectTreeIndex();
+    const projRank = (pid) => (projIdx.has(pid) ? projIdx.get(pid) : 1e9);
+
     notes.sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
       let primary = 0;
@@ -110,9 +115,7 @@ class ViewRenderer {
         case 'category':
           primary = (a.category || '').localeCompare(b.category || ''); break;
         case 'project': {
-          const pa = this.getProject(a.projectId);
-          const pb = this.getProject(b.projectId);
-          primary = (pa?.name || '').localeCompare(pb?.name || ''); break;
+          primary = projRank(a.projectId) - projRank(b.projectId); break;
         }
         case 'priority':
         default:
@@ -122,7 +125,16 @@ class ViewRenderer {
       if (primary !== 0) return primary;
       const secondary = colorCache.get(a) - colorCache.get(b);
       if (secondary !== 0) return secondary;
-      // Tertiary sort: alphabetical
+      // Tertiary sort: configurable in Settings (age-based unless the primary sort
+      // is already date-based, in which case it falls back to alphabetical).
+      // Read straight from settings so it always reflects the saved choice.
+      const tert = (dataManager.settings && dataManager.settings.noteTertiarySort) || this.tertiarySort || 'alpha';
+      if (tert !== 'alpha' && sortMode !== 'created' && sortMode !== 'created-asc' && sortMode !== 'due') {
+        const d = tert === 'oldest'
+          ? new Date(a.createdAt || 0) - new Date(b.createdAt || 0)
+          : new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        if (d !== 0) return d;
+      }
       return (a.title || '').localeCompare(b.title || '');
     });
 
@@ -152,7 +164,8 @@ class ViewRenderer {
       const effectiveIdx = resolveAutoColor(note, this.colorMode || 'category', this.data.projects);
       const c = getStickyColors()[effectiveIdx];
       const proj = this.getProject(note.projectId);
-      const rotation = ((note.id ? note.id.charCodeAt(note.id.length - 1) : 0) % 3 - 1) * 1.2;
+      const askew = dataManager.settings.askewNotes !== false;
+      const rotation = askew ? ((note.id ? note.id.charCodeAt(note.id.length - 1) : 0) % 3 - 1) * 1.2 : 0;
 
       const el = document.createElement('div');
       // Determine stale/old status for shake animations
@@ -357,6 +370,18 @@ class ViewRenderer {
     });
   }
 
+  // Map of projectId → display index in sidebar-tree order (active groups in their
+  // order, each group's projects, then ungrouped). Matches buildSidebar /
+  // renderProjectSlates so every project-ordered view agrees.
+  _projectTreeIndex() {
+    const groups = (this.data.getActiveProjectGroups && this.data.getActiveProjectGroups()) || [];
+    const m = new Map();
+    let i = 0;
+    groups.forEach(g => this.data.projects.filter(p => p.groupId === g.id).forEach(p => m.set(p.id, i++)));
+    this.data.projects.filter(p => !p.groupId || !groups.find(g => g.id === p.groupId)).forEach(p => m.set(p.id, i++));
+    return m;
+  }
+
   // ============ DYNAMIC GROUPING ============
   _buildGroups(notes, sortMode) {
     // Always separate completed notes into their own group at the bottom
@@ -459,7 +484,10 @@ class ViewRenderer {
           projGroups[pid].notes.push(note);
         });
         groups = Object.values(projGroups);
-        groups.sort((a, b) => a.label.localeCompare(b.label));
+        // Order project groups to match the sidebar tree (not alphabetically).
+        const pidx = this._projectTreeIndex();
+        const rank = (k) => (pidx.has(k) ? pidx.get(k) : 1e9);
+        groups.sort((a, b) => rank(a.key) - rank(b.key));
         break;
       }
     }
