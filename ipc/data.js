@@ -6,7 +6,7 @@ const { DATA_DIR } = require('../config');
 
 const ALLOWED_FILES = [
   'tasks.json', 'projects.json', 'purchases.json', 'settings.json',
-  'schedule.json', 'todos.json', 'archived_projects.json'
+  'schedule.json', 'todos.json', 'archived_projects.json', 'print_history.json'
 ];
 
 module.exports = function register(getMainWindow) {

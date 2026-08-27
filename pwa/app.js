@@ -450,6 +450,7 @@ function render() {
       });
       break;
     }
+    case 'ecosystem': content.innerHTML = ''; mountEcosystem(content); break;
     case 'timeline': content.innerHTML = renderTimeline(); bindTimelineEvents(); break;
     case 'calendar': content.innerHTML = renderCalendar(); bindCalendarEvents(); break;
     case 'purchases': content.innerHTML = renderPurchases(); bindPurchaseEvents(); break;
@@ -2489,3 +2490,335 @@ async function pwaCheckTimersAndAlarms() {
   }
 }
 setInterval(() => { pwaCheckTimersAndAlarms(); }, 1000);
+
+// ===================== ECOSYSTEM (branched view — PWA mirror) =====================
+// Reflects the desktop "Ecosystem" canvas from the synced settings.ecosystem tree.
+// Mobile is view-focused: pan/zoom/pinch, tap-to-open (links, task detail), and
+// collapse/expand. Structural editing + local-asset/utility/CAD actions live on
+// the desktop app, so those nodes open an informational sheet here.
+const ECO_RING = 210, ECO_OFF = 50000, ECO_GRAY = '#64748B';
+const ECO_ICON = { root: '🌳', project: '📁', category: '🏷️', bucket: '🗂️', branch: '🌿', folder: '📁', file: '📄', cad: '🧊', link: '🔗', utility: '🔧', note: '🗒️', task: '📝', event: '📅', purchase: '📦', todo: '✅' };
+const ECO_DESKTOP_ONLY = new Set(['folder', 'file', 'cad', 'utility']);
+let ecoCam = { scale: 1, tx: 0, ty: 0 }, ecoCamInit = false;
+let ecoGraph = new Map(), ecoPos = new Map();
+let ecoWorld = null, ecoRoot = null, ecoEdgesG = null, ecoNodesLayer = null;
+const ecoPointers = new Map();
+let ecoPinch = null, ecoPan = null;
+// Progressive disclosure (mirrors desktop): projects open by default, deeper
+// branches collapsed until tapped; big fans cluster into "+N more".
+const ECO_CAP = 10;
+const ecoExpanded = new Set();        // deep branches the user tapped open (root always open)
+const ecoMoreShown = new Map();
+let ecoVisList = [], ecoVisChildren = new Map();
+function ecoIsOpen(id) { if (id.startsWith('more:')) return false; if (id === 'root') return true; return ecoExpanded.has(id); }
+function ecoChildrenToShow(id) {
+  const kids = ecoGraph.get(id).childrenIds;
+  if (kids.length <= ECO_CAP + 1) return kids.slice();
+  const shown = ecoMoreShown.get(id) || ECO_CAP;
+  if (kids.length <= shown + 1) return kids.slice();
+  const list = kids.slice(0, shown), moreId = 'more:' + id;
+  ecoAdd({ id: moreId, kind: 'more', label: `+${kids.length - shown} more`, color: ecoGraph.get(id).limb, limb: ecoGraph.get(id).limb, parentId: id, moreParent: id });
+  list.push(moreId); return list;
+}
+function ecoToggleOpen(id) {
+  if (id === 'root') return;
+  if (ecoExpanded.has(id)) ecoExpanded.delete(id); else ecoExpanded.add(id);
+  ecoRender();
+}
+
+function ecoStore() {
+  const s = (data.settings && data.settings.ecosystem) || {};
+  return {
+    nodes: Array.isArray(s.nodes) ? s.nodes : [],
+    showData: s.showData === undefined ? true : s.showData,
+    layout: s.layout || {},
+  };
+}
+function ecoCatInfo(cid) {
+  const c = (data.settings.categories || []).find(x => x.id === cid);
+  return { label: c ? (c.name || c.label) : String(cid), color: c ? c.color : ECO_GRAY };
+}
+function ecoAdd(n) { ecoGraph.set(n.id, { childrenIds: [], ...n }); }
+
+function ecoBuild() {
+  const store = ecoStore();
+  ecoGraph = new Map();
+  ecoAdd({ id: 'root', kind: 'root', label: 'Workspace', color: ECO_GRAY, limb: ECO_GRAY, parentId: null });
+  for (const p of (data.projects || [])) {
+    const col = p.color || '#818CF8';
+    ecoAdd({ id: 'proj:' + p.id, kind: 'project', label: p.name || 'Project', color: col, limb: col, parentId: 'root' });
+    const cats = Array.isArray(p.categories) ? p.categories : [];
+    const catIds = new Set();
+    for (const raw of cats) {
+      const cid = (raw && typeof raw === 'object') ? raw.id : raw;
+      if (!cid || catIds.has(cid)) continue;
+      catIds.add(cid);
+      const ci = ecoCatInfo(cid);
+      ecoAdd({ id: `cat:${p.id}:${cid}`, kind: 'category', label: ci.label, color: ci.color, limb: col, parentId: 'proj:' + p.id });
+    }
+    if (store.showData) {
+      // Bulk data lives as `items` (a tap-open list), not as branches.
+      const pushItem = (nid, item) => { const nn = ecoGraph.get(nid); if (nn) (nn.items = nn.items || []).push(item); };
+      let genMade = false;
+      for (const t of (data.tasks || [])) {
+        if (t.projectId !== p.id) continue;
+        let parent;
+        if (t.category && catIds.has(t.category)) parent = `cat:${p.id}:${t.category}`;
+        else { if (!genMade) { ecoAdd({ id: `cat:${p.id}:__gen`, kind: 'category', label: 'General', color: ECO_GRAY, limb: col, parentId: 'proj:' + p.id, items: [] }); genMade = true; } parent = `cat:${p.id}:__gen`; }
+        pushItem(parent, { kind: 'task', ref: t, label: t.title || 'Untitled', done: !!t.completed, priority: t.priority });
+      }
+      const buckets = [
+        { key: 'schedule', label: 'Schedule', kind: 'event', items: (data.scheduleItems || []).filter(s => s.projectId === p.id), title: s => s.title },
+        { key: 'purchases', label: 'Purchases', kind: 'purchase', items: (data.purchases || []).filter(s => s.projectId === p.id), title: s => s.item || s.itemDescription },
+        { key: 'todos', label: 'To-dos', kind: 'todo', items: (data.todos || []).filter(s => s.projectId === p.id), title: s => s.text || s.title },
+      ];
+      for (const b of buckets) {
+        if (!b.items.length) continue;
+        ecoAdd({ id: `bucket:${p.id}:${b.key}`, kind: 'bucket', label: b.label, color: col, limb: col, parentId: 'proj:' + p.id,
+          items: b.items.map(it => ({ kind: b.kind, ref: it, label: b.title(it) || '(untitled)', done: !!it.completed })) });
+      }
+    }
+  }
+  for (const un of store.nodes) {
+    const parentId = ecoGraph.has(un.parentId) ? un.parentId : 'root';
+    const limb = ecoGraph.get(parentId) ? ecoGraph.get(parentId).limb : ECO_GRAY;
+    ecoAdd({ id: un.id, kind: un.kind, label: un.label || (ECO_ICON[un.kind] || '•'), color: limb, limb, parentId, data: un.data || {}, user: true });
+  }
+  for (const n of ecoGraph.values()) if (n.parentId && ecoGraph.has(n.parentId)) ecoGraph.get(n.parentId).childrenIds.push(n.id);
+  // apply persisted layout overrides (positions authored on desktop)
+  ecoGraph._layout = store.layout;
+}
+
+function ecoVisible() {
+  ecoVisList = []; ecoVisChildren = new Map();
+  const walk = (id) => {
+    ecoVisList.push(id);
+    if (!ecoIsOpen(id)) { ecoVisChildren.set(id, []); return; }
+    const kids = ecoChildrenToShow(id);
+    ecoVisChildren.set(id, kids);
+    for (const k of kids) { if (k.startsWith('more:')) { ecoVisList.push(k); ecoVisChildren.set(k, []); } else walk(k); }
+  };
+  if (ecoGraph.has('root')) walk('root');
+  return ecoVisList;
+}
+
+// Stable cached layout (mirrors desktop): children fan out from their parent at a
+// fixed distance and positions are cached so expanding one branch never moves others.
+const ecoPlaced = new Map();
+const ECO_CHILD_DIST = 195;
+function ecoLayout() {
+  ecoPos = new Map();
+  const layout = ecoGraph._layout || {};
+  const rootPos = (layout['root'] && Number.isFinite(layout['root'].x)) ? layout['root'] : (ecoPlaced.get('root') || { x: 0, y: 0 });
+  ecoPos.set('root', rootPos); ecoPlaced.set('root', rootPos);
+  const posFor = (id, angle, dist, from) => {
+    if (layout[id] && Number.isFinite(layout[id].x)) return layout[id];
+    if (ecoPlaced.has(id)) return ecoPlaced.get(id);
+    const p = { x: from.x + Math.cos(angle) * dist, y: from.y + Math.sin(angle) * dist };
+    ecoPlaced.set(id, p); return p;
+  };
+  const walk = (id) => {
+    const kids = ecoVisChildren.get(id) || [];
+    if (!kids.length) return;
+    const P = ecoPos.get(id);
+    if (id === 'root') {
+      const n = kids.length, step = (2 * Math.PI) / n, start = -Math.PI / 2;
+      const Rr = Math.max(ECO_RING, (150 * n) / (2 * Math.PI));
+      kids.forEach((k, i) => ecoPos.set(k, posFor(k, start + i * step, Rr, P)));
+    } else {
+      const outward = Math.atan2(P.y - rootPos.y, P.x - rootPos.x);
+      const n = kids.length, spread = Math.min(Math.PI * 1.7, 0.7 + n * 0.4);
+      const start = outward - spread / 2, step = n > 1 ? spread / (n - 1) : 0;
+      kids.forEach((k, i) => ecoPos.set(k, posFor(k, n === 1 ? outward : start + i * step, ECO_CHILD_DIST + (i % 3) * 100, P)));
+    }
+    for (const k of kids) walk(k);
+  };
+  walk('root');
+}
+
+function ecoDepth(id) { let d = 0, c = ecoGraph.get(id); while (c && c.parentId) { d++; c = ecoGraph.get(c.parentId); } return d; }
+
+function ecoApplyCam() { if (ecoWorld) ecoWorld.style.transform = `translate(${ecoCam.tx}px,${ecoCam.ty}px) scale(${ecoCam.scale})`; }
+
+function ecoRenderEdges() {
+  let s = '';
+  for (const id of ecoVisList) {
+    if (id === 'root') continue;
+    const n = ecoGraph.get(id), pp = ecoPos.get(n.parentId), cp = ecoPos.get(id);
+    if (!pp || !cp) continue;
+    const mx = (pp.x + cp.x) / 2, my = (pp.y + cp.y) / 2, dx = cp.x - pp.x, dy = cp.y - pp.y, len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(60, len * 0.12), cxp = mx + (-dy / len) * bow, cyp = my + (dx / len) * bow;
+    const d = ecoDepth(id), w = d <= 1 ? 3 : d === 2 ? 2 : 1.4;
+    s += `<path d="M${pp.x},${pp.y} Q${cxp},${cyp} ${cp.x},${cp.y}" fill="none" stroke="${n.limb}" stroke-width="${w}" stroke-opacity="0.5" stroke-linecap="round"/>`;
+  }
+  ecoEdgesG.innerHTML = s;
+}
+
+function ecoRenderNodes() {
+  let html = '';
+  for (const id of ecoVisList) {
+    const n = ecoGraph.get(id), p = ecoPos.get(id); if (!p) continue;
+    if (n.kind === 'more') {
+      html += `<div class="eco-node kind-more" data-more="${escapeHtml(id)}" style="left:${p.x}px;top:${p.y}px;--eco-accent:${n.color}"><span class="eco-node-ic">⋯</span><span class="eco-node-body"><span class="eco-node-title">${escapeHtml(n.label)}</span></span></div>`;
+      continue;
+    }
+    const kids = n.childrenIds.length, open = ecoIsOpen(id), items = (n.items || []).length;
+    const pill = kids ? (open ? `<button class="eco-collapse" data-collapse="${escapeHtml(id)}">–</button>` : `<button class="eco-collapse" data-collapse="${escapeHtml(id)}">+${kids}</button>`) : '';
+    const badge = items ? `<span class="eco-count">${items > 99 ? '99+' : items}</span>` : '';
+    const dot = (n.kind === 'project' || n.kind === 'category' || n.kind === 'bucket');
+    const ic = dot ? `<span class="eco-dot" style="background:${n.color}"></span>` : `<span class="eco-node-ic">${(n.data && n.data.icon) || ECO_ICON[n.kind] || '•'}</span>`;
+    let sub = '';
+    if (n.data && n.data.path) sub = String(n.data.path).replace(/\\/g, '/').split('/').slice(-1)[0];
+    else if (n.data && n.data.url) sub = String(n.data.url).replace(/^https?:\/\//, '');
+    html += `<div class="eco-node kind-${n.kind}${n.done ? ' done' : ''}" data-id="${escapeHtml(id)}" style="left:${p.x}px;top:${p.y}px;--eco-accent:${n.color}">`
+      + ic + `<span class="eco-node-body"><span class="eco-node-title">${escapeHtml(n.label)}</span>`
+      + (sub ? `<span class="eco-node-sub">${escapeHtml(sub)}</span>` : '') + `</span>`
+      + pill + badge + `</div>`;
+  }
+  ecoNodesLayer.innerHTML = html;
+}
+
+function ecoRender() {
+  ecoBuild(); ecoVisible(); ecoLayout(); ecoRenderEdges(); ecoRenderNodes();
+  if (!ecoCamInit) { ecoFit(); ecoCamInit = true; }
+  ecoApplyCam();
+}
+
+function ecoFit() {
+  const ids = ecoVisList; if (!ids.length || !ecoRoot) return;
+  let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
+  for (const id of ids) { const p = ecoPos.get(id); if (!p) continue; a = Math.min(a, p.x); b = Math.min(b, p.y); c = Math.max(c, p.x); d = Math.max(d, p.y); }
+  if (!Number.isFinite(a)) return;
+  const pad = 90, r = ecoRoot.getBoundingClientRect(), w = (c - a) + pad * 2, h = (d - b) + pad * 2;
+  const scale = Math.max(0.12, Math.min(Math.min(r.width / w, r.height / h), 1.4));
+  ecoCam.scale = scale; ecoCam.tx = r.width / 2 - ((a + c) / 2) * scale; ecoCam.ty = r.height / 2 - ((b + d) / 2) * scale;
+  ecoApplyCam();
+}
+
+function ecoOpen(id) {
+  const n = ecoGraph.get(id); if (!n) return;
+  if (n.items && n.items.length) { ecoItemSheet(n); return; } // data node → list widget
+  if (['root', 'project', 'category', 'bucket', 'branch', 'folder'].includes(n.kind)) {
+    if (n.kind === 'folder') { ecoSheet('📁 ' + n.label, `<p class="eco-sheet-p">This folder lives in the desktop app:</p><code class="eco-sheet-code">${escapeHtml((n.data && n.data.path) || '')}</code>`); return; }
+    ecoToggleOpen(id); return;
+  }
+  if (n.kind === 'link' && n.data && n.data.url) { window.open(n.data.url, '_blank', 'noopener'); return; }
+  if (n.kind === 'task' && n.ref) { showNoteDetail(n.ref.id); return; }
+  if (n.kind === 'note') { ecoSheet('🗒️ ' + n.label, `<p class="eco-sheet-p">${escapeHtml((n.data && n.data.body) || n.label)}</p>`); return; }
+  if (ECO_DESKTOP_ONLY.has(n.kind)) {
+    const path = (n.data && (n.data.path || n.data.boundFolder)) || '';
+    ecoSheet((ECO_ICON[n.kind] || '•') + ' ' + n.label,
+      `<p class="eco-sheet-p">Open this on the desktop app.</p>${path ? `<code class="eco-sheet-code">${escapeHtml(path)}</code>` : ''}`);
+    return;
+  }
+  // event / purchase / todo → quick info
+  const r = n.ref || {}; const rows = [];
+  if (r.date) rows.push(['Date', r.date]);
+  if (r.startTime) rows.push(['Time', (r.startTime || '') + (r.endTime ? '–' + r.endTime : '')]);
+  if (r.status) rows.push(['Status', r.status]);
+  if (r.cost) rows.push(['Cost', '$' + r.cost]);
+  ecoSheet((ECO_ICON[n.kind] || '•') + ' ' + n.label,
+    rows.length ? `<table class="eco-sheet-info">${rows.map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(v)}</td></tr>`).join('')}</table>` : `<p class="eco-sheet-p">No extra details.</p>`);
+}
+
+function ecoSheet(title, bodyHtml) {
+  const ov = document.createElement('div');
+  ov.className = 'overlay eco-sheet-overlay';
+  ov.innerHTML = `<div class="overlay-sheet"><h2>${escapeHtml(title)}</h2><div class="eco-sheet-body">${bodyHtml}</div><div class="sheet-actions"><button class="btn-primary" data-close>Close</button></div></div>`;
+  document.getElementById('screen-app').appendChild(ov);
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov || e.target.hasAttribute('data-close')) close(); });
+}
+// List widget for a data node's items (tap a task → its detail).
+function ecoItemSheet(n) {
+  const pri = (p) => p === 'High' ? '#EF4444' : p === 'Medium' ? '#F59E0B' : p === 'Low' ? '#22C55E' : '#94A3B8';
+  const rows = n.items.slice(0, 200).map((it, i) => {
+    const dot = it.kind === 'task' ? `<span class="eco-list-dot" style="background:${pri(it.priority)}"></span>` : `<span class="eco-list-ic">${ECO_ICON[it.kind] || '•'}</span>`;
+    return `<button class="eco-list-row${it.done ? ' done' : ''}" data-i="${i}">${dot}<span class="eco-list-label">${escapeHtml(it.label)}</span></button>`;
+  }).join('');
+  const ov = document.createElement('div');
+  ov.className = 'overlay eco-sheet-overlay';
+  ov.innerHTML = `<div class="overlay-sheet"><h2>${escapeHtml(n.label)} · ${n.items.length}</h2><div class="eco-list-body">${rows}</div><div class="sheet-actions"><button class="btn-primary" data-close>Close</button></div></div>`;
+  document.getElementById('screen-app').appendChild(ov);
+  ov.addEventListener('click', (e) => {
+    if (e.target === ov || e.target.hasAttribute('data-close')) { ov.remove(); return; }
+    const row = e.target.closest('[data-i]');
+    if (row) { const it = n.items[+row.dataset.i]; ov.remove(); if (it && it.kind === 'task' && it.ref) showNoteDetail(it.ref.id); }
+  });
+}
+
+function ecoScreenToWorld(cx, cy) {
+  const r = ecoRoot.getBoundingClientRect();
+  return { x: (cx - r.left - ecoCam.tx) / ecoCam.scale, y: (cy - r.top - ecoCam.ty) / ecoCam.scale };
+}
+
+function mountEcosystem(container) {
+  container.innerHTML =
+    `<div class="eco-root"><div class="eco-world"><svg class="eco-edges"><g></g></svg><div class="eco-nodes"></div></div>`
+    + `<div class="eco-hint">Pinch / scroll to zoom · drag to pan · tap to open · edit on desktop</div>`
+    + `<div class="eco-toolbar"><button data-a="fit" title="Fit">🎯</button></div></div>`;
+  ecoRoot = container.querySelector('.eco-root');
+  ecoWorld = container.querySelector('.eco-world');
+  const svg = container.querySelector('.eco-edges');
+  ecoEdgesG = svg.querySelector('g');
+  ecoEdgesG.setAttribute('transform', `translate(${ECO_OFF},${ECO_OFF})`);
+  svg.style.left = -ECO_OFF + 'px'; svg.style.top = -ECO_OFF + 'px';
+  svg.setAttribute('width', ECO_OFF * 2); svg.setAttribute('height', ECO_OFF * 2);
+  ecoNodesLayer = container.querySelector('.eco-nodes');
+
+  ecoRoot.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = ecoRoot.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    const f = e.deltaY < 0 ? 1.12 : 1 / 1.12, ns = Math.max(0.12, Math.min(ecoCam.scale * f, 3.5));
+    const wx = (mx - ecoCam.tx) / ecoCam.scale, wy = (my - ecoCam.ty) / ecoCam.scale;
+    ecoCam.tx = mx - wx * ns; ecoCam.ty = my - wy * ns; ecoCam.scale = ns; ecoApplyCam();
+  }, { passive: false });
+
+  ecoRoot.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('.eco-toolbar')) return;
+    ecoPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ecoPointers.size === 1) {
+      const nodeEl = e.target.closest('.eco-node');
+      ecoPan = { startX: e.clientX, startY: e.clientY, tx: ecoCam.tx, ty: ecoCam.ty, moved: false, nodeId: nodeEl ? nodeEl.dataset.id : null, collapse: e.target.closest('.eco-collapse'), more: e.target.closest('[data-more]') };
+    } else if (ecoPointers.size === 2) {
+      const pts = [...ecoPointers.values()];
+      ecoPinch = { d: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), scale: ecoCam.scale, tx: ecoCam.tx, ty: ecoCam.ty,
+        mx: (pts[0].x + pts[1].x) / 2, my: (pts[0].y + pts[1].y) / 2 };
+      ecoPan = null;
+    }
+    try { ecoRoot.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  ecoRoot.addEventListener('pointermove', (e) => {
+    if (!ecoPointers.has(e.pointerId)) return;
+    ecoPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (ecoPinch && ecoPointers.size >= 2) {
+      const pts = [...ecoPointers.values()];
+      const nd = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      const ns = Math.max(0.12, Math.min(ecoPinch.scale * (nd / (ecoPinch.d || 1)), 3.5));
+      const r = ecoRoot.getBoundingClientRect(), mx = ecoPinch.mx - r.left, my = ecoPinch.my - r.top;
+      const wx = (mx - ecoPinch.tx) / ecoPinch.scale, wy = (my - ecoPinch.ty) / ecoPinch.scale;
+      ecoCam.scale = ns; ecoCam.tx = mx - wx * ns; ecoCam.ty = my - wy * ns; ecoApplyCam();
+      return;
+    }
+    if (ecoPan) {
+      const dx = e.clientX - ecoPan.startX, dy = e.clientY - ecoPan.startY;
+      if (Math.hypot(dx, dy) > 5) ecoPan.moved = true;
+      ecoCam.tx = ecoPan.tx + dx; ecoCam.ty = ecoPan.ty + dy; ecoApplyCam();
+    }
+  });
+  const endPtr = (e) => {
+    if (ecoPan && !ecoPan.moved && ecoPointers.size === 1) {
+      if (ecoPan.more) { const mp = ecoGraph.get(ecoPan.more.dataset.more); if (mp) { ecoMoreShown.set(mp.moreParent, (ecoMoreShown.get(mp.moreParent) || ECO_CAP) + ECO_CAP); ecoRender(); } }
+      else if (ecoPan.collapse) { ecoToggleOpen(ecoPan.collapse.dataset.collapse); }
+      else if (ecoPan.nodeId) ecoOpen(ecoPan.nodeId);
+    }
+    ecoPointers.delete(e.pointerId);
+    if (ecoPointers.size < 2) ecoPinch = null;
+    if (ecoPointers.size === 0) ecoPan = null;
+  };
+  ecoRoot.addEventListener('pointerup', endPtr);
+  ecoRoot.addEventListener('pointercancel', endPtr);
+  container.querySelector('.eco-toolbar').addEventListener('click', (e) => { if (e.target.closest('[data-a="fit"]')) ecoFit(); });
+
+  ecoRender();
+}

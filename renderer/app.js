@@ -22,6 +22,8 @@
     const modalManager = new ModalManager(dataManager);
     const purchasingBoard = new PurchasingBoard(dataManager);
     const notesBoard = new NotesBoard(dataManager);
+    // Expose to other modules (e.g. the Ecosystem view creates real tasks/events/purchases).
+    window.viewRenderer = viewRenderer; window.modalManager = modalManager; window.purchasingBoard = purchasingBoard;
 
     modalManager.init(viewRenderer);
     purchasingBoard.init();
@@ -407,7 +409,7 @@
 
       // Full-bleed views hide the day sidebar / content-header / quick-filters and own
       // the entire main-content area (email uses a 3-pane grid that needs the full width).
-      const isFullView = viewRenderer.currentView === 'files' || viewRenderer.currentView === 'stats' || viewRenderer.currentView === 'engineering' || viewRenderer.currentView === 'settings' || viewRenderer.currentView === 'timers' || viewRenderer.currentView === 'email';
+      const isFullView = viewRenderer.currentView === 'files' || viewRenderer.currentView === 'stats' || viewRenderer.currentView === 'engineering' || viewRenderer.currentView === 'settings' || viewRenderer.currentView === 'timers' || viewRenderer.currentView === 'email' || viewRenderer.currentView === 'ecosystem';
       document.getElementById('sidebar').style.display = isFullView ? 'none' : '';
       document.getElementById('content-header').style.display = isFullView ? 'none' : '';
       document.getElementById('quick-filters').classList.toggle('hidden', isFullView);
@@ -445,6 +447,7 @@
     let emailInitialized = false;
 
     function renderCurrentView() {
+      if (typeof updateOrganicBack === 'function') updateOrganicBack();
       // Deactivate the Engineering Utilities tab (and its active sub-utility) when leaving it
       if (viewRenderer.currentView !== 'engineering') {
         engineeringUtilities.deactivate();
@@ -452,6 +455,14 @@
       // Stop email polling when leaving the email view
       if (viewRenderer.currentView !== 'email' && emailInitialized) {
         emailView.deactivate();
+      }
+      // Tear down the Ecosystem canvas when leaving it (closes panels/menus).
+      if (viewRenderer.currentView !== 'ecosystem' && typeof ecosystemView !== 'undefined') {
+        ecosystemView.deactivate();
+      }
+      if (viewRenderer.currentView === 'ecosystem') {
+        ecosystemView.activate();
+        return;
       }
       if (viewRenderer.currentView === 'email') {
         if (!emailInitialized) { emailView.init(); emailInitialized = true; }
@@ -484,41 +495,91 @@
       viewRenderer.updateProgress();
     }
 
-    // ============ HEADER TAB SWITCHING ============
-    document.querySelectorAll('.header-tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
+    // ============ VIEW SWITCHING (shared by header tabs + Chrome tabs) ============
+    window.switchToView = (view, project) => {
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+      viewRenderer.currentView = view;
+      if (project !== undefined) {
+        viewRenderer.selectedProject = project;
+        document.querySelectorAll('#sidebar .sidebar-item[data-project]').forEach(b => b.classList.toggle('active', b.dataset.project === project));
+      }
+      // "all-archived" only makes sense in the Projects overview.
+      if (viewRenderer.selectedProject === 'all-archived' && view !== 'projects') {
+        viewRenderer.selectedProject = 'all';
+        document.querySelectorAll('#sidebar .sidebar-item[data-project]').forEach(b => b.classList.toggle('active', b.dataset.project === 'all'));
+      }
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      const panel = document.getElementById('view-' + view); if (panel) panel.classList.add('active');
+      document.getElementById('quick-filters').classList.toggle('hidden', !(view === 'notes' || view === 'board'));
+      updateContentHeader();
+      renderCurrentView();
+      dataManager.updateSettings({ activeView: view });
+      if (typeof syncActiveChromeTab === 'function') syncActiveChromeTab(view);
+      if (typeof updateOrganicBack === 'function') updateOrganicBack();
+    };
+    document.querySelectorAll('.header-tab[data-view]').forEach(tab => tab.addEventListener('click', () => window.switchToView(tab.dataset.view)));
 
-        const view = tab.dataset.view;
-        viewRenderer.currentView = view;
-
-        // The "all-archived" selection is only meaningful in the Projects overview.
-        // Leaving to any other tab would otherwise filter notes/calendar/etc. by a
-        // project id of 'all-archived' (matching nothing), so fall back to "all".
-        if (viewRenderer.selectedProject === 'all-archived' && view !== 'projects') {
-          viewRenderer.selectedProject = 'all';
-          document.querySelectorAll('#sidebar .sidebar-item[data-project]').forEach(b =>
-            b.classList.toggle('active', b.dataset.project === 'all'));
-        }
-
-        // Show/hide view panels
-        document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-        document.getElementById('view-' + view).classList.add('active');
-
-        // Show/hide quick filters bar
-        const filtersEl = document.getElementById('quick-filters');
-        if (view === 'notes' || view === 'board') {
-          filtersEl.classList.remove('hidden');
-        } else {
-          filtersEl.classList.add('hidden');
-        }
-
-        updateContentHeader();
-        renderCurrentView();
-        dataManager.updateSettings({ activeView: view });
+    // ============ CHROME-STYLE TAB BAR (toggle in Settings → Appearance) ============
+    const VIEW_META = {
+      notes: { icon: '📌', title: 'Notes' }, projects: { icon: '📁', title: 'Projects' }, ecosystem: { icon: '🌳', title: 'Ecosystem' },
+      calendar: { icon: '📅', title: 'Calendar' }, email: { icon: '✉️', title: 'Email' }, timeline: { icon: '📈', title: 'Timeline' },
+      timers: { icon: '⏱', title: 'Timers' }, board: { icon: '📋', title: 'Board' }, purchasing: { icon: '📦', title: 'Purchases' },
+      stats: { icon: '📊', title: 'Stats' }, files: { icon: '📁', title: 'Files' }, engineering: { icon: '🔧', title: 'Tools' },
+    };
+    let chromeTabs = [], activeChromeId = null;
+    const chromeEnabled = () => !!dataManager.settings.chromeTabs;
+    window.chromeTabsEnabled = chromeEnabled;
+    const newTabId = () => 't_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 4);
+    function tabTitle(t) {
+      if (t.project && t.project !== 'all') { const p = dataManager.projects.find(x => x.id === t.project); if (p) return p.name; }
+      return t.title || (VIEW_META[t.view] || {}).title || t.view;
+    }
+    function renderChromeTabs() {
+      const strip = document.getElementById('chrome-tabs'); if (!strip) return;
+      const closable = chromeTabs.length > 1;
+      strip.innerHTML = chromeTabs.map(t => `<div class="ctab${t.id === activeChromeId ? ' active' : ''}" data-ctab="${t.id}" title="${escapeHtml(tabTitle(t))}"><span class="ctab-ic">${t.icon || (VIEW_META[t.view] || {}).icon || '•'}</span><span class="ctab-title">${escapeHtml(tabTitle(t))}</span>${closable ? `<button class="ctab-close" data-ctab-close="${t.id}" title="Close">×</button>` : ''}</div>`).join('');
+    }
+    function activateChromeTab(id) {
+      const t = chromeTabs.find(x => x.id === id); if (!t) return;
+      activeChromeId = id;
+      window.switchToView(t.view, t.project != null ? t.project : undefined);
+    }
+    function syncActiveChromeTab(view) {
+      if (!chromeEnabled()) return;
+      const t = chromeTabs.find(x => x.id === activeChromeId);
+      if (t) { t.view = view; t.project = viewRenderer.selectedProject; }
+      renderChromeTabs();
+    }
+    window.chromeOpenTab = (spec, activate = true) => {
+      let t = chromeTabs.find(x => x.view === spec.view && (x.project || null) === (spec.project || null));
+      if (!t) { t = { id: newTabId(), view: spec.view, project: spec.project || null, title: spec.title, icon: spec.icon }; chromeTabs.push(t); }
+      if (activate) activateChromeTab(t.id); else renderChromeTabs();
+      return t;
+    };
+    function closeChromeTab(id) {
+      const idx = chromeTabs.findIndex(x => x.id === id); if (idx < 0) return;
+      const wasActive = chromeTabs[idx].id === activeChromeId;
+      chromeTabs.splice(idx, 1);
+      if (!chromeTabs.length) { window.chromeOpenTab({ view: 'ecosystem' }, true); return; }
+      if (wasActive) activateChromeTab(chromeTabs[Math.min(idx, chromeTabs.length - 1)].id); else renderChromeTabs();
+    }
+    (function bindChromeStrip() {
+      const strip = document.getElementById('chrome-tabs'); if (!strip) return;
+      strip.addEventListener('click', (e) => {
+        const close = e.target.closest('[data-ctab-close]'); if (close) { e.stopPropagation(); closeChromeTab(close.dataset.ctabClose); return; }
+        const tab = e.target.closest('[data-ctab]'); if (tab) activateChromeTab(tab.dataset.ctab);
       });
-    });
+    })();
+    window.syncActiveChromeTab = syncActiveChromeTab;
+    window.applyChromeTabs = (on) => {
+      dataManager.updateSettings({ chromeTabs: !!on });
+      document.body.classList.toggle('chrome-tabs-on', !!on);
+      if (on) {
+        if (!chromeTabs.length) { const v = viewRenderer.currentView || 'notes'; chromeTabs = [{ id: newTabId(), view: v, project: viewRenderer.selectedProject, icon: (VIEW_META[v] || {}).icon }]; activeChromeId = chromeTabs[0].id; }
+        renderChromeTabs();
+      }
+      if (typeof updateOrganicBack === 'function') updateOrganicBack();
+    };
 
     // ============ HOTBAR: show/hide tabs, promoted utilities, drag-reorder, lock ============
     // Open an engineering utility that's been promoted to its own top-bar tab.
@@ -609,6 +670,64 @@
     } catch (e) { console.warn('Hotbar setup failed:', e); }
     // Let the Settings editor re-apply after toggling tabs/utilities.
     window.applyHotbar = () => applyHotbar();
+
+    // Open the Engineering Utilities tab and jump straight to a specific utility.
+    // Used by the Ecosystem view's utility nodes ("Open <utility>").
+    window.openEngineeringUtility = (id) => {
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+      const engTab = document.querySelector('.header-tab[data-view="engineering"]');
+      if (engTab) engTab.classList.add('active');
+      if (typeof ecosystemView !== 'undefined') ecosystemView.deactivate();
+      viewRenderer.currentView = 'engineering';
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('view-engineering').classList.add('active');
+      document.getElementById('quick-filters').classList.add('hidden');
+      updateContentHeader();
+      engineeringUtilities.activate();
+      if (id) engineeringUtilities.select(id);
+      dataManager.updateSettings({ activeView: 'engineering' });
+    };
+
+    // Interface mode: 'tabbed' (classic header tabs) or 'organic' (the Ecosystem tree
+    // becomes the whole app). A prominent header toggle flips between the two.
+    window.applyUiMode = (mode) => {
+      const organic = mode === 'organic';
+      document.body.classList.toggle('organic-mode', organic);
+      dataManager.updateSettings({ uiMode: mode });
+      if (organic) { const t = document.querySelector('.header-tab[data-view="ecosystem"]'); if (t) t.click(); }
+      else if (viewRenderer.currentView === 'ecosystem') { const t = document.querySelector('.header-tab[data-view="notes"]'); if (t) t.click(); }
+      updateOrganicBack();
+    };
+
+    // In organic mode, opening an app area (Calendar/Email/…) leaves the tree; a single
+    // floating button brings you back. No tab bar — the tree is home.
+    function updateOrganicBack() {
+      let btn = document.getElementById('organic-back');
+      const show = document.body.classList.contains('organic-mode') && viewRenderer.currentView !== 'ecosystem' && !dataManager.settings.chromeTabs;
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'organic-back'; btn.innerHTML = '&#127795; Ecosystem';
+        btn.addEventListener('click', () => { const t = document.querySelector('.header-tab[data-view="ecosystem"]'); if (t) t.click(); });
+        document.body.appendChild(btn);
+      }
+      btn.style.display = show ? '' : 'none';
+    }
+
+    // Tabbed view: where the tab bar sits (top default, or left/right/bottom rail).
+    window.applyTabBarPos = (pos) => {
+      pos = ['top', 'left', 'bottom', 'right'].includes(pos) ? pos : 'top';
+      document.body.classList.remove('tabbar-left', 'tabbar-right', 'tabbar-bottom');
+      if (pos !== 'top') document.body.classList.add('tabbar-' + pos);
+      dataManager.updateSettings({ tabBarPos: pos });
+      if (pos === 'left' || pos === 'right') {
+        const h = document.getElementById('header');
+        document.documentElement.style.setProperty('--tabrail-top', (h ? h.getBoundingClientRect().bottom : 92) + 'px');
+      }
+    };
+    window.addEventListener('resize', () => {
+      const pos = dataManager.settings.tabBarPos;
+      if (pos === 'left' || pos === 'right') { const h = document.getElementById('header'); document.documentElement.style.setProperty('--tabrail-top', (h ? h.getBoundingClientRect().bottom : 92) + 'px'); }
+    });
 
     // ============ ADD BUTTON ============
     document.getElementById('btn-add-main').addEventListener('click', () => {
@@ -1263,6 +1382,9 @@
       printerInitialized = true; // bridge already rendered + polling; don't re-init on first tab visit
     }
 
+    // Resume tracking any print left in-progress (asks success/fail when it finishes).
+    if (window.printTracker && !EMB) printTracker.init();
+
     // Restore last view (handle legacy 'schedule' -> 'calendar', and remove 'tasks')
     let savedView = dataManager.settings.activeView;
     if (savedView === 'schedule') savedView = 'calendar';
@@ -1275,6 +1397,11 @@
     } else {
       renderCurrentView();
     }
+
+    // Apply the saved tab-bar position, then boot into organic mode if that's the saved mode.
+    window.applyTabBarPos(dataManager.settings.tabBarPos || 'top');
+    window.applyChromeTabs(dataManager.settings.chromeTabs);
+    if (dataManager.settings.uiMode === 'organic') window.applyUiMode('organic');
 
     console.log('EngOrg initialized:', dataManager.tasks.length, 'notes,', dataManager.scheduleItems.length, 'events,', dataManager.purchases.length, 'purchases');
 

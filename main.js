@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, MenuItem, ipcMain } = require('electron');
+const { app, BrowserWindow, shell, Menu, MenuItem, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
@@ -13,6 +13,7 @@ const registerGit     = require('./ipc/git');
 const registerAuth    = require('./ipc/auth');
 const registerPrinter = require('./ipc/printer');
 const registerSlicer  = require('./ipc/slicer');
+const registerPrintHistory = require('./ipc/print-history');
 const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
 const registerGithub  = require('./ipc/github');
@@ -34,8 +35,16 @@ function ensureDataDir() {
 }
 
 function createWindow() {
+  // Clamp the initial window to the current display's WORK AREA (screen minus the
+  // taskbar), so on a laptop shorter than our 1400×900 preference the bottom of the
+  // app isn't pushed off-screen behind the taskbar. Leave a small margin and center.
+  const workArea = screen.getPrimaryDisplay().workAreaSize;
+  const winWidth  = Math.min(1400, workArea.width  - 40);
+  const winHeight = Math.min(900,  workArea.height - 40);
+
   mainWindow = new BrowserWindow({
-    width: 1400, height: 900, minWidth: 1024, minHeight: 700,
+    width: winWidth, height: winHeight, center: true,
+    minWidth: Math.min(1024, winWidth), minHeight: Math.min(700, winHeight),
     // Custom themed title bar (renderer/titlebar.js): hide the native caption +
     // menu bar but keep the resizable window frame. The app draws its own slim,
     // theme-aware bar with the File/Edit/View/Window menus and window controls.
@@ -143,6 +152,7 @@ app.whenReady().then(() => {
   registerAuth(getMainWindow);
   registerPrinter(getMainWindow);
   registerSlicer(getMainWindow);
+  registerPrintHistory(getMainWindow);
   registerEmail(getMainWindow);
   registerCalendar();
   registerGithub();

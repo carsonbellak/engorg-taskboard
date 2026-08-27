@@ -997,6 +997,38 @@ function renderSettings() {
             <span class="settings-toggle-desc">Install the Printer &amp; Slicer utilities, OrcaSlicer proxy, and remote printer controls (also available in the Utility Store)</span>
             <input type="checkbox" class="settings-checkbox" id="settings-printer-enabled" ${dataManager.settings.printerEnabled === true ? 'checked' : ''}>
           </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Interface</span>
+            <span class="settings-toggle-desc">Classic tabs, or the organic Ecosystem tree as the whole app (the gear stays available to switch back)</span>
+            <select class="settings-select" id="settings-ui-mode">
+              <option value="tabbed" ${(dataManager.settings.uiMode || 'tabbed') === 'tabbed' ? 'selected' : ''}>Tabbed</option>
+              <option value="organic" ${dataManager.settings.uiMode === 'organic' ? 'selected' : ''}>Organic (tree)</option>
+            </select>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Tab bar position</span>
+            <span class="settings-toggle-desc">Where the tab bar sits in the tabbed interface</span>
+            <select class="settings-select" id="settings-tabbar-pos">
+              ${['top', 'left', 'right', 'bottom'].map(v => `<option value="${v}" ${(dataManager.settings.tabBarPos || 'top') === v ? 'selected' : ''}>${v.charAt(0).toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Chrome-style tabs</span>
+            <span class="settings-toggle-desc">A browser-style tab bar with open/close/new-tab — right-click views to “open in new tab”</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-chrome-tabs" ${dataManager.settings.chromeTabs ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Show completed tasks</span>
+            <span class="settings-toggle-desc">Include done tasks in lists (also toggleable at the bottom of each list)</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-show-completed" ${dataManager.settings.showCompleted !== false ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Ecosystem transitions</span>
+            <span class="settings-toggle-desc">How fast the Ecosystem tree camera glides/zooms when you hover branches</span>
+            <select class="settings-select" id="settings-eco-ease">
+              ${['slow', 'normal', 'fast', 'instant'].map(v => `<option value="${v}" ${((dataManager.settings.ecosystem && dataManager.settings.ecosystem.easeSpeed) || 'normal') === v ? 'selected' : ''}>${v.charAt(0).toUpperCase() + v.slice(1)}</option>`).join('')}
+            </select>
+          </label>
         </div>
       </div>
 
@@ -1283,6 +1315,20 @@ function renderSettings() {
     dataManager.updateSettings({ staleAnimations: e.target.checked });
     document.body.classList.toggle('no-stale-anim', !e.target.checked);
   });
+  const ecoEaseSel = document.getElementById('settings-eco-ease');
+  if (ecoEaseSel) ecoEaseSel.addEventListener('change', (e) => {
+    const tree = dataManager.getEcosystem();
+    tree.easeSpeed = e.target.value;
+    dataManager.saveEcosystem(tree);
+  });
+  const uiModeSel = document.getElementById('settings-ui-mode');
+  if (uiModeSel) uiModeSel.addEventListener('change', (e) => { if (window.applyUiMode) window.applyUiMode(e.target.value); });
+  const tabPosSel = document.getElementById('settings-tabbar-pos');
+  if (tabPosSel) tabPosSel.addEventListener('change', (e) => { if (window.applyTabBarPos) window.applyTabBarPos(e.target.value); });
+  const showCompletedCb = document.getElementById('settings-show-completed');
+  if (showCompletedCb) showCompletedCb.addEventListener('change', (e) => { dataManager.updateSettings({ showCompleted: e.target.checked }); });
+  const chromeTabsCb = document.getElementById('settings-chrome-tabs');
+  if (chromeTabsCb) chromeTabsCb.addEventListener('change', (e) => { if (window.applyChromeTabs) window.applyChromeTabs(e.target.checked); });
   document.getElementById('settings-askew-notes').addEventListener('change', (e) => {
     dataManager.updateSettings({ askewNotes: e.target.checked });
     window.dispatchEvent(new CustomEvent('tasks-changed')); // re-render notes straight/tilted
@@ -1505,6 +1551,7 @@ function renderSettings() {
 // what the bar renders (hiddenTabs / hotbarUtilities / tabOrder / tabsLocked).
 const HOTBAR_MAIN_TABS = [
   { view: 'notes', label: 'Notes', icon: '📌' }, { view: 'projects', label: 'Projects', icon: '📁' },
+  { view: 'ecosystem', label: 'Ecosystem', icon: '🌳' },
   { view: 'calendar', label: 'Calendar', icon: '📅' }, { view: 'email', label: 'Email', icon: '✉️' },
   { view: 'timeline', label: 'Timeline', icon: '📈' }, { view: 'timers', label: 'Timers', icon: '⏱' },
   { view: 'board', label: 'Board', icon: '📋' }, { view: 'purchasing', label: 'Purchases', icon: '📦' },

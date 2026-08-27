@@ -33,6 +33,11 @@ const __api = {
   installer: {
     build: () => ipcRenderer.invoke('installer:build')
   },
+  // 3D print history — archive STL+gcode of tracked prints
+  printHistory: {
+    archive: (opts) => ipcRenderer.invoke('printHistory:archive', opts),
+    openArchive: (id) => ipcRenderer.invoke('printHistory:openArchive', id),
+  },
   // Slicer (OrcaSlicer CLI)
   slicer: {
     selectModel: () => ipcRenderer.invoke('slicer:selectModel'),

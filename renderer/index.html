@@ -30,6 +30,7 @@
     <div class="header-tabs">
       <button class="header-tab active" data-view="notes">&#128204; Notes</button>
       <button class="header-tab" data-view="projects">&#128193; Projects</button>
+      <button class="header-tab" data-view="ecosystem">&#127795; Ecosystem</button>
       <button class="header-tab" data-view="calendar">&#128197; Calendar</button>
       <button class="header-tab" data-view="email">&#9993; Email</button>
       <button class="header-tab" data-view="timeline">&#128200; Timeline</button>
@@ -41,6 +42,7 @@
       <button class="header-tab" data-view="engineering">&#128295; Engineering Utilities</button>
       <button id="btn-tab-lock" class="tab-lock-btn" title="Lock tab order">&#128275;</button>
     </div>
+    <div id="chrome-tabs" class="chrome-tabs"></div>
     <button id="btn-cloud-sync" class="header-btn cloud-sync-btn" title="Sign in to sync across devices">&#9729; Sign in</button>
     <span id="sync-status-dot" class="sync-dot disconnected"></span>
     <button id="btn-outlook-sync" class="header-btn" title="Outlook Calendar Sync">&#128197; Outlook</button>
@@ -133,6 +135,7 @@
       <!-- View containers -->
       <div id="view-notes" class="view-panel active"></div>
       <div id="view-projects" class="view-panel"></div>
+      <div id="view-ecosystem" class="view-panel"></div>
       <div id="view-calendar" class="view-panel"></div>
       <div id="view-email" class="view-panel"></div>
       <div id="view-timeline" class="view-panel"></div>
@@ -585,6 +588,8 @@
   <script src="updates.js"></script>
   <script src="window-split.js"></script>
   <script src="titlebar.js"></script>
+  <script src="print-tracker.js"></script>
+  <script src="ecosystem.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -258,17 +258,18 @@ class FirebaseSync {
     // keys (printer, installed utilities, hotbar layout, git repos, etc.) are left
     // untouched, and `localTheme`/`splitLayout` live in localStorage by design.
     const SYNCED_SETTINGS = ['projectGroups', 'categories', 'noteSortMode',
-      'noteColorMode', 'noteTertiarySort', 'calendarFeeds', 'linkedAccounts', 'alarms'];
+      'noteColorMode', 'noteTertiarySort', 'calendarFeeds', 'linkedAccounts', 'alarms', 'ecosystem'];
     const settingsUnsub = base.doc('settings').onSnapshot(snapshot => {
       if (!snapshot.exists || snapshot.metadata.hasPendingWrites) return;
       const data = snapshot.data();
-      let changed = false, catsChanged = false;
+      let changed = false, catsChanged = false, ecoChanged = false;
       for (const k of SYNCED_SETTINGS) {
         if (!(k in data)) continue;
         if (JSON.stringify(data[k]) !== JSON.stringify(dataManager.settings[k])) {
           dataManager.settings[k] = data[k];
           changed = true;
           if (k === 'categories') catsChanged = true;
+          if (k === 'ecosystem') ecoChanged = true;
         }
       }
       if (!changed) return;
@@ -281,6 +282,7 @@ class FirebaseSync {
       }
       window.dispatchEvent(new CustomEvent('projects-changed'));
       if (catsChanged) window.dispatchEvent(new CustomEvent('categories-changed'));
+      if (ecoChanged) window.dispatchEvent(new CustomEvent('ecosystem-changed'));
     });
     this.listeners.push(settingsUnsub);
 

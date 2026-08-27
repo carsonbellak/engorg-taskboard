@@ -8,20 +8,23 @@ class DataManager {
     this.purchases = [];
     this.scheduleItems = []; // schedule events
     this.todos = [];         // task checklist items
+    this.printHistory = [];  // 3D print records (device-local, not synced — paths are local)
     this.settings = {};
     this.loaded = false;
   }
 
   async init() {
-    const [tasks, projects, archivedProjects, purchases, settings, schedule, todos] = await Promise.all([
+    const [tasks, projects, archivedProjects, purchases, settings, schedule, todos, printHistory] = await Promise.all([
       window.api.loadData('tasks.json'),
       window.api.loadData('projects.json'),
       window.api.loadData('archived_projects.json'),
       window.api.loadData('purchases.json'),
       window.api.loadData('settings.json'),
       window.api.loadData('schedule.json'),
-      window.api.loadData('todos.json')
+      window.api.loadData('todos.json'),
+      window.api.loadData('print_history.json')
     ]);
+    this.printHistory = printHistory?.prints || [];
 
     this.tasks = tasks?.tasks || [];
     // Backfill modifiedAt for existing tasks
@@ -60,6 +63,12 @@ class DataManager {
     // Ensure projectGroups always exists so it syncs to the PWA
     if (!Array.isArray(this.settings.projectGroups)) {
       this.settings.projectGroups = [];
+      settingsNeedsSave = true;
+    }
+
+    // Ensure the Ecosystem tree exists (stored in settings so it syncs everywhere)
+    if (!this.settings.ecosystem || typeof this.settings.ecosystem !== 'object') {
+      this.settings.ecosystem = { nodes: [], layout: {}, collapsed: {}, showData: true };
       settingsNeedsSave = true;
     }
 
@@ -460,9 +469,44 @@ class DataManager {
     return { count: events.length, changed };
   }
 
+  // === 3D Print history (device-local; archived files live under appdata/print_archive) ===
+  getPrints() { return this.printHistory; }
+  async addPrint(entry) {
+    entry.id = entry.id || this._genId('print');
+    this.printHistory.push(entry);
+    await this._savePrintHistory();
+    return entry;
+  }
+  async updatePrint(id, updates) {
+    const p = this.printHistory.find(x => x.id === id);
+    if (!p) return null;
+    Object.assign(p, updates);
+    await this._savePrintHistory();
+    return p;
+  }
+  async deletePrint(id) {
+    this.printHistory = this.printHistory.filter(x => x.id !== id);
+    await this._savePrintHistory();
+  }
+  async _savePrintHistory() {
+    await window.api.saveData('print_history.json', { prints: this.printHistory });
+  }
+
   // === Settings ===
   async updateSettings(updates) {
     Object.assign(this.settings, updates);
+    await this._saveSettings();
+  }
+
+  // === Ecosystem tree (branched view) — kept in settings so it syncs across devices ===
+  getEcosystem() {
+    if (!this.settings.ecosystem || typeof this.settings.ecosystem !== 'object') {
+      this.settings.ecosystem = { nodes: [], layout: {}, collapsed: {}, showData: true };
+    }
+    return this.settings.ecosystem;
+  }
+  async saveEcosystem(tree) {
+    this.settings.ecosystem = tree;
     await this._saveSettings();
   }
 

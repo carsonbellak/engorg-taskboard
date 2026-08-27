@@ -4,6 +4,7 @@ const slicerController = (() => {
   let isActive = false;
   let profiles = { process: [], filament: [] };
   let lastGcodePath = null;
+  let lastSliceMeta = null; // captured for the print tracker on "Upload & Print"
 
   // Multi-model support
   let loadedModels = []; // { path, name, mesh, bbox }
@@ -328,6 +329,7 @@ const slicerController = (() => {
                   <button id="slicer-btn-view-gcode" class="printer-btn printer-btn-info">View G-code</button>
                   <button id="slicer-btn-upload" class="printer-btn printer-btn-success">Upload to Printer</button>
                   <button id="slicer-btn-upload-print" class="printer-btn printer-btn-print">Upload & Print</button>
+                  <button id="slicer-btn-print-history" class="printer-btn printer-btn-info" title="Print history, best profiles &amp; failure charts">🖨️ History</button>
                 </div>
               </div>
             </div>
@@ -365,6 +367,7 @@ const slicerController = (() => {
     document.getElementById('slicer-btn-slice').addEventListener('click', startSlicing);
     document.getElementById('slicer-btn-upload')?.addEventListener('click', () => uploadGcode(false));
     document.getElementById('slicer-btn-upload-print')?.addEventListener('click', () => uploadGcode(true));
+    document.getElementById('slicer-btn-print-history')?.addEventListener('click', () => { if (window.openPrintHistory) window.openPrintHistory(); });
     document.getElementById('slicer-btn-view-gcode')?.addEventListener('click', viewGcode);
     document.getElementById('slicer-btn-back-model')?.addEventListener('click', backToModel);
     document.getElementById('slicer-btn-arrange')?.addEventListener('click', arrangeModels);
@@ -1326,6 +1329,13 @@ const slicerController = (() => {
 
       if (result.success) {
         lastGcodePath = result.gcodePath;
+        const modelPath = loadedModels[0].path;
+        lastSliceMeta = {
+          modelPath, modelName: (modelPath.split(/[\\/]/).pop() || 'Print').replace(/\.[^.]+$/, ''),
+          gcodePath: result.gcodePath, processProfile, filamentProfile,
+          layerHeight: overrides.layerHeight, infill: overrides.infill, supports: overrides.supports, ironing: overrides.ironing,
+          estimates: result.estimates,
+        };
         showStatus('Slicing complete!', 'success');
         showResults(result.estimates);
       } else {
@@ -1391,6 +1401,8 @@ const slicerController = (() => {
           const filename = lastGcodePath.split(/[\\/]/).pop();
           await window.api.printer.apiPost(baseUrl, '/printer/print/start', { filename });
           showStatus('Upload complete! Print started: ' + filename, 'success');
+          // Record this print (archive files, ask which project, track to completion).
+          if (window.printTracker && lastSliceMeta) { try { printTracker.onPrintStarted({ ...lastSliceMeta, gcodePath: lastGcodePath }); } catch (e) { console.warn('print track failed', e); } }
         } else {
           showStatus('Upload complete! File ready on printer.', 'success');
         }
