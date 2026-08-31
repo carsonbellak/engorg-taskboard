@@ -1083,6 +1083,27 @@
       setInterval(() => { syncGitHub().catch(() => {}); }, 30 * 60 * 1000); // every 30 min
     }
 
+    // ============ GRADESCOPE SYNC (linked account → calendar due dates) ============
+    // Logs in with the stored credentials (main process), scrapes assignment due
+    // dates, and folds them into scheduleItems as source:'gradescope' (prune=true so
+    // dropped/changed deadlines self-correct). Credentials never leave the main process.
+    async function syncGradescope(silent = true) {
+      if (!window.api.gradescope) return { imported: 0 };
+      const status = await window.api.gradescope.status();
+      if (!status.connected) return { imported: 0 };
+      const res = await window.api.gradescope.fetchAssignments();
+      if (res.error) { if (!silent) alert('Gradescope sync failed: ' + res.error); else console.warn('Gradescope sync failed:', res.error); return { error: res.error }; }
+      const { changed } = await dataManager.importExternalEvents(res.events || [], { source: 'gradescope', prune: true });
+      if (changed) window.dispatchEvent(new CustomEvent('schedule-changed'));
+      return { imported: (res.events || []).length, courses: res.courses || [] };
+    }
+    window.syncGradescope = syncGradescope; // Settings "Connect"/"Sync now" call this
+
+    if (!EMB) {
+      setTimeout(() => { syncGradescope(true).catch(e => console.warn('Initial Gradescope sync failed:', e.message)); }, 6000);
+      setInterval(() => { syncGradescope(true).catch(() => {}); }, 30 * 60 * 1000); // every 30 min
+    }
+
     // ============ QUICK FILTERS ============
     const activeFilters = { priority: null, overdue: false, category: null };
     viewRenderer.activeFilters = activeFilters;

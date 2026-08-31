@@ -17,6 +17,7 @@ const registerPrintHistory = require('./ipc/print-history');
 const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
 const registerGithub  = require('./ipc/github');
+const registerGradescope = require('./ipc/gradescope');
 const registerSpell   = require('./ipc/spell');
 const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
@@ -156,6 +157,7 @@ app.whenReady().then(() => {
   registerEmail(getMainWindow);
   registerCalendar();
   registerGithub();
+  registerGradescope();
   registerSpell();
   registerKicadImporter(getMainWindow);
   registerUtilityStore();

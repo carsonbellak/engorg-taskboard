@@ -36,6 +36,10 @@ module.exports = {
   // Email hub — encrypted account store (app passwords encrypted via safeStorage)
   EMAIL_ACCOUNTS_FILE: path.join('C:\\Assistant\\appdata', 'email_accounts.json'),
   GITHUB_TOKEN_FILE: path.join('C:\\Assistant\\appdata', 'github.json'),
+  // Gradescope link — email + password encrypted at rest via safeStorage (we must
+  // keep the password, not a token, because Gradescope has no API and sessions expire
+  // so we re-login on each sync).
+  GRADESCOPE_CREDS_FILE: path.join('C:\\Assistant\\appdata', 'gradescope.json'),
   EMAIL_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'email_attachments'),
 
   // Microsoft OAuth (modern auth) for Outlook / Microsoft 365 mail accounts.

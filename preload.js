@@ -199,6 +199,13 @@ const __api = {
     disconnect: () => ipcRenderer.invoke('github:disconnect'),
     fetchActivity: (days) => ipcRenderer.invoke('github:fetchActivity', days),
   },
+  // Gradescope link — assignment due dates → calendar
+  gradescope: {
+    status: () => ipcRenderer.invoke('gradescope:status'),
+    connect: (email, password) => ipcRenderer.invoke('gradescope:connect', email, password),
+    disconnect: () => ipcRenderer.invoke('gradescope:disconnect'),
+    fetchAssignments: () => ipcRenderer.invoke('gradescope:fetchAssignments'),
+  },
   // Git integration
   git: {
     // inspection

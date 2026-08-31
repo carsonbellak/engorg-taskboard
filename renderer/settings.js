@@ -1901,6 +1901,10 @@ async function refreshLinkedAccounts() {
   try { if (window.api && window.api.github) gh = await window.api.github.status(); } catch {}
   const ghReg = reg.github || null;
 
+  let gs = { connected: false };
+  try { if (window.api && window.api.gradescope) gs = await window.api.gradescope.status(); } catch {}
+  const gsReg = reg.gradescope || null;
+
   let emailAccts = [];
   try { if (window.api && window.api.email) emailAccts = await window.api.email.listAccounts() || []; } catch {}
   // Mirror local email accounts into the synced registry (metadata only).
@@ -1959,6 +1963,38 @@ async function refreshLinkedAccounts() {
     });
   }
 
+  // --- Gradescope card ---
+  const gsForm = '<div class="acct-inline-form">'
+    + '<input type="email" class="settings-input acct-input" id="gs-email" placeholder="Gradescope email" autocomplete="off">'
+    + '<input type="password" class="settings-input acct-input" id="gs-password" placeholder="Password" autocomplete="off"></div>';
+  let gradescopeCard;
+  if (gs.connected) {
+    gradescopeCard = accountCard({
+      icon: '<span class="acct-emoji">🎓</span>',
+      name: `Gradescope · ${escapeHtmlS(gs.email || '')}`,
+      sub: '<span class="acct-sub-line">Assignment due dates sync into your calendar every 30 minutes.</span>',
+      status: 'Connected', statusClass: 'ok',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gs-sync">Sync now</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="gs-out">Disconnect</button>',
+    });
+  } else if (gsReg && gsReg.email) {
+    gradescopeCard = accountCard({
+      icon: '<span class="acct-emoji">🎓</span>',
+      name: `Gradescope · ${escapeHtmlS(gsReg.email)}`,
+      sub: '<span class="acct-sub-line acct-reconnect">Linked on another device — sign in here to sync due dates.</span>' + gsForm,
+      status: 'Reconnect', statusClass: 'warn',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gs-connect">Connect</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="gs-forget">Remove</button>',
+    });
+  } else {
+    gradescopeCard = accountCard({
+      icon: '<span class="acct-emoji">🎓</span>',
+      name: 'Gradescope',
+      sub: '<span class="acct-sub-line">Pull assignment due dates into your calendar.</span>' + gsForm
+        + '<p class="settings-field-hint">Your password is encrypted on this device (OS keystore) and never leaves it. Won\'t work with Google/School SSO logins.</p>',
+      status: 'Not linked', statusClass: '',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="gs-connect">Connect</button>',
+    });
+  }
+
   // --- Email cards ---
   const provIcon = (p) => ({ gmail: '📧', outlook: '📨', office365: '📨', yahoo: '📬', icloud: '✉️' }[(p || '').toLowerCase()] || '✉️');
   const localEmails = new Set(emailAccts.map(a => (a.email || a.user || '').toLowerCase()));
@@ -1985,6 +2021,8 @@ async function refreshLinkedAccounts() {
     ${cloudCard}
     <div class="acct-group-label">Developer</div>
     ${githubCard}
+    <div class="acct-group-label">School</div>
+    ${gradescopeCard}
     <div class="acct-group-label">Email <button class="settings-btn settings-btn-sm acct-add-btn" data-act="email-add">+ Add account</button></div>
     ${emailCards || '<div class="acct-empty">No email accounts linked yet.</div>'}
     <div id="acct-status" class="settings-inline-status"></div>`;
@@ -2037,6 +2075,34 @@ function bindLinkedAccounts(body) {
         refreshLinkedAccounts();
       } catch (e) { st('Failed: ' + (e.message || e)); }
     }
+    else if (act === 'gs-connect') {
+      const email = (document.getElementById('gs-email') || {}).value;
+      const password = (document.getElementById('gs-password') || {}).value;
+      if (!email || !email.trim() || !password) { st('Enter your Gradescope email and password.'); return; }
+      st('Signing in…');
+      try {
+        const res = await window.api.gradescope.connect(email.trim(), password);
+        if (res.error) { st('Failed: ' + res.error); return; }
+        await setLinkedRegistry({ gradescope: { email: res.email, addedAt: new Date().toISOString() } });
+        st('Connected — pulling due dates…');
+        let r = {};
+        if (window.syncGradescope) r = await window.syncGradescope(true);
+        st(r && r.imported ? `Synced ${r.imported} assignment${r.imported === 1 ? '' : 's'} into your calendar.` : 'Connected. No upcoming due dates found yet.');
+        refreshLinkedAccounts();
+      } catch (e) { st('Failed: ' + (e.message || e)); }
+    }
+    else if (act === 'gs-sync') {
+      st('Syncing…');
+      try { const r = window.syncGradescope ? await window.syncGradescope(true) : {}; st(r && r.error ? 'Failed: ' + r.error : `Synced ${r.imported || 0} assignment${(r.imported || 0) === 1 ? '' : 's'}.`); }
+      catch (e) { st('Failed: ' + (e.message || e)); }
+      refreshLinkedAccounts();
+    }
+    else if (act === 'gs-out') {
+      try { await window.api.gradescope.disconnect(); } catch {}
+      await setLinkedRegistry({ gradescope: null });
+      refreshLinkedAccounts();
+    }
+    else if (act === 'gs-forget') { await setLinkedRegistry({ gradescope: null }); refreshLinkedAccounts(); }
     else if (act === 'email-add' || act === 'email-manage') { goEmailTab(); }
     else if (act === 'email-forget') {
       const email = (el.dataset.email || '').toLowerCase();
