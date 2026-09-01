@@ -18,6 +18,8 @@ class ViewRenderer {
     this.calendarMonth = new Date().getMonth();
     this.calendarView = 'month'; // 'month' | 'week' | 'agenda'
     this.calendarWeekStart = this._getWeekStart(new Date());
+    this.calSelectedDate = null; // YYYY-MM-DD shown in the persistent day panel (right side)
+    this.calShowCompleted = false; // day panel: reveal the collapsed "completed" section
   }
 
   getProject(id) {
@@ -197,12 +199,13 @@ class ViewRenderer {
 
       let attachmentsHtml = '';
       if (note.attachments && note.attachments.length > 0) {
-        attachmentsHtml = '<div class="note-attachments">' +
-          note.attachments.map(a =>
-            `<a href="#" class="note-attachment-chip" data-path="${escapeHtml(a.path)}" title="${escapeHtml(a.path)}">&#128206; ${escapeHtml(a.name)}</a>`
+        attachmentsHtml =
+          '<div class="note-attachment-preview" title="Click to open"></div>' +
+          '<div class="note-attachments">' +
+          note.attachments.map((a, i) =>
+            `<a href="#" class="note-attachment-chip${i === 0 ? ' active' : ''}" data-index="${i}" data-path="${escapeHtml(a.path)}" title="${escapeHtml(a.name)}">&#128206; ${escapeHtml(a.name)}</a>`
           ).join('') +
-          '</div>' +
-          '<div class="note-attachment-preview"></div>';
+          '</div>';
       }
 
       let checklistHtml = '';
@@ -222,14 +225,14 @@ class ViewRenderer {
 
       el.innerHTML = `
         <div class="note-top">
-          <span class="note-project-badge" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</span>
+          <span class="note-project-badge" style="color: ${proj?.color || '#64748B'}">${sourceLogoSvg(note.source)}${proj ? escapeHtml(proj.name) : ''}</span>
           <div class="note-top-actions">
             <button class="note-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" title="Mark complete">${note.completed ? '&#10003;' : ''}</button>
             <button class="note-close" data-id="${note.id}">&times;</button>
           </div>
         </div>
         <p class="note-text">${escapeHtml(note.title)}</p>
-        ${note.description ? `<span class="note-desc-hint">...</span><div class="note-desc">${escapeHtml(note.description)}</div>` : ''}
+        ${note.description ? `<div class="note-desc" title="${escapeHtml(note.description)}">${escapeHtml(note.description)}</div>` : ''}
         ${checklistHtml}
         ${linksHtml}
         ${attachmentsHtml}
@@ -260,7 +263,7 @@ class ViewRenderer {
       });
 
       el.addEventListener('dblclick', (e) => {
-        if (e.target.closest('.note-close') || e.target.closest('.note-check') || e.target.closest('.note-link-chip') || e.target.closest('.note-cl-toggle') || e.target.closest('.note-attachment-chip')) return;
+        if (e.target.closest('.note-close') || e.target.closest('.note-check') || e.target.closest('.note-link-chip') || e.target.closest('.note-cl-toggle') || e.target.closest('.note-attachment-chip') || e.target.closest('.note-attachment-preview')) return;
         window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
       });
 
@@ -290,76 +293,71 @@ class ViewRenderer {
         });
       });
 
-      // Attachment click handlers
-      el.querySelectorAll('.note-attachment-chip').forEach(chip => {
-        chip.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          window.api.openPath(chip.dataset.path);
-        });
-      });
-
-      // Attachment hover preview - lazy load on first hover
+      // Attachments: one preview at a time; the chip row acts as a selector. Clicking
+      // a chip swaps which attachment is previewed; clicking the preview opens it.
       if (note.attachments && note.attachments.length > 0) {
+        const previewEl = el.querySelector('.note-attachment-preview');
+        const chips = [...el.querySelectorAll('.note-attachment-chip')];
+        let activeIdx = 0;
+
+        const IMAGE_EXTS = ['png','jpg','jpeg','gif','svg','bmp','webp','ico','tiff','tif','avif'];
+        const VIDEO_EXTS = ['mp4','webm','ogv','mov'];
+        const TEXT_EXTS = ['txt','md','log','ini','cfg','conf','js','ts','py','c','cpp','h','json','xml','yaml','yml','html','css','sh','bat','sql'];
+
+        async function renderPreview(att) {
+          if (!previewEl) return;
+          previewEl.innerHTML = '';
+          const item = document.createElement('div');
+          item.className = 'note-preview-item';
+          const ext = (att.name.split('.').pop() || '').toLowerCase();
+          if (IMAGE_EXTS.includes(ext)) {
+            try { const u = await window.api.files.getFileUrl(att.path); item.innerHTML = `<img src="${u}" alt="${escapeHtml(att.name)}" class="note-preview-img">`; }
+            catch { item.innerHTML = `<div class="note-preview-fallback">&#128206; ${escapeHtml(att.name)}</div>`; }
+          } else if (VIDEO_EXTS.includes(ext)) {
+            try { const u = await window.api.files.getFileUrl(att.path); item.innerHTML = `<video src="${u}" class="note-preview-video" muted preload="metadata"></video>`; }
+            catch { item.innerHTML = `<div class="note-preview-fallback">&#127916; ${escapeHtml(att.name)}</div>`; }
+          } else if (ext === 'pdf') {
+            try { const u = await window.api.files.getFileUrl(att.path); item.innerHTML = `<embed src="${u}" type="application/pdf" class="note-preview-pdf">`; }
+            catch { item.innerHTML = `<div class="note-preview-fallback">&#128213; ${escapeHtml(att.name)}</div>`; }
+          } else if (ext === 'docx') {
+            try { const buffer = await window.api.files.readBinary(att.path); const result = await mammoth.convertToHtml({ arrayBuffer: buffer }); item.innerHTML = `<div class="note-preview-docx">${result.value}</div>`; }
+            catch { item.innerHTML = `<div class="note-preview-fallback">&#128195; ${escapeHtml(att.name)}</div>`; }
+          } else if (TEXT_EXTS.includes(ext)) {
+            try { const text = await window.api.files.readText(att.path); const snippet = text.length > 500 ? text.slice(0, 500) + '...' : text; item.innerHTML = `<pre class="note-preview-text">${escapeHtml(snippet)}</pre>`; }
+            catch { item.innerHTML = `<div class="note-preview-fallback">&#128196; ${escapeHtml(att.name)}</div>`; }
+          } else {
+            item.innerHTML = `<div class="note-preview-fallback">&#128206; ${escapeHtml(att.name)}</div>`;
+          }
+          previewEl.appendChild(item);
+        }
+
+        function setActive(i) {
+          activeIdx = i;
+          chips.forEach((c, ci) => c.classList.toggle('active', ci === i));
+          renderPreview(note.attachments[i]);
+        }
+
+        chips.forEach(chip => {
+          chip.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setActive(parseInt(chip.dataset.index, 10));
+          });
+        });
+        if (previewEl) {
+          previewEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const att = note.attachments[activeIdx];
+            if (att) window.api.openPath(att.path);
+          });
+        }
+
+        // Lazy-render the first attachment's preview on first hover.
         let previewLoaded = false;
-        el.addEventListener('mouseenter', async () => {
+        el.addEventListener('mouseenter', () => {
           if (previewLoaded) return;
           previewLoaded = true;
-          const previewEl = el.querySelector('.note-attachment-preview');
-          if (!previewEl) return;
-
-          const IMAGE_EXTS = ['png','jpg','jpeg','gif','svg','bmp','webp','ico','tiff','tif','avif'];
-          const VIDEO_EXTS = ['mp4','webm','ogv','mov'];
-          const TEXT_EXTS = ['txt','md','log','ini','cfg','conf','js','ts','py','c','cpp','h','json','xml','yaml','yml','html','css','sh','bat','sql'];
-
-          for (const att of note.attachments) {
-            const ext = (att.name.split('.').pop() || '').toLowerCase();
-            const item = document.createElement('div');
-            item.className = 'note-preview-item';
-
-            if (IMAGE_EXTS.includes(ext)) {
-              try {
-                const fileUrl = await window.api.files.getFileUrl(att.path);
-                item.innerHTML = `<img src="${fileUrl}" alt="${escapeHtml(att.name)}" class="note-preview-img">`;
-              } catch {
-                item.innerHTML = `<div class="note-preview-fallback">&#128206; ${escapeHtml(att.name)}</div>`;
-              }
-            } else if (VIDEO_EXTS.includes(ext)) {
-              try {
-                const fileUrl = await window.api.files.getFileUrl(att.path);
-                item.innerHTML = `<video src="${fileUrl}" class="note-preview-video" muted preload="metadata"></video>`;
-              } catch {
-                item.innerHTML = `<div class="note-preview-fallback">&#127916; ${escapeHtml(att.name)}</div>`;
-              }
-            } else if (ext === 'pdf') {
-              try {
-                const fileUrl = await window.api.files.getFileUrl(att.path);
-                item.innerHTML = `<embed src="${fileUrl}" type="application/pdf" class="note-preview-pdf">`;
-              } catch {
-                item.innerHTML = `<div class="note-preview-fallback">&#128213; ${escapeHtml(att.name)}</div>`;
-              }
-            } else if (ext === 'docx') {
-              try {
-                const buffer = await window.api.files.readBinary(att.path);
-                const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
-                item.innerHTML = `<div class="note-preview-docx">${result.value}</div>`;
-              } catch {
-                item.innerHTML = `<div class="note-preview-fallback">&#128195; ${escapeHtml(att.name)}</div>`;
-              }
-            } else if (TEXT_EXTS.includes(ext)) {
-              try {
-                const text = await window.api.files.readText(att.path);
-                const snippet = text.length > 500 ? text.slice(0, 500) + '...' : text;
-                item.innerHTML = `<pre class="note-preview-text">${escapeHtml(snippet)}</pre>`;
-              } catch {
-                item.innerHTML = `<div class="note-preview-fallback">&#128196; ${escapeHtml(att.name)}</div>`;
-              }
-            } else {
-              item.innerHTML = `<div class="note-preview-fallback">&#128206; ${escapeHtml(att.name)}</div>`;
-            }
-
-            previewEl.appendChild(item);
-          }
+          setActive(activeIdx);
         });
       }
 
@@ -929,9 +927,31 @@ class ViewRenderer {
   // ── Dispatcher ───────────────────────────────────────────────────
   _renderCalendarView() {
     const container = document.getElementById('view-calendar');
-    if (this.calendarView === 'week')   return this._renderWeekView(container);
-    if (this.calendarView === 'agenda') return this._renderAgendaView(container);
-    this._renderMonthView(container);
+    // Persistent split layout: the calendar view (month/week/agenda) on the left, a
+    // permanent day-detail panel on the right. Rendering the panel from stored state
+    // (calSelectedDate) — instead of appending a throwaway overlay — means a data-change
+    // re-render (e.g. checking off an item) keeps the day open instead of snapping shut.
+    if (!this.calSelectedDate) this.calSelectedDate = this._dateStr(new Date());
+    container.classList.add('cal-split-view');
+    container.innerHTML = `<div class="cal-view-area"></div><aside class="cal-side" id="cal-side"></aside>`;
+    const area = container.querySelector('.cal-view-area');
+    if (this.calendarView === 'week')        this._renderWeekView(area);
+    else if (this.calendarView === 'agenda') this._renderAgendaView(area);
+    else                                     this._renderMonthView(area);
+    this._renderDaySide();
+    this._highlightSelectedCell();
+  }
+
+  // Mark the cell/column/row for the currently-selected day across whichever view is up.
+  _highlightSelectedCell() {
+    const container = document.getElementById('view-calendar');
+    if (!container) return;
+    container.querySelectorAll('.cal-selected').forEach(el => el.classList.remove('cal-selected'));
+    const d = this.calSelectedDate;
+    const sel = container.querySelector(
+      `.cal-day-cell[data-date="${d}"], .cal-week-col-head[data-date="${d}"], .cal-agenda-day[data-date="${d}"]`
+    );
+    if (sel) sel.classList.add('cal-selected');
   }
 
   // ── MONTH VIEW ───────────────────────────────────────────────────
@@ -984,7 +1004,7 @@ class ViewRenderer {
         const proj = this.getProject(item.projectId);
         const timeStr = item.startTime ? `${formatTime12(item.startTime)} ` : '';
         html += `<div class="cal-event-dot" style="background:${proj?.color || '#3B82F6'}">
-          <span class="cal-event-text">${timeStr}${escapeHtml(item.title)}</span>
+          <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}${escapeHtml(item.title)}</span>
         </div>`;
       });
 
@@ -993,7 +1013,7 @@ class ViewRenderer {
         const proj = this.getProject(note.projectId);
         const timeStr = note.dueTime ? `${formatTime12(note.dueTime)} ` : '';
         html += `<div class="cal-event-dot cal-note-dot" style="background:${proj?.color || '#6366F1'}88">
-          <span class="cal-event-text">${timeStr}&#128204; ${escapeHtml(note.title)}</span>
+          <span class="cal-event-text">${sourceLogoSvg(note.source)}${timeStr}&#128204; ${escapeHtml(note.title)}</span>
         </div>`;
       });
 
@@ -1063,7 +1083,7 @@ class ViewRenderer {
         notes.filter(n => !n.dueTime).forEach(note => {
           const proj = this.getProject(note.projectId);
           html += `<div class="cal-week-allday-event" style="background:${proj?.color||'#6366F1'}22;border-left:3px solid ${proj?.color||'#6366F1'}">
-            &#128204; ${escapeHtml(note.title)}
+            ${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}
           </div>`;
         });
         html += `</div>`;
@@ -1116,7 +1136,7 @@ class ViewRenderer {
         const height = Math.min((durMins / 60) * HOUR_H, (HOURS * 60 - topMins) / 60 * HOUR_H);
         html += `<div class="cal-week-event" data-id="${item.id}"
           style="top:${top}px;height:${height-2}px;background:${proj?.color||'#3B82F6'};border-color:${proj?.color||'#3B82F6'}">
-          <div class="cal-week-event-title">${escapeHtml(item.title)}</div>
+          <div class="cal-week-event-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div>
           <div class="cal-week-event-time">${formatTime12(item.startTime)}${item.endTime ? '–'+formatTime12(item.endTime) : ''}</div>
         </div>`;
       });
@@ -1130,7 +1150,7 @@ class ViewRenderer {
         const top = (topMins / 60) * HOUR_H;
         html += `<div class="cal-week-event cal-week-note" data-id="${note.id}"
           style="top:${top}px;height:28px;background:${proj?.color||'#6366F1'}22;border-color:${proj?.color||'#6366F1'}">
-          <div class="cal-week-event-title">&#128204; ${escapeHtml(note.title)}</div>
+          <div class="cal-week-event-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
         </div>`;
       });
 
@@ -1218,10 +1238,9 @@ class ViewRenderer {
           html += `<div class="cal-agenda-item" data-id="${item.id}" data-date="${dateStr}" data-day-name="${dayName}">
             <div class="cal-agenda-item-bar" style="background:${proj?.color||'#3B82F6'}"></div>
             <div class="cal-agenda-item-content">
-              <div class="cal-agenda-item-title">${escapeHtml(item.title)}</div>
+              <div class="cal-agenda-item-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div>
               <div class="cal-agenda-item-meta">
                 ${timeStr}${proj ? ' · ' + escapeHtml(proj.name) : ''}
-                ${item.source==='outlook'?'<span class="outlook-badge">Outlook</span>':''}
               </div>
             </div>
             ${item.completed ? '<span class="cal-agenda-done">&#10003;</span>' : ''}
@@ -1234,7 +1253,7 @@ class ViewRenderer {
           html += `<div class="cal-agenda-item cal-agenda-note" data-id="${note.id}" data-date="${dateStr}">
             <div class="cal-agenda-item-bar" style="background:${proj?.color||'#6366F1'}"></div>
             <div class="cal-agenda-item-content">
-              <div class="cal-agenda-item-title">&#128204; ${escapeHtml(note.title)}</div>
+              <div class="cal-agenda-item-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
               <div class="cal-agenda-item-meta">
                 ${timeStr}${timeStr&&proj?' · ':''}${proj ? escapeHtml(proj.name) : ''}
               </div>
@@ -1280,98 +1299,128 @@ class ViewRenderer {
     });
   }
 
-  _showDayExpanded(dateStr, dayName) {
-    const existing = document.querySelector('.cal-day-detail');
-    if (existing) existing.remove();
+  // Select a day → show it in the persistent right-side panel (no throwaway overlay).
+  _showDayExpanded(dateStr /* , dayName (derived) */) {
+    this.calSelectedDate = dateStr;
+    this._renderDaySide();
+    this._highlightSelectedCell();
+  }
 
-    // Gather events for this day
-    const events = this.data.scheduleItems.filter(item => {
-      if (item.date === dateStr) return true;
-      if (!item.date && item.day === dayName) return true;
-      return false;
-    }).filter(item =>
-      this.selectedProject === 'all' || item.projectId === this.selectedProject
-    ).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+  // Render the currently-selected day into the persistent side panel (#cal-side).
+  // Keyed on this.calSelectedDate so a data-change re-render re-opens the same day
+  // instead of the panel vanishing (which is what made checking items "close" the day).
+  _renderDaySide() {
+    const side = document.getElementById('cal-side');
+    if (!side) return;
+    const dateStr = this.calSelectedDate;
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    const dayName = DAYS[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1];
+    // Reuse the same source the grid uses (project-filtered); sort for tidy display.
+    const { events, notes } = this._getDayItems(dateStr, dayName);
+    events.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    notes.sort((a, b) => (a.dueTime || '~').localeCompare(b.dueTime || '~'));
 
-    // Gather notes for this day (only notes with matching dueDate)
-    const notes = this.data.tasks.filter(note => {
-      return note.dueDate === dateStr;
-    }).filter(note =>
-      this.selectedProject === 'all' || note.projectId === this.selectedProject
-    );
+    const isToday = dateObj.toDateString() === new Date().toDateString();
+    const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
-    const detail = document.createElement('div');
-    detail.className = 'cal-day-detail';
+    // Card builders (shared by the active list and the collapsed "completed" section).
+    const eventCard = (item) => {
+      const proj = this.getProject(item.projectId);
+      return `<div class="schedule-card ${item.completed ? 'done' : ''}" style="border-left-color: ${proj?.color || '#3B82F6'}">
+        <button class="schedule-check ${item.completed ? 'checked' : ''}" data-id="${item.id}">${item.completed ? '&#10003;' : ''}</button>
+        <div class="schedule-time">
+          <div class="schedule-time-start">${formatTime12(item.startTime)}</div>
+          <div class="schedule-time-end">&rarr; ${formatTime12(item.endTime)}</div>
+        </div>
+        <div class="schedule-info">
+          <div class="schedule-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div>
+          ${item.description ? `<div class="schedule-desc">${escapeHtml(item.description)}</div>` : ''}
+          <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
+          ${item.date ? '<span class="cal-event-type-badge">One-time</span>' : '<span class="cal-event-type-badge recurring">Weekly</span>'}
+        </div>
+        <button class="schedule-close" data-id="${item.id}" title="Delete event">&times;</button>
+      </div>`;
+    };
+    const noteCard = (note) => {
+      const proj = this.getProject(note.projectId);
+      return `<div class="schedule-card cal-side-note ${note.completed ? 'done' : ''}" data-note-id="${note.id}" style="border-left-color: ${proj?.color || '#6366F1'}">
+        <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
+        ${note.dueTime ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(note.dueTime)}</div></div>` : ''}
+        <div class="schedule-info">
+          <div class="schedule-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
+          ${note.description ? `<div class="schedule-desc">${escapeHtml(note.description)}</div>` : ''}
+          <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
+        </div>
+        <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
+      </div>`;
+    };
 
-    const dateLabel = new Date(dateStr + 'T00:00:00');
-    const formattedDate = dateLabel.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const isDone = (x) => !!x.completed;
+    const activeEvents = events.filter(e => !isDone(e)), doneEvents = events.filter(isDone);
+    const activeNotes  = notes.filter(n => !isDone(n)),  doneNotes  = notes.filter(isDone);
+    const doneCount = doneEvents.length + doneNotes.length;
+    const hasActive = activeEvents.length + activeNotes.length > 0;
 
-    let html = `<div class="cal-detail-header">
-      <h3>${formattedDate}</h3>
-      <button class="cal-detail-close">&times;</button>
+    let html = `<div class="cal-side-header">
+      <div class="cal-side-datewrap">
+        <div class="cal-side-date">${formattedDate}${isToday ? ' <span class="cal-side-today">Today</span>' : ''}</div>
+        <div class="cal-side-year">${dateObj.getFullYear()}</div>
+      </div>
     </div>`;
 
     if (events.length === 0 && notes.length === 0) {
-      html += `<p class="cal-detail-empty">No items for this day.</p>`;
+      html += `<div class="cal-side-empty">
+        <div class="cal-side-empty-icon">&#128197;</div>
+        <div>Nothing scheduled for this day.</div>
+        <div class="cal-side-empty-hint">Pick another day to see what&rsquo;s on it.</div>
+      </div>`;
     } else {
-      // Events section
-      if (events.length > 0) {
-        html += `<div class="cal-detail-section-label">Events</div>`;
-        html += `<div class="schedule-list">`;
-        events.forEach(item => {
-          const proj = this.getProject(item.projectId);
-          html += `<div class="schedule-card ${item.completed ? 'done' : ''}" style="border-left-color: ${proj?.color || '#3B82F6'}">
-            <button class="schedule-check ${item.completed ? 'checked' : ''}" data-id="${item.id}">${item.completed ? '&#10003;' : ''}</button>
-            <div class="schedule-time">
-              <div class="schedule-time-start">${formatTime12(item.startTime)}</div>
-              <div class="schedule-time-end">&rarr; ${formatTime12(item.endTime)}</div>
-            </div>
-            <div class="schedule-info">
-              <div class="schedule-title">${escapeHtml(item.title)}</div>
-              ${item.description ? `<div class="schedule-desc">${escapeHtml(item.description)}</div>` : ''}
-              <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
-              ${item.date ? '<span class="cal-event-type-badge">One-time</span>' : '<span class="cal-event-type-badge recurring">Weekly</span>'}
-              ${item.source === 'outlook' ? '<span class="outlook-badge">Outlook</span>' : ''}
-            </div>
-            <button class="schedule-close" data-id="${item.id}">&times;</button>
-          </div>`;
-        });
+      // Active (incomplete) items — the default view.
+      if (activeEvents.length > 0) {
+        html += `<div class="cal-detail-section-label">Events</div><div class="schedule-list">`;
+        html += activeEvents.map(eventCard).join('');
         html += `</div>`;
       }
-
-      // Notes section
-      if (notes.length > 0) {
-        html += `<div class="cal-detail-section-label" style="margin-top:12px">Notes</div>`;
-        html += `<div class="schedule-list">`;
-        notes.forEach(note => {
-          const proj = this.getProject(note.projectId);
-          html += `<div class="schedule-card ${note.completed ? 'done' : ''}" style="border-left-color: ${proj?.color || '#6366F1'}">
-            <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
-            ${note.dueTime ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(note.dueTime)}</div></div>` : ''}
-            <div class="schedule-info">
-              <div class="schedule-title">&#128204; ${escapeHtml(note.title)}</div>
-              ${note.description ? `<div class="schedule-desc">${escapeHtml(note.description)}</div>` : ''}
-              <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
-            </div>
-            <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
-          </div>`;
-        });
+      if (activeNotes.length > 0) {
+        html += `<div class="cal-detail-section-label" style="margin-top:14px">Notes</div><div class="schedule-list">`;
+        html += activeNotes.map(noteCard).join('');
+        html += `</div>`;
+      }
+      // Everything on this day is done → celebrate instead of a blank panel.
+      if (!hasActive && doneCount > 0) {
+        html += `<div class="cal-side-alldone">&#127881; All done for this day</div>`;
+      }
+      // Completed items — hidden by default under an expander at the bottom.
+      if (doneCount > 0) {
+        html += `<button class="cal-side-completed-toggle ${this.calShowCompleted ? 'open' : ''}">
+          <span class="cal-side-chevron">&#9656;</span> ${this.calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})
+        </button>`;
+        html += `<div class="cal-side-completed-list schedule-list"${this.calShowCompleted ? '' : ' hidden'}>`;
+        html += doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
         html += `</div>`;
       }
     }
 
-    detail.innerHTML = html;
-    document.querySelector('.calendar-container').appendChild(detail);
+    side.innerHTML = html;
 
-    detail.querySelector('.cal-detail-close').addEventListener('click', () => detail.remove());
+    const toggleBtn = side.querySelector('.cal-side-completed-toggle');
+    if (toggleBtn) toggleBtn.addEventListener('click', () => {
+      this.calShowCompleted = !this.calShowCompleted;
+      this._renderDaySide();
+    });
 
-    // Bind event completion toggles
-    detail.querySelectorAll('.schedule-check').forEach(btn => {
-      btn.addEventListener('click', async () => {
+    // Completion toggles (notes + events) — the re-render keeps this same day open.
+    side.querySelectorAll('.schedule-check').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         if (btn.dataset.type === 'note') {
           const note = this.data.tasks.find(t => t.id === btn.dataset.id);
           if (note) {
-            await this.data.updateTask(btn.dataset.id, { completed: !note.completed });
+            const nowDone = !note.completed;
+            await this.data.updateTask(btn.dataset.id, {
+              completed: nowDone,
+              status: nowDone ? 'done' : (note.status === 'done' ? 'backlog' : note.status),
+            });
             window.dispatchEvent(new CustomEvent('tasks-changed'));
           }
         } else {
@@ -1381,10 +1430,20 @@ class ViewRenderer {
       });
     });
 
-    detail.querySelectorAll('.schedule-close').forEach(btn => {
-      btn.addEventListener('click', async () => {
+    side.querySelectorAll('.schedule-close').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
         await this.data.deleteScheduleItem(btn.dataset.id);
         window.dispatchEvent(new CustomEvent('schedule-changed'));
+      });
+    });
+
+    // Click a note row (outside its buttons) to open the full note editor.
+    side.querySelectorAll('.cal-side-note').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.schedule-check')) return;
+        const note = this.data.tasks.find(t => t.id === card.dataset.noteId);
+        if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
       });
     });
   }

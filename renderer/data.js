@@ -450,7 +450,8 @@ class DataManager {
       const existing = byExtId.get(ev.extId);
       if (existing) {
         if (existing.title !== ev.title || existing.date !== ev.date || existing.startTime !== ev.startTime ||
-            existing.endTime !== ev.endTime || existing.location !== ev.location || existing.description !== ev.description) {
+            existing.endTime !== ev.endTime || existing.location !== ev.location || existing.description !== ev.description ||
+            (ev.projectId && existing.projectId !== ev.projectId)) {
           Object.assign(existing, ev);
           changed = true;
         }
@@ -460,7 +461,7 @@ class DataManager {
           id: this._genId('sch'),
           createdAt: new Date().toISOString(),
           completed: false,
-          projectId: null,
+          projectId: ev.projectId || null,
         });
         changed = true;
       }

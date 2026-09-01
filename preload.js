@@ -205,6 +205,7 @@ const __api = {
     connect: (email, password) => ipcRenderer.invoke('gradescope:connect', email, password),
     disconnect: () => ipcRenderer.invoke('gradescope:disconnect'),
     fetchAssignments: () => ipcRenderer.invoke('gradescope:fetchAssignments'),
+    fetchAttachments: (courseId, assignmentId) => ipcRenderer.invoke('gradescope:fetchAttachments', courseId, assignmentId),
   },
   // Git integration
   git: {

@@ -1045,8 +1045,17 @@
         if (!feed.url) continue;
         try {
           const events = await window.api.calendar.fetchFeed(feed.url, feed.source || 'feed');
-          const { changed } = await dataManager.importExternalEvents(events, { source: feed.source || 'feed', prune: true });
-          if (changed) window.dispatchEvent(new CustomEvent('schedule-changed'));
+          // Brightspace: turn "… - Due" deadlines into assignment notes tied to their
+          // class project (merged with the matching Gradescope project), and tag the
+          // calendar entries with that project before they're imported.
+          let notesCreated = 0;
+          if ((feed.source || '').toLowerCase() === 'brightspace') notesCreated = await syncBrightspaceNotes(events);
+          // Deadlines that became assignment notes drive the calendar via their due date,
+          // so don't also import them as schedule events (prune drops any older duplicates).
+          const toImport = events.filter(ev => !ev._noteBacked);
+          const { changed } = await dataManager.importExternalEvents(toImport, { source: feed.source || 'feed', prune: true });
+          if (changed || notesCreated) window.dispatchEvent(new CustomEvent('schedule-changed'));
+          if (notesCreated) { window.dispatchEvent(new CustomEvent('tasks-changed')); window.dispatchEvent(new CustomEvent('projects-changed')); }
         } catch (e) { console.warn('Calendar feed sync failed (' + (feed.name || feed.url) + '):', e.message); }
       }
       try {
@@ -1060,7 +1069,10 @@
     window.syncCalendars = syncCalendars; // allow Settings to trigger a sync after adding a feed
 
     if (!EMB) {
-      setTimeout(() => { syncCalendars().catch(e => console.warn('Initial calendar sync failed:', e.message)); }, 4000);
+      // Run the Brightspace/calendar sync after Gradescope's initial sync (below, ~4s)
+      // so class projects already carry their course code and Brightspace merges into
+      // them instead of creating duplicates.
+      setTimeout(() => { syncCalendars().catch(e => console.warn('Initial calendar sync failed:', e.message)); }, 16000);
       setInterval(() => { syncCalendars().catch(() => {}); }, 15 * 60 * 1000); // every 15 min
     }
 
@@ -1083,24 +1095,272 @@
       setInterval(() => { syncGitHub().catch(() => {}); }, 30 * 60 * 1000); // every 30 min
     }
 
-    // ============ GRADESCOPE SYNC (linked account → calendar due dates) ============
-    // Logs in with the stored credentials (main process), scrapes assignment due
-    // dates, and folds them into scheduleItems as source:'gradescope' (prune=true so
-    // dropped/changed deadlines self-correct). Credentials never leave the main process.
+    // ============ GRADESCOPE SYNC (linked account → projects + assignment notes) ============
+    // Logs in with the stored credentials (main process) and scrapes assignment due
+    // dates, then in the renderer: (1) find-or-create a project per class, (2) tag each
+    // calendar entry with that project, (3) create/update one "assignment" note per
+    // assignment with a time-based priority that's recomputed every sync, and (4) lazily
+    // download any Gradescope attachments onto the note. Credentials never leave main.
+    const GS_PALETTE = ['#3B82F6', '#22C55E', '#EF4444', '#F97316', '#8B5CF6', '#EC4899', '#14B8A6', '#EAB308', '#6366F1', '#06B6D4'];
+    // >1 week → Low, inside 1 week → Medium, within 24h (or overdue) → High.
+    function gsPriority(dueISO) {
+      const ms = new Date(dueISO).getTime() - Date.now();
+      if (ms <= 24 * 3600 * 1000) return 'High';
+      if (ms <= 7 * 24 * 3600 * 1000) return 'Medium';
+      return 'Low';
+    }
+    const gsWeekday = (dueISO) => { const d = new Date(dueISO); return DAYS[(d.getDay() + 6) % 7]; };
+
+    // Canonical Purdue course code from a course name: "ME 164 - LAB" and
+    // "ME 16400 LAB" both → "ME16400" (short 3-digit numbers are padded to the
+    // official 5 digits), so Gradescope and Brightspace names for the same class match.
+    function courseCodeOf(s) {
+      // Drop the term ("Fall 2026") first so it isn't misread as the course code.
+      const cleaned = (s || '').replace(/\b(fall|spring|summer|winter|autumn|fa|sp|su|wi)\s*'?\d{2,4}\b/gi, ' ');
+      const m = cleaned.match(/\b([A-Za-z]{2,4})\s*(\d{3,5})\b/);
+      if (!m) return null;
+      let num = m[2];
+      if (num.length === 3) num += '00';
+      else if (num.length === 4) num += '0';
+      return m[1].toUpperCase() + num;
+    }
+
+    // Strip a term prefix ("Fall 2026") from a course name (mirrors ipc/gradescope.js).
+    function cleanCourseName(s) {
+      return (s || '')
+        .replace(/\b(fall|spring|summer|winter|autumn)\s*'?\d{2,4}\b/gi, '')
+        .replace(/\b\d{4}\s+(fall|spring|summer|winter|autumn)\b/gi, '')
+        .replace(/\b(fa|sp|su|wi)\s*'?\d{2,4}\b/gi, '')
+        .replace(/\(\s*\)|\[\s*\]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/^[\s\-–—:,|]+|[\s\-–—:,|]+$/g, '')
+        .trim();
+    }
+
+    // Find an existing project for a course by its code (padded), then by exact name.
+    function findCourseProject(code, cleanName) {
+      if (code) {
+        const byCode = dataManager.projects.find(p => courseCodeOf(p.courseCode || p.courseShort || p.name) === code);
+        if (byCode) return byCode;
+      }
+      if (cleanName) {
+        const lc = cleanName.trim().toLowerCase();
+        const byName = dataManager.projects.find(p => (p.name || '').trim().toLowerCase() === lc);
+        if (byName) return byName;
+      }
+      return null;
+    }
+
+    // Turn Brightspace "<title> - Due" calendar entries into assignment notes, one per
+    // deadline, tied to the class project (merged with the Gradescope project of the
+    // same course code). Content-release ("- Available") and other entries are ignored.
+    async function syncBrightspaceNotes(events) {
+      try { await dataManager.addCategory({ id: 'assignment', name: 'Assignment', label: 'ASGN', color: '#8B5CF6' }); } catch (e) {}
+      let notesCreated = 0;
+      for (const ev of events) {
+        const m = (ev.title || '').match(/^(.*?)\s*[-–]\s*Due\s*$/i);
+        if (!m) continue;                       // only deadlines
+        const rawCourse = ev.location || '';
+        if (!rawCourse) continue;               // need a course to attach to
+        const cleanName = cleanCourseName(rawCourse);
+        const code = courseCodeOf(rawCourse);
+        let proj = findCourseProject(code, cleanName);
+        if (!proj) {
+          const meta = code ? { courseCode: code } : {};
+          proj = await dataManager.addProject({
+            name: cleanName || rawCourse,
+            color: GS_PALETTE[dataManager.projects.length % GS_PALETTE.length],
+            categories: ['assignment'],
+            ...meta,
+          });
+        }
+        ev.projectId = proj.id;                 // tag the (now note-backed) deadline with the class project
+        ev._noteBacked = true;                  // becomes an assignment note → keep it out of the schedule import
+
+        const title = (m[1] || '').trim() || ev.title;
+        const dueISO = new Date(`${ev.date}T${ev.startTime || '23:59'}:00`).toISOString();
+        const priority = gsPriority(dueISO);
+        const bid = ev.extId;                   // brightspace:uid:occurrence — stable per deadline
+        const existing = dataManager.tasks.find(t => t.brightspaceId === bid);
+        if (existing) {
+          const patch = {};
+          if (existing.title !== title) patch.title = title;
+          if (existing.projectId !== proj.id) patch.projectId = proj.id;
+          if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
+          if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.priority !== priority) patch.priority = priority;
+          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+        } else {
+          await dataManager.addTask({
+            title,
+            description: `Brightspace · ${cleanName || rawCourse}`,
+            projectId: proj.id,
+            category: 'assignment',
+            priority,
+            dueDate: ev.date,
+            dueTime: ev.startTime,
+            day: gsWeekday(dueISO),
+            status: 'backlog',
+            completed: false,
+            checklist: [],
+            attachments: [],
+            source: 'brightspace',
+            brightspaceId: bid,
+          });
+          notesCreated++;
+        }
+      }
+      return notesCreated;
+    }
+
     async function syncGradescope(silent = true) {
       if (!window.api.gradescope) return { imported: 0 };
       const status = await window.api.gradescope.status();
       if (!status.connected) return { imported: 0 };
       const res = await window.api.gradescope.fetchAssignments();
       if (res.error) { if (!silent) alert('Gradescope sync failed: ' + res.error); else console.warn('Gradescope sync failed:', res.error); return { error: res.error }; }
-      const { changed } = await dataManager.importExternalEvents(res.events || [], { source: 'gradescope', prune: true });
-      if (changed) window.dispatchEvent(new CustomEvent('schedule-changed'));
-      return { imported: (res.events || []).length, courses: res.courses || [] };
+      const events = res.events || [];
+
+      // Make sure the "assignment" category exists (idempotent — no-ops if present).
+      try { await dataManager.addCategory({ id: 'assignment', name: 'Assignment', label: 'ASGN', color: '#8B5CF6' }); } catch (e) {}
+
+      // (1) Find-or-create a project per course, linked by gradescopeCourseId (fall
+      // back to a name match so we adopt an existing project instead of duplicating it).
+      const projByCourse = {};
+      for (const c of (res.courses || [])) {
+        const code = courseCodeOf(c.short || c.name);
+        let proj = dataManager.projects.find(p => p.gradescopeCourseId === c.id) || findCourseProject(code, c.name);
+        // Store the code/short so Brightspace (which only has the code) can merge into
+        // this same project instead of creating a duplicate.
+        const meta = { gradescopeCourseId: c.id };
+        if (c.short) meta.courseShort = c.short;
+        if (code) meta.courseCode = code;
+        if (proj) {
+          await dataManager.updateProject(proj.id, meta);
+        } else {
+          proj = await dataManager.addProject({
+            name: c.name,
+            color: GS_PALETTE[dataManager.projects.length % GS_PALETTE.length],
+            categories: ['assignment'],
+            ...meta,
+          });
+        }
+        projByCourse[c.id] = proj.id;
+      }
+
+      // (2)+(3) Tag calendar events with their project; create/update assignment notes.
+      let notesCreated = 0;
+      const activeGids = new Set();
+      for (const ev of events) {
+        const projectId = projByCourse[ev.courseId] || null;
+        ev.projectId = projectId; // so the calendar entry attaches to the class project
+        const gid = ev.extId;     // gradescope:courseId:assignmentId — stable per assignment
+        activeGids.add(gid);
+        const priority = gsPriority(ev.dueISO);
+        const desc = `Gradescope · ${ev.course}`;
+        const existing = dataManager.tasks.find(t => t.gradescopeId === gid);
+        if (existing) {
+          // Auto-managed fields only — never clobber the user's status/checklist/attachments.
+          const patch = {};
+          if (existing.title !== ev.title) patch.title = ev.title;
+          if (existing.projectId !== projectId) patch.projectId = projectId;
+          if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
+          if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.priority !== priority) patch.priority = priority;
+          // Migrate: keep the description clean and ensure the Gradescope link exists
+          // as a real link entry (older notes had the URL dumped in the description).
+          if (ev.url && !(existing.links || []).some(l => l.url === ev.url)) {
+            patch.links = (existing.links || []).concat([{ label: 'Open in Gradescope', url: ev.url }]);
+          }
+          if (existing.description && existing.description.includes(ev.url)) patch.description = desc;
+          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+          // Gradescope is the source of truth for submission — mark done when submitted,
+          // but never auto-un-complete (a note the user finished stays done).
+          if (ev.submitted && existing.status !== 'done') await dataManager.updateTaskStatus(existing.id, 'done');
+        } else {
+          await dataManager.addTask({
+            title: ev.title,
+            description: desc,
+            links: ev.url ? [{ label: 'Open in Gradescope', url: ev.url }] : [],
+            projectId,
+            category: 'assignment',
+            priority,
+            dueDate: ev.date,
+            dueTime: ev.startTime,
+            day: gsWeekday(ev.dueISO),
+            status: ev.submitted ? 'done' : 'backlog',
+            completed: !!ev.submitted,
+            checklist: [],
+            attachments: [],
+            source: 'gradescope',
+            gradescopeId: gid,
+            gradescopeCourseId: ev.courseId,
+            gradescopeAssignmentId: ev.assignmentId,
+          });
+          notesCreated++;
+        }
+      }
+
+      // (4) No separate calendar entry: each assignment is a note whose due date
+      // already surfaces it on the calendar, so importing an event too would double it.
+      // Pass an empty list (prune:true) to purge any schedule items earlier versions made.
+      const { changed } = await dataManager.importExternalEvents([], { source: 'gradescope', prune: true });
+
+      // (5) Fetch each assignment's attachments once. On a manual sync, wait for it so
+      // we can report a real count; on the silent auto-sync, let it run in background.
+      let attach = null;
+      if (silent) fetchGradescopeAttachments(activeGids).catch(() => {});
+      else attach = await fetchGradescopeAttachments(activeGids).catch(() => null);
+
+      if (changed || notesCreated) {
+        window.dispatchEvent(new CustomEvent('schedule-changed'));
+        window.dispatchEvent(new CustomEvent('tasks-changed'));
+        window.dispatchEvent(new CustomEvent('projects-changed'));
+      }
+      return { imported: events.length, notesCreated, courses: res.courses || [], attach };
+    }
+
+    // Lazily download attachments for assignment notes we haven't checked yet. Marks
+    // each note checked so we don't re-hit Gradescope every sync.
+    // Attachment names that are Gradescope site chrome (logo/favicon/64x64 thumbnails),
+    // not coursework — pruned from notes even if downloaded by an earlier version.
+    const GS_BAD_ATT = /^\d+x\d+[-_.]|(^|[-_ ])(logo|favicon|sprite|apple-touch|brand)([-_. ]|$)/i;
+    // Bump when the attachment-detection logic improves, so already-checked notes get
+    // re-scanned exactly once instead of being skipped forever by their checked flag.
+    const GS_ATTACH_VER = 4;
+    async function fetchGradescopeAttachments(activeGids) {
+      let scanned = 0, added = 0;
+      for (const t of dataManager.tasks.slice()) {
+        if (t.source !== 'gradescope') continue;
+        // One-time cleanup of junk attachments a previous sync may have grabbed.
+        if ((t.attachments || []).some(a => GS_BAD_ATT.test(a.name || ''))) {
+          await dataManager.updateTask(t.id, { attachments: (t.attachments || []).filter(a => !GS_BAD_ATT.test(a.name || '')) });
+          window.dispatchEvent(new CustomEvent('tasks-changed'));
+        }
+        if (t.gsAttachVer === GS_ATTACH_VER) continue; // already scanned with current logic
+        if (!t.gradescopeCourseId || !t.gradescopeAssignmentId) continue;
+        if (activeGids && !activeGids.has(t.gradescopeId)) continue;
+        try {
+          scanned++;
+          const r = await window.api.gradescope.fetchAttachments(t.gradescopeCourseId, t.gradescopeAssignmentId);
+          const atts = (r && r.attachments) || [];
+          if (!atts.length && r && r.debug) console.info(`[Gradescope] no attachment for "${t.title}"`, r.debug);
+          const patch = { gsAttachVer: GS_ATTACH_VER };
+          if (atts.length) {
+            const have = new Set((t.attachments || []).map(a => a.name));
+            patch.attachments = (t.attachments || []).concat(atts.filter(a => !have.has(a.name)));
+            added += atts.length;
+          }
+          await dataManager.updateTask(t.id, patch);
+          if (atts.length) window.dispatchEvent(new CustomEvent('tasks-changed'));
+        } catch (e) { /* leave un-versioned so a later sync retries */ }
+      }
+      return { scanned, added };
     }
     window.syncGradescope = syncGradescope; // Settings "Connect"/"Sync now" call this
 
     if (!EMB) {
-      setTimeout(() => { syncGradescope(true).catch(e => console.warn('Initial Gradescope sync failed:', e.message)); }, 6000);
+      setTimeout(() => { syncGradescope(true).catch(e => console.warn('Initial Gradescope sync failed:', e.message)); }, 4000);
       setInterval(() => { syncGradescope(true).catch(() => {}); }, 30 * 60 * 1000); // every 30 min
     }
 

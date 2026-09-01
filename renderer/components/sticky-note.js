@@ -212,3 +212,37 @@ function isOverdue(note) {
   const due = new Date(note.dueDate + 'T' + (note.dueTime || '23:59'));
   return now > due;
 }
+
+// Brand logo mark for an item's external source (gradescope / brightspace / outlook).
+// Returns an inline SVG (offline-safe, theme-agnostic, scales with font-size via the
+// .src-logo class) or '' for unknown / native items. Used on note cards and every
+// calendar surface so you can tell at a glance where an item came from.
+function sourceLogoSvg(source) {
+  const s = (source || '').toLowerCase();
+  if (s === 'gradescope') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Gradescope"><title>Gradescope</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#1B8A5A"/>` +
+      `<path d="M6.8 12.2l3.1 3.1L17 8.3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `</svg>`;
+  }
+  if (s === 'brightspace') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Brightspace"><title>Brightspace</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#FF5000"/>` +
+      `<path d="M8 8.2 L15.5 12 L8 15.8" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>` +
+      `<circle cx="8" cy="8.2" r="2.15" fill="#fff"/>` +
+      `<circle cx="15.5" cy="12" r="2.15" fill="#fff"/>` +
+      `<circle cx="8" cy="15.8" r="2.15" fill="#fff"/>` +
+      `</svg>`;
+  }
+  if (s === 'outlook') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Outlook"><title>Outlook</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#0F6CBD"/>` +
+      `<rect x="10.5" y="6.5" width="10" height="11" rx="1.4" fill="#8EC5F0"/>` +
+      `<path d="M10.5 8.2l5 3.1 5-3.1" fill="none" stroke="#0F6CBD" stroke-width="1.3" stroke-linejoin="round"/>` +
+      `<ellipse cx="7.4" cy="12" rx="4.6" ry="5.2" fill="#0F6CBD"/>` +
+      `<ellipse cx="7.4" cy="12" rx="2.9" ry="3.5" fill="none" stroke="#fff" stroke-width="1.9"/>` +
+      `</svg>`;
+  }
+  return '';
+}
+if (typeof window !== 'undefined') window.sourceLogoSvg = sourceLogoSvg;

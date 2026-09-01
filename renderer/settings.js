@@ -1972,7 +1972,7 @@ async function refreshLinkedAccounts() {
     gradescopeCard = accountCard({
       icon: '<span class="acct-emoji">🎓</span>',
       name: `Gradescope · ${escapeHtmlS(gs.email || '')}`,
-      sub: '<span class="acct-sub-line">Assignment due dates sync into your calendar every 30 minutes.</span>',
+      sub: '<span class="acct-sub-line">Classes → projects, assignments → notes + calendar entries with auto priority. Syncs every 30 min.</span>',
       status: 'Connected', statusClass: 'ok',
       actions: '<button class="settings-btn settings-btn-sm" data-act="gs-sync">Sync now</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="gs-out">Disconnect</button>',
     });
@@ -1988,7 +1988,7 @@ async function refreshLinkedAccounts() {
     gradescopeCard = accountCard({
       icon: '<span class="acct-emoji">🎓</span>',
       name: 'Gradescope',
-      sub: '<span class="acct-sub-line">Pull assignment due dates into your calendar.</span>' + gsForm
+      sub: '<span class="acct-sub-line">Turn your classes into projects and assignments into notes + calendar entries, with attachments and auto-updating priority.</span>' + gsForm
         + '<p class="settings-field-hint">Your password is encrypted on this device (OS keystore) and never leaves it. Won\'t work with Google/School SSO logins.</p>',
       status: 'Not linked', statusClass: '',
       actions: '<button class="settings-btn settings-btn-sm" data-act="gs-connect">Connect</button>',
@@ -2045,6 +2045,18 @@ function mirrorEmailRegistry(localAccts, reg) {
   if (changed) setLinkedRegistry({ email: [...byEmail.values()] });
 }
 
+// Human-readable summary of a Gradescope sync result (assignments + attachments).
+function gsSyncSummary(r) {
+  if (!r || r.imported == null) return '';
+  const a = r.imported || 0;
+  let msg = `Synced ${a} assignment${a === 1 ? '' : 's'}`;
+  if (r.attach) {
+    if (r.attach.added) msg += `, downloaded ${r.attach.added} attachment${r.attach.added === 1 ? '' : 's'}`;
+    else if (r.attach.scanned) msg += `, no attachments found on ${r.attach.scanned} checked`;
+  }
+  return msg + '.';
+}
+
 function bindLinkedAccounts(body) {
   const st = (m) => { const s = document.getElementById('acct-status'); if (s) s.textContent = m || ''; };
   const goEmailTab = () => { const t = document.querySelector('.header-tab[data-view="email"]'); if (t) t.click(); };
@@ -2086,14 +2098,14 @@ function bindLinkedAccounts(body) {
         await setLinkedRegistry({ gradescope: { email: res.email, addedAt: new Date().toISOString() } });
         st('Connected — pulling due dates…');
         let r = {};
-        if (window.syncGradescope) r = await window.syncGradescope(true);
-        st(r && r.imported ? `Synced ${r.imported} assignment${r.imported === 1 ? '' : 's'} into your calendar.` : 'Connected. No upcoming due dates found yet.');
+        if (window.syncGradescope) r = await window.syncGradescope(false);
+        st(gsSyncSummary(r) || 'Connected. No upcoming due dates found yet.');
         refreshLinkedAccounts();
       } catch (e) { st('Failed: ' + (e.message || e)); }
     }
     else if (act === 'gs-sync') {
       st('Syncing…');
-      try { const r = window.syncGradescope ? await window.syncGradescope(true) : {}; st(r && r.error ? 'Failed: ' + r.error : `Synced ${r.imported || 0} assignment${(r.imported || 0) === 1 ? '' : 's'}.`); }
+      try { const r = window.syncGradescope ? await window.syncGradescope(false) : {}; st(r && r.error ? 'Failed: ' + r.error : gsSyncSummary(r)); }
       catch (e) { st('Failed: ' + (e.message || e)); }
       refreshLinkedAccounts();
     }

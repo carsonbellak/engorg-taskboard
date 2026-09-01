@@ -40,6 +40,8 @@ module.exports = {
   // keep the password, not a token, because Gradescope has no API and sessions expire
   // so we re-login on each sync).
   GRADESCOPE_CREDS_FILE: path.join('C:\\Assistant\\appdata', 'gradescope.json'),
+  // Downloaded assignment attachments (device-local — paths are local, so NOT synced).
+  GRADESCOPE_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'gradescope_attachments'),
   EMAIL_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'email_attachments'),
 
   // Microsoft OAuth (modern auth) for Outlook / Microsoft 365 mail accounts.

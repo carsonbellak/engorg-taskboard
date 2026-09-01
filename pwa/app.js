@@ -169,6 +169,8 @@ const notifiedTimerIds = new Set();
 let editingScheduleId = null;
 let editingPurchaseId = null;
 let calendarMonth = new Date();
+let selectedCalDate = null; // YYYY-MM-DD of the open day (persists across re-renders)
+let calShowCompleted = false; // day list: reveal the collapsed "completed" section
 let filters = { priority: '', category: '', overdue: false };
 let noteSortMode = 'priority';
 let noteColorMode = 'category';
@@ -487,6 +489,32 @@ function escapeHtml(str) {
   if (!str) return '';
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
+// Brand logo mark for an item's external source (gradescope / brightspace / outlook).
+// Inline SVG so it scales with font-size (.src-logo); '' for native items. Mirrors the
+// desktop helper in renderer/components/sticky-note.js.
+function sourceLogoSvg(source) {
+  const s = (source || '').toLowerCase();
+  if (s === 'gradescope') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Gradescope"><title>Gradescope</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#1B8A5A"/>` +
+      `<path d="M6.8 12.2l3.1 3.1L17 8.3" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  if (s === 'brightspace') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Brightspace"><title>Brightspace</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#FF5000"/>` +
+      `<path d="M8 8.2 L15.5 12 L8 15.8" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>` +
+      `<circle cx="8" cy="8.2" r="2.15" fill="#fff"/><circle cx="15.5" cy="12" r="2.15" fill="#fff"/><circle cx="8" cy="15.8" r="2.15" fill="#fff"/></svg>`;
+  }
+  if (s === 'outlook') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Outlook"><title>Outlook</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#0F6CBD"/>` +
+      `<rect x="10.5" y="6.5" width="10" height="11" rx="1.4" fill="#8EC5F0"/>` +
+      `<path d="M10.5 8.2l5 3.1 5-3.1" fill="none" stroke="#0F6CBD" stroke-width="1.3" stroke-linejoin="round"/>` +
+      `<ellipse cx="7.4" cy="12" rx="4.6" ry="5.2" fill="#0F6CBD"/>` +
+      `<ellipse cx="7.4" cy="12" rx="2.9" ry="3.5" fill="none" stroke="#fff" stroke-width="1.9"/></svg>`;
+  }
+  return '';
+}
 function filterByProject(items) {
   if (currentProject === 'all') return items;
   return items.filter(i => i.projectId === currentProject);
@@ -798,7 +826,7 @@ function renderNoteCard(t) {
     <div class="note-priority-bar ${pClass}"></div>
     <div class="note-header">
       <button class="note-checkbox ${t.completed ? 'checked' : ''}" data-toggle="${t.id}">${t.completed ? '&#10003;' : ''}</button>
-      <div class="note-title">${escapeHtml(t.title)}</div>
+      <div class="note-title">${sourceLogoSvg(t.source)}${escapeHtml(t.title)}</div>
     </div>
     ${metaHtml || checklistHtml ? `<div class="note-meta">${metaHtml}${checklistHtml}</div>` : ''}
   </div>`;
@@ -1218,7 +1246,11 @@ function renderCalendar() {
       if (!item.date && item.day === dayName) return true;
       return false;
     });
-    if (dayEvents.length > 0) eventMap[d] = dayEvents;
+    // Notes with a due date show on the calendar too — an assignment note IS its own
+    // calendar entry (no duplicate schedule event is created for it).
+    const dayNotes = data.tasks.filter(n => n.dueDate === dateStr);
+    const dayItems = [...dayEvents, ...dayNotes];
+    if (dayItems.length > 0) eventMap[d] = dayItems;
   }
 
   let html = `<div class="calendar-header">
@@ -1266,6 +1298,7 @@ function bindCalendarEvents() {
       const month = calendarMonth.getMonth();
       const date = new Date(year, month, day);
       const dateStr = date.toISOString().slice(0, 10);
+      selectedCalDate = dateStr; // remember so a re-render re-opens this day, not today
       const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const dayName = DAYS[date.getDay()];
 
@@ -1275,36 +1308,76 @@ function bindCalendarEvents() {
         return false;
       }).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
 
+      // Notes due this day show alongside events (assignment notes drive the calendar).
+      const notes = data.tasks.filter(n => n.dueDate === dateStr)
+        .sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || ''));
+
       const eventsEl = document.getElementById('cal-day-events');
       if (!eventsEl) return;
 
       document.querySelectorAll('.cal-cell').forEach(c => c.classList.remove('selected'));
       cell.classList.add('selected');
 
-      if (events.length === 0) {
-        eventsEl.innerHTML = `<div class="cal-no-events">${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })} — No events</div>`;
+      const dateTitle = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+      if (events.length === 0 && notes.length === 0) {
+        eventsEl.innerHTML = `<div class="cal-no-events">${dateTitle} — No events</div>`;
         return;
       }
 
-      let ehtml = `<div class="cal-events-title">${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>`;
-      for (const item of events) {
-        ehtml += `<div class="event-card cal-event-card" data-id="${item.id}">
+      const evCard = (item) => `<div class="event-card cal-event-card ${item.completed ? 'completed' : ''}" data-id="${item.id}">
           <div class="event-time">${item.startTime || ''}<br>${item.endTime || ''}</div>
-          <div style="flex:1"><div class="event-title">${escapeHtml(item.title)}</div></div>
+          <div style="flex:1"><div class="event-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div></div>
           <button class="event-edit-btn" data-id="${item.id}">&#9998;</button>
         </div>`;
+      const nCard = (note) => {
+        const projName = getProjectName(note.projectId);
+        return `<div class="event-card cal-event-card cal-note-card ${note.completed ? 'completed' : ''}" data-note-id="${note.id}">
+          <div class="event-time">${note.dueTime || ''}</div>
+          <div style="flex:1"><div class="event-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
+          ${projName ? `<div class="cal-note-proj">${escapeHtml(projName)}</div>` : ''}</div>
+        </div>`;
+      };
+
+      const activeEvents = events.filter(e => !e.completed), doneEvents = events.filter(e => e.completed);
+      const activeNotes = notes.filter(n => !n.completed), doneNotes = notes.filter(n => n.completed);
+      const doneCount = doneEvents.length + doneNotes.length;
+      const hasActive = activeEvents.length + activeNotes.length > 0;
+
+      let ehtml = `<div class="cal-events-title">${dateTitle}</div>`;
+      ehtml += activeEvents.map(evCard).join('') + activeNotes.map(nCard).join('');
+      if (!hasActive && doneCount > 0) ehtml += `<div class="cal-alldone">&#127881; All done for this day</div>`;
+      if (doneCount > 0) {
+        ehtml += `<button class="cal-completed-toggle ${calShowCompleted ? 'open' : ''}"><span class="cal-chevron">&#9656;</span> ${calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
+        if (calShowCompleted) ehtml += `<div class="cal-completed-list">${doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
       }
       eventsEl.innerHTML = ehtml;
 
       eventsEl.querySelectorAll('.event-edit-btn').forEach(btn => {
         btn.addEventListener('click', (e) => { e.stopPropagation(); openScheduleForm(btn.dataset.id); });
       });
+      eventsEl.querySelectorAll('.cal-note-card').forEach(card => {
+        card.addEventListener('click', () => showNoteDetail(card.dataset.noteId));
+      });
+      const calToggle = eventsEl.querySelector('.cal-completed-toggle');
+      if (calToggle) calToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        calShowCompleted = !calShowCompleted;
+        cell.click(); // re-render this day's list with the new state
+      });
     });
   });
 
-  // Auto-select today's cell on load
-  const todayCell = document.querySelector('.cal-cell.today');
-  if (todayCell) todayCell.click();
+  // Restore the previously-selected day (so checking an item off doesn't snap the
+  // panel back to today); fall back to today's cell.
+  let cellToSelect = document.querySelector('.cal-cell.today');
+  if (selectedCalDate) {
+    const sd = new Date(selectedCalDate + 'T00:00:00');
+    if (sd.getFullYear() === calendarMonth.getFullYear() && sd.getMonth() === calendarMonth.getMonth()) {
+      const c = document.querySelector(`.cal-cell[data-day="${sd.getDate()}"]`);
+      if (c) cellToSelect = c;
+    }
+  }
+  if (cellToSelect) cellToSelect.click();
 }
 
 // ===================== SCHEDULE CRUD =====================
