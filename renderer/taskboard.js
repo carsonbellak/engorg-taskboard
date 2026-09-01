@@ -1362,10 +1362,7 @@ class ViewRenderer {
     const hasActive = activeEvents.length + activeNotes.length > 0;
 
     let html = `<div class="cal-side-header">
-      <div class="cal-side-datewrap">
-        <div class="cal-side-date">${formattedDate}${isToday ? ' <span class="cal-side-today">Today</span>' : ''}</div>
-        <div class="cal-side-year">${dateObj.getFullYear()}</div>
-      </div>
+      <div class="cal-side-date">${formattedDate}<span class="cal-side-year">${dateObj.getFullYear()}</span>${isToday ? '<span class="cal-side-today">Today</span>' : ''}</div>
     </div>`;
 
     if (events.length === 0 && notes.length === 0) {
@@ -1390,14 +1387,18 @@ class ViewRenderer {
       if (!hasActive && doneCount > 0) {
         html += `<div class="cal-side-alldone">&#127881; All done for this day</div>`;
       }
-      // Completed items — hidden by default under an expander at the bottom.
+      // Completed items — collapsed by default under an expander at the bottom.
+      // The list is only rendered when open (relying on the [hidden] attribute
+      // fails here because `.schedule-list { display:flex }` overrides it).
       if (doneCount > 0) {
         html += `<button class="cal-side-completed-toggle ${this.calShowCompleted ? 'open' : ''}">
           <span class="cal-side-chevron">&#9656;</span> ${this.calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})
         </button>`;
-        html += `<div class="cal-side-completed-list schedule-list"${this.calShowCompleted ? '' : ' hidden'}>`;
-        html += doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
-        html += `</div>`;
+        if (this.calShowCompleted) {
+          html += `<div class="cal-side-completed-list schedule-list">`;
+          html += doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
+          html += `</div>`;
+        }
       }
     }
 
