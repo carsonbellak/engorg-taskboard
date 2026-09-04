@@ -331,24 +331,38 @@ class ViewRenderer {
           previewEl.appendChild(item);
         }
 
+        // Track which attachment is actually rendered so re-selecting the active
+        // chip (or hovering a single-attachment note) never rebuilds the <embed> —
+        // rebuilding reloads it, which flashes/collapses the card ("minimising").
+        let loadedIdx = -1;
         function setActive(i) {
           activeIdx = i;
           chips.forEach((c, ci) => c.classList.toggle('active', ci === i));
+          if (loadedIdx === i) return;
+          loadedIdx = i;
           renderPreview(note.attachments[i]);
         }
 
+        const openActive = () => {
+          const att = note.attachments[activeIdx];
+          if (att) window.api.openPath(att.path);
+        };
+
         chips.forEach(chip => {
+          const idx = parseInt(chip.dataset.index, 10);
+          // Hover a chip to preview it; click it to open the file.
+          chip.addEventListener('mouseenter', () => setActive(idx));
           chip.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            setActive(parseInt(chip.dataset.index, 10));
+            activeIdx = idx;
+            openActive();
           });
         });
         if (previewEl) {
           previewEl.addEventListener('click', (e) => {
             e.stopPropagation();
-            const att = note.attachments[activeIdx];
-            if (att) window.api.openPath(att.path);
+            openActive();
           });
         }
 

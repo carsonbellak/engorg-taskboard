@@ -672,6 +672,11 @@ body[data-project-indicator="bar"] .sidebar-item .sidebar-project-dot {
   min-height: 100px;
   max-height: 150px;
   overflow: hidden;
+  /* Flex column so the trailing rows (OVERDUE badge + priority/due meta) are
+     protected from the collapsed max-height clip — the title/desc absorb the
+     shrink instead, keeping the actionable info visible. */
+  display: flex;
+  flex-direction: column;
   position: relative;
   box-shadow: 0 2px 12px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15);
   transition: transform 0.22s cubic-bezier(.4,0,.2,1), box-shadow 0.22s cubic-bezier(.4,0,.2,1);
@@ -758,6 +763,7 @@ body[data-project-indicator="bar"] .sidebar-item .sidebar-project-dot {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: 0; /* allow the flex column to shrink the title before clipping the meta rows */
 }
 .sticky-note:hover .note-text {
   -webkit-line-clamp: unset;
@@ -783,10 +789,16 @@ body[data-project-indicator="bar"] .sidebar-item .sidebar-project-dot {
 }
 
 .sticky-note .note-links {
-  display: flex;
+  /* Action links are hidden in the compact card and revealed on hover, so the
+     collapsed height stays for the title + priority/due summary. */
+  display: none;
   flex-wrap: wrap;
   gap: 4px;
   margin-bottom: 6px;
+  flex-shrink: 0;
+}
+.sticky-note:hover .note-links {
+  display: flex;
 }
 
 .sticky-note .note-link-chip {
@@ -810,6 +822,7 @@ body[data-project-indicator="bar"] .sidebar-item .sidebar-project-dot {
   justify-content: space-between;
   align-items: center;
   margin-top: 8px;
+  flex-shrink: 0; /* keep the priority/category/due row visible even when the card is full */
 }
 
 .sticky-note .note-priority-dot {
@@ -3419,6 +3432,7 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   color: #EF4444;
   letter-spacing: 0.5px;
   margin-top: 4px;
+  flex-shrink: 0; /* never let the OVERDUE flag get clipped by the collapsed card */
 }
 
 .board-card-overdue {
@@ -3817,6 +3831,14 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   border-radius: 6px;
   overflow: hidden;
   background: rgba(0,0,0,0.04);
+}
+
+/* The preview is a click-to-open thumbnail. Let clicks fall through the embedded
+   media to the preview container's open handler — <embed>/PDF plugins otherwise
+   swallow the click, so clicking a PDF preview would do nothing. */
+.note-attachment-preview .note-preview-item,
+.note-attachment-preview .note-preview-item * {
+  pointer-events: none;
 }
 
 .note-preview-img {
