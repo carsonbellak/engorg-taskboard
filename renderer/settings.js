@@ -100,19 +100,20 @@ const COLOR_THEMES = {
     desc: 'Frosted panels over a deep liquid glow',
     style: 'glass',
     vars: {
-      '--bg-primary': '#070A14',
-      '--bg-secondary': 'rgba(255,255,255,0.05)',
-      '--bg-sidebar': 'rgba(255,255,255,0.04)',
-      '--bg-header': 'rgba(255,255,255,0.05)',
-      '--bg-card': 'rgba(255,255,255,0.09)',
-      '--bg-input': 'rgba(255,255,255,0.06)',
-      '--bg-hover': 'rgba(255,255,255,0.12)',
-      '--border-color': 'rgba(255,255,255,0.16)',
-      '--border-light': 'rgba(255,255,255,0.08)',
+      // Deep indigo-slate base (was near-black #070A14, which read flat/muddy).
+      '--bg-primary': '#0C1122',
+      '--bg-secondary': 'rgba(190,205,255,0.05)',
+      '--bg-sidebar': 'rgba(190,205,255,0.04)',
+      '--bg-header': 'rgba(190,205,255,0.05)',
+      '--bg-card': 'rgba(200,214,255,0.08)',
+      '--bg-input': 'rgba(200,214,255,0.06)',
+      '--bg-hover': 'rgba(200,214,255,0.13)',
+      '--border-color': 'rgba(200,214,255,0.18)',
+      '--border-light': 'rgba(200,214,255,0.09)',
       '--text-primary': '#EEF2FB',
-      '--text-secondary': '#C2CCDE',
-      '--text-muted': '#8896AE',
-      '--text-faint': '#5A6883',
+      '--text-secondary': '#C6D0E4',
+      '--text-muted': '#93A0BC',
+      '--text-faint': '#5F6E8C',
       '--accent': '#8B93FF',
       '--accent-hover': '#AEB4FF',
       '--accent-bg': 'rgba(139,147,255,0.16)',
@@ -139,10 +140,12 @@ const COLOR_THEMES = {
       '--card-shadow': '0 8px 32px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 0 0 1px rgba(255,255,255,0.04)',
       '--card-hover-shadow': '0 16px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.32), inset 0 0 0 1px rgba(255,255,255,0.06)',
       '--btn-shadow': '0 4px 16px rgba(139,147,255,0.3)',
-      // Liquid glass colour field (drifting blobs the frosted panels refract)
-      '--glass-c1': 'rgba(99,102,241,0.55)',
-      '--glass-c2': 'rgba(20,184,166,0.45)',
-      '--glass-c3': 'rgba(168,85,247,0.5)',
+      // Liquid glass colour field (drifting blobs the frosted panels refract).
+      // A cohesive cool trio — indigo / sky / violet — instead of the old
+      // indigo+teal+purple mix that muddied together.
+      '--glass-c1': 'rgba(99,110,241,0.45)',
+      '--glass-c2': 'rgba(56,189,248,0.34)',
+      '--glass-c3': 'rgba(167,139,250,0.42)',
       '--glass-edge': 'rgba(255,255,255,0.5)',
     }
   },
@@ -248,26 +251,29 @@ const COLOR_THEMES = {
     desc: 'Bold borders, raw edges',
     style: 'brutalist',
     vars: {
-      '--bg-primary': '#FFFFF0',
-      '--bg-secondary': '#FAFAE0',
-      '--bg-sidebar': '#FFFFF0',
-      '--bg-header': '#000000',
-      '--bg-card': '#FFFFF0',
-      '--bg-input': '#FFFFF0',
-      '--bg-hover': '#F0F0D8',
-      '--border-color': '#000000',
-      '--border-light': '#CCCCAA',
-      '--text-primary': '#000000',
-      '--text-secondary': '#222200',
-      '--text-muted': '#555544',
-      '--text-faint': '#888870',
-      '--accent': '#FF3300',
-      '--accent-hover': '#CC2900',
-      '--accent-bg': '#FFEEEE',
-      '--accent-text': '#CC0000',
-      '--success': '#008800',
-      '--warning': '#CC8800',
-      '--danger': '#CC0000',
+      // Toned down for HDR/OLED: charcoal (#242422) rather than pure #000, a
+      // slightly dimmed paper ground, and a calmer red — keeps the hard-edged
+      // brutalist look without the searing max-contrast on bright displays.
+      '--bg-primary': '#F3F1E4',
+      '--bg-secondary': '#EDEBDA',
+      '--bg-sidebar': '#F3F1E4',
+      '--bg-header': '#242422',
+      '--bg-card': '#F6F4E9',
+      '--bg-input': '#F6F4E9',
+      '--bg-hover': '#E6E3CF',
+      '--border-color': '#242422',
+      '--border-light': '#C4C2AC',
+      '--text-primary': '#1C1C1A',
+      '--text-secondary': '#33332A',
+      '--text-muted': '#5A5A4C',
+      '--text-faint': '#8A8A76',
+      '--accent': '#D93A17',
+      '--accent-hover': '#B62F12',
+      '--accent-bg': '#F6E4DE',
+      '--accent-text': '#B62F12',
+      '--success': '#2E7D32',
+      '--warning': '#B27700',
+      '--danger': '#C0281C',
       '--shadow': 'rgba(0,0,0,0)',
       '--shadow-lg': 'rgba(0,0,0,0)',
       '--radius-sm': '0px',
@@ -275,18 +281,18 @@ const COLOR_THEMES = {
       '--radius-lg': '0px',
       '--border-width': '3px',
       '--card-border-width': '3px',
-      '--header-bg': '#000000',
+      '--header-bg': '#242422',
       '--sidebar-bg': 'var(--bg-sidebar)',
       '--card-blur': '0',
       '--card-opacity': '1',
       '--font-weight-normal': '500',
       '--font-weight-bold': '800',
       '--font-weight-heavy': '900',
-      '--header-border': '3px solid #000000',
-      '--sidebar-border': '3px solid #000000',
-      '--card-shadow': '4px 4px 0px #000000',
-      '--card-hover-shadow': '6px 6px 0px #000000',
-      '--btn-shadow': '3px 3px 0px #000000',
+      '--header-border': '3px solid #242422',
+      '--sidebar-border': '3px solid #242422',
+      '--card-shadow': '4px 4px 0px #242422',
+      '--card-hover-shadow': '6px 6px 0px #242422',
+      '--btn-shadow': '3px 3px 0px #242422',
     }
   },
   nord: {
@@ -383,31 +389,33 @@ const COLOR_THEMES = {
   },
   forest: {
     name: 'Forest',
-    desc: 'Earthy greens',
+    desc: 'Calm sage & pine',
     style: 'forest',
     vars: {
-      '--bg-primary': '#F0F7F4',
-      '--bg-secondary': '#E6F0EB',
-      '--bg-sidebar': '#E6F0EB',
-      '--bg-header': '#F0F7F4',
-      '--bg-card': '#FFFFFF',
+      // Refined sage/pine palette — warmer, softer ground and a deeper, more
+      // grounded pine accent (was a bright minty green on cool mint panels).
+      '--bg-primary': '#EEF3EA',
+      '--bg-secondary': '#E3EBDD',
+      '--bg-sidebar': '#E6EEE0',
+      '--bg-header': '#EEF3EA',
+      '--bg-card': '#FAFCF7',
       '--bg-input': '#FFFFFF',
-      '--bg-hover': '#D5E8DD',
-      '--border-color': '#C6DDD0',
-      '--border-light': '#E6F0EB',
-      '--text-primary': '#1A3A2A',
-      '--text-secondary': '#2D5940',
-      '--text-muted': '#4A7A5C',
-      '--text-faint': '#7BA68C',
-      '--accent': '#16A34A',
-      '--accent-hover': '#15803D',
-      '--accent-bg': '#DCFCE7',
-      '--accent-text': '#15803D',
-      '--success': '#22C55E',
-      '--warning': '#F59E0B',
-      '--danger': '#EF4444',
-      '--shadow': 'rgba(26,58,42,0.08)',
-      '--shadow-lg': 'rgba(26,58,42,0.15)',
+      '--bg-hover': '#DAE7D2',
+      '--border-color': '#CCDCC1',
+      '--border-light': '#E3EBDD',
+      '--text-primary': '#1E3325',
+      '--text-secondary': '#33543C',
+      '--text-muted': '#5E7D64',
+      '--text-faint': '#8EAB90',
+      '--accent': '#2F8F5B',
+      '--accent-hover': '#26794C',
+      '--accent-bg': '#DCEFE0',
+      '--accent-text': '#20693F',
+      '--success': '#2FA35C',
+      '--warning': '#D9902B',
+      '--danger': '#D4574E',
+      '--shadow': 'rgba(30,51,37,0.08)',
+      '--shadow-lg': 'rgba(30,51,37,0.15)',
       '--radius-sm': '8px',
       '--radius-md': '10px',
       '--radius-lg': '12px',
@@ -422,9 +430,9 @@ const COLOR_THEMES = {
       '--font-weight-heavy': '800',
       '--header-border': '1px solid var(--border-color)',
       '--sidebar-border': '1px solid var(--border-color)',
-      '--card-shadow': '0 2px 8px rgba(26,58,42,0.08), 0 1px 2px rgba(26,58,42,0.06)',
-      '--card-hover-shadow': '0 12px 28px rgba(26,58,42,0.15), 0 4px 8px rgba(26,58,42,0.1)',
-      '--btn-shadow': '0 2px 8px rgba(22,163,74,0.3)',
+      '--card-shadow': '0 2px 8px rgba(30,51,37,0.08), 0 1px 2px rgba(30,51,37,0.06)',
+      '--card-hover-shadow': '0 12px 28px rgba(30,51,37,0.15), 0 4px 8px rgba(30,51,37,0.1)',
+      '--btn-shadow': '0 2px 8px rgba(47,143,91,0.3)',
     }
   },
   ocean: {
@@ -873,9 +881,22 @@ function applyTheme(themeId) {
     document.body.classList.add('style-' + theme.style);
   }
 
+  // Liquid-glass translucency (0 = frosted/opaque, 1 = fully translucent)
+  applyGlassStrength();
+
   // Ambient FX layer
   if (window.ThemeFx) window.ThemeFx.init(themeId);
 }
+
+// Push the saved Liquid Glass slider value into the CSS var the .style-glass
+// rules read. Harmless for non-glass themes (no rule consumes it there).
+function applyGlassStrength(val) {
+  const s = (typeof val === 'number')
+    ? val
+    : (typeof dataManager?.settings?.glassStrength === 'number' ? dataManager.settings.glassStrength : 0.5);
+  document.documentElement.style.setProperty('--glass-strength', String(Math.max(0, Math.min(1, s))));
+}
+window.applyGlassStrength = applyGlassStrength;
 
 let _settingsTab = 'appearance'; // remembered across re-renders of the Settings page
 
@@ -967,6 +988,19 @@ function renderSettings() {
               <span>${label}</span>
             </button>
           `).join('')}
+        </div>
+      </div>
+
+      <!-- Liquid Glass translucency -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Liquid Glass</h3>
+        <p class="settings-section-hint">Only affects the Liquid Glass themes. Slide toward Max to make panels and cards more see-through — at Max only text and borders stay solid.</p>
+        <div class="settings-slider-row">
+          <span class="settings-slider-label">Frosted</span>
+          <input type="range" class="settings-slider" id="settings-glass-strength"
+                 min="0" max="1" step="0.05"
+                 value="${typeof dataManager.settings.glassStrength === 'number' ? dataManager.settings.glassStrength : 0.5}">
+          <span class="settings-slider-label">Max</span>
         </div>
       </div>
 
@@ -1337,6 +1371,15 @@ function renderSettings() {
       renderSettings();
     });
   });
+
+  // Liquid Glass translucency slider — live preview while dragging, persist on release.
+  const glassSlider = document.getElementById('settings-glass-strength');
+  if (glassSlider) {
+    glassSlider.addEventListener('input', (e) => applyGlassStrength(parseFloat(e.target.value)));
+    glassSlider.addEventListener('change', (e) => {
+      dataManager.updateSettings({ glassStrength: parseFloat(e.target.value) });
+    });
+  }
 
   // Toggle handlers
   document.getElementById('settings-stale-anim').addEventListener('change', (e) => {

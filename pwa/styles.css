@@ -41,6 +41,18 @@ body[data-style="glass"] {
     var(--bg);
   background-attachment: fixed;
 }
+/* Translucency slider (--glass-strength, synced from desktop): 0 frosted → 1
+   fully see-through. Scales the surface tints; --bg + --border stay solid. */
+body[data-style="glass"] {
+  --glass-k: calc(1 - var(--glass-strength, 0.5));
+  --glass-tint: 255, 255, 255;
+  --bg-card:     rgba(var(--glass-tint), calc(0.55 * var(--glass-k)));
+  --bg-elevated: rgba(var(--glass-tint), calc(0.60 * var(--glass-k)));
+}
+body[data-style="glass"].theme-dark {
+  --bg-card:     rgba(var(--glass-tint), calc(0.15 * var(--glass-k)));
+  --bg-elevated: rgba(var(--glass-tint), calc(0.22 * var(--glass-k)));
+}
 body[data-style="glass"] #app-header,
 body[data-style="glass"] #bottom-nav {
   backdrop-filter: blur(24px) saturate(180%);

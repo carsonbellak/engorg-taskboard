@@ -61,13 +61,13 @@ if ('serviceWorker' in navigator) {
 const COLOR_THEMES = {
   default: { name:'Default', dark:false, vars:{'--bg':'#F8FAFC','--bg-card':'#FFFFFF','--bg-elevated':'#F1F5F9','--border':'#E2E8F0','--text':'#0F172A','--text-secondary':'#334155','--text-muted':'#64748B','--accent':'#3B82F6','--accent-light':'rgba(59,130,246,0.12)','--success':'#22C55E','--warning':'#F59E0B','--danger':'#EF4444','--radius':'12px'} },
   dark: { name:'Dark', dark:true, vars:{'--bg':'#0F172A','--bg-card':'#1E293B','--bg-elevated':'#334155','--border':'#334155','--text':'#F1F5F9','--text-secondary':'#CBD5E1','--text-muted':'#94A3B8','--accent':'#3B82F6','--accent-light':'rgba(59,130,246,0.15)','--success':'#4ADE80','--warning':'#FBBF24','--danger':'#F87171','--radius':'12px'} },
-  glassDark: { name:'Liquid Glass Dark', dark:true, style:'glass', vars:{'--bg':'#070A14','--bg-card':'rgba(255,255,255,0.06)','--bg-elevated':'rgba(255,255,255,0.09)','--border':'rgba(255,255,255,0.16)','--text':'#EEF2FB','--text-secondary':'#C2CCDE','--text-muted':'#8896AE','--accent':'#8B93FF','--accent-light':'rgba(139,147,255,0.16)','--success':'#34D399','--warning':'#FBBF24','--danger':'#FB7185','--radius':'16px','--glass-c1':'rgba(99,102,241,0.55)','--glass-c2':'rgba(20,184,166,0.45)','--glass-c3':'rgba(168,85,247,0.5)'} },
+  glassDark: { name:'Liquid Glass Dark', dark:true, style:'glass', vars:{'--bg':'#0C1122','--bg-card':'rgba(200,214,255,0.08)','--bg-elevated':'rgba(200,214,255,0.13)','--border':'rgba(200,214,255,0.18)','--text':'#EEF2FB','--text-secondary':'#C6D0E4','--text-muted':'#93A0BC','--accent':'#8B93FF','--accent-light':'rgba(139,147,255,0.16)','--success':'#34D399','--warning':'#FBBF24','--danger':'#FB7185','--radius':'16px','--glass-c1':'rgba(99,110,241,0.45)','--glass-c2':'rgba(56,189,248,0.34)','--glass-c3':'rgba(167,139,250,0.42)'} },
   glassLight: { name:'Liquid Glass Light', dark:false, style:'glass', vars:{'--bg':'#E7EEFB','--bg-card':'rgba(255,255,255,0.55)','--bg-elevated':'rgba(255,255,255,0.6)','--border':'rgba(255,255,255,0.75)','--text':'#1E293B','--text-secondary':'#475569','--text-muted':'#64748B','--accent':'#6366F1','--accent-light':'rgba(99,102,241,0.14)','--success':'#059669','--warning':'#D97706','--danger':'#E11D48','--radius':'16px','--glass-c1':'rgba(125,180,255,0.55)','--glass-c2':'rgba(255,170,210,0.5)','--glass-c3':'rgba(150,230,200,0.55)'} },
   neon: { name:'Neon', dark:true, vars:{'--bg':'#0A0A0F','--bg-card':'#141420','--bg-elevated':'#1A1A2A','--border':'#2A2A3E','--text':'#E0E0FF','--text-secondary':'#A0A0CC','--text-muted':'#6B6B99','--accent':'#00FFAA','--accent-light':'rgba(0,255,170,0.08)','--success':'#00FF88','--warning':'#FFD600','--danger':'#FF2266','--radius':'6px'} },
-  brutalist: { name:'Brutalist', dark:false, vars:{'--bg':'#FAFAE0','--bg-card':'#FFFFF0','--bg-elevated':'#F0F0D8','--border':'#000000','--text':'#000000','--text-secondary':'#222200','--text-muted':'#555544','--accent':'#FF3300','--accent-light':'#FFEEEE','--success':'#008800','--warning':'#CC8800','--danger':'#CC0000','--radius':'0px'} },
+  brutalist: { name:'Brutalist', dark:false, vars:{'--bg':'#EDEBDA','--bg-card':'#F6F4E9','--bg-elevated':'#E6E3CF','--border':'#242422','--text':'#1C1C1A','--text-secondary':'#33332A','--text-muted':'#5A5A4C','--accent':'#D93A17','--accent-light':'#F6E4DE','--success':'#2E7D32','--warning':'#B27700','--danger':'#C0281C','--radius':'0px'} },
   nord: { name:'Nord', dark:true, vars:{'--bg':'#2E3440','--bg-card':'#3B4252','--bg-elevated':'#434C5E','--border':'#434C5E','--text':'#ECEFF4','--text-secondary':'#D8DEE9','--text-muted':'#81A1C1','--accent':'#88C0D0','--accent-light':'rgba(136,192,208,0.12)','--success':'#A3BE8C','--warning':'#EBCB8B','--danger':'#BF616A','--radius':'8px'} },
   midnight: { name:'Midnight', dark:true, vars:{'--bg':'#13111C','--bg-card':'#1C1929','--bg-elevated':'#2D2640','--border':'#2D2640','--text':'#E8E4F0','--text-secondary':'#C4BDD4','--text-muted':'#8B80A5','--accent':'#A78BFA','--accent-light':'rgba(167,139,250,0.15)','--success':'#4ADE80','--warning':'#FBBF24','--danger':'#F87171','--radius':'12px'} },
-  forest: { name:'Forest', dark:false, vars:{'--bg':'#E6F0EB','--bg-card':'#FFFFFF','--bg-elevated':'#D5E8DD','--border':'#C6DDD0','--text':'#1A3A2A','--text-secondary':'#2D5940','--text-muted':'#4A7A5C','--accent':'#16A34A','--accent-light':'#DCFCE7','--success':'#22C55E','--warning':'#F59E0B','--danger':'#EF4444','--radius':'12px'} },
+  forest: { name:'Forest', dark:false, vars:{'--bg':'#E3EBDD','--bg-card':'#FAFCF7','--bg-elevated':'#DAE7D2','--border':'#CCDCC1','--text':'#1E3325','--text-secondary':'#33543C','--text-muted':'#5E7D64','--accent':'#2F8F5B','--accent-light':'#DCEFE0','--success':'#2FA35C','--warning':'#D9902B','--danger':'#D4574E','--radius':'12px'} },
   ocean: { name:'Ocean', dark:true, vars:{'--bg':'#0C1222','--bg-card':'#131D33','--bg-elevated':'#1A2844','--border':'#1E3055','--text':'#E0E8F5','--text-secondary':'#B0C4E0','--text-muted':'#6B8DBB','--accent':'#0EA5E9','--accent-light':'rgba(14,165,233,0.15)','--success':'#34D399','--warning':'#FBBF24','--danger':'#FB7185','--radius':'12px'} },
   rose: { name:'Rose', dark:false, vars:{'--bg':'#FEE2E8','--bg-card':'#FFFFFF','--bg-elevated':'#FECDD3','--border':'#FECDD3','--text':'#4C0519','--text-secondary':'#881337','--text-muted':'#BE185D','--accent':'#E11D48','--accent-light':'#FFE4E6','--success':'#22C55E','--warning':'#F59E0B','--danger':'#EF4444','--radius':'12px'} },
   sand: { name:'Sand', dark:false, vars:{'--bg':'#F0EBE1','--bg-card':'#FFFFFF','--bg-elevated':'#E8E0D0','--border':'#D4C9B8','--text':'#3D3425','--text-secondary':'#5C503C','--text-muted':'#8C7D66','--accent':'#B45309','--accent-light':'#FEF3C7','--success':'#22C55E','--warning':'#F59E0B','--danger':'#EF4444','--radius':'12px'} },
@@ -95,6 +95,16 @@ function applyTheme(themeId) {
   // Update meta theme-color
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', theme.vars['--accent'] || '#818CF8');
+
+  // Liquid-glass translucency (mirrors the desktop slider, synced via settings).
+  applyGlassStrength();
+}
+
+// Reflect the synced Liquid Glass translucency (0 = frosted, 1 = fully see-through).
+function applyGlassStrength() {
+  const s = (typeof data !== 'undefined' && typeof data.settings?.glassStrength === 'number')
+    ? data.settings.glassStrength : 0.5;
+  document.documentElement.style.setProperty('--glass-strength', String(Math.max(0, Math.min(1, s))));
 }
 
 // ===================== PUSH NOTIFICATIONS =====================
@@ -305,6 +315,8 @@ function setupListeners(uid) {
     if (d.theme && COLOR_THEMES[d.theme]) {
       applyTheme(d.theme);
     }
+    // Apply synced Liquid Glass translucency (even when the theme didn't change).
+    applyGlassStrength();
     // Show/hide printer tab based on setting
     const printerNav = document.querySelector('.nav-item[data-view="printer"]');
     if (printerNav) printerNav.style.display = d.printerEnabled ? '' : 'none';

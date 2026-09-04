@@ -7417,6 +7417,49 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
   margin: -8px 0 12px;
 }
 
+/* Range-slider setting row (e.g. Liquid Glass translucency) */
+.settings-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 460px;
+}
+.settings-slider-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted, #64748B);
+  white-space: nowrap;
+}
+.settings-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border-color, #E2E8F0);
+  outline: none;
+  cursor: pointer;
+}
+.settings-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent, #3B82F6);
+  border: 2px solid var(--bg-card, #fff);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  cursor: pointer;
+}
+.settings-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent, #3B82F6);
+  border: 2px solid var(--bg-card, #fff);
+  cursor: pointer;
+}
+
 /* ── Tabbed settings layout ─────────────────────────────────────────────── */
 .settings-tabbed { max-width: 1080px; margin: 0 auto; padding: 0; display: flex; gap: 0; align-items: flex-start; }
 .settings-nav {
@@ -8046,6 +8089,35 @@ body.style-neon .sticky-note:hover {
  * prismatic rainbow edges. Water droplets cling to the pane. Depth
  * comes from layered blur and transparency.
  */
+/* Liquid-glass translucency slider (Settings → Appearance → Liquid Glass).
+   --glass-strength runs 0 (frosted / most opaque) → 1 (surfaces fully
+   translucent, so only text + borders remain). JS sets it inline on :root;
+   the 0.5 fallback keeps a sensible mid-frost when unset. These override the
+   theme's inline --bg-* vars for everything inside <body>, while --bg-primary
+   (the backdrop) and --border-color (the visible edges) stay from the theme. */
+body.style-glass {
+  --glass-k: calc(1 - var(--glass-strength, 0.5));
+  --glass-tint: 255, 255, 255;
+  --bg-secondary: rgba(var(--glass-tint), calc(0.42 * var(--glass-k)));
+  --bg-sidebar:   rgba(var(--glass-tint), calc(0.42 * var(--glass-k)));
+  --bg-header:    rgba(var(--glass-tint), calc(0.50 * var(--glass-k)));
+  --bg-card:      rgba(var(--glass-tint), calc(0.55 * var(--glass-k)));
+  --bg-input:     rgba(var(--glass-tint), calc(0.50 * var(--glass-k)));
+  --bg-hover:     rgba(var(--glass-tint), calc(0.72 * var(--glass-k)));
+  --sidebar-bg:   var(--bg-sidebar);
+  --header-bg:    var(--bg-header);
+}
+/* White tint over a dark base washes out fast, so dark glass uses much lower
+   base alphas (still scaled to 0 at max strength). */
+body.style-glass.theme-dark {
+  --bg-secondary: rgba(var(--glass-tint), calc(0.10 * var(--glass-k)));
+  --bg-sidebar:   rgba(var(--glass-tint), calc(0.09 * var(--glass-k)));
+  --bg-header:    rgba(var(--glass-tint), calc(0.12 * var(--glass-k)));
+  --bg-card:      rgba(var(--glass-tint), calc(0.15 * var(--glass-k)));
+  --bg-input:     rgba(var(--glass-tint), calc(0.12 * var(--glass-k)));
+  --bg-hover:     rgba(var(--glass-tint), calc(0.24 * var(--glass-k)));
+}
+
 body.style-glass #main-content { position: relative; }
 body.style-glass #main-content::before {
   content: '';
@@ -8117,36 +8189,7 @@ body.style-nord #main-content::before {
   pointer-events: none;
   z-index: 0;
 }
-/* fine snow particles drifting down */
-body.style-nord #main-content::after {
-  content: '';
-  position: fixed;
-  width: 3px; height: 3px;
-  border-radius: 50%;
-  top: -10%;
-  left: 0;
-  background: transparent;
-  box-shadow:
-    50px 0 0 0 rgba(236,239,244,0.3),
-    200px 20px 0 -0.5px rgba(216,222,233,0.2),
-    350px 10px 0 0 rgba(236,239,244,0.25),
-    500px 30px 0 -0.5px rgba(216,222,233,0.15),
-    650px 5px 0 0 rgba(236,239,244,0.2),
-    800px 25px 0 -0.5px rgba(216,222,233,0.25),
-    950px 15px 0 0 rgba(236,239,244,0.18),
-    120px 100px 0 0 rgba(216,222,233,0.22),
-    270px 80px 0 -0.5px rgba(236,239,244,0.15),
-    430px 110px 0 0 rgba(216,222,233,0.2),
-    580px 90px 0 -0.5px rgba(236,239,244,0.25),
-    730px 105px 0 0 rgba(216,222,233,0.18),
-    880px 85px 0 -0.5px rgba(236,239,244,0.22),
-    1030px 95px 0 0 rgba(216,222,233,0.15),
-    180px 190px 0 0 rgba(236,239,244,0.2),
-    330px 175px 0 -0.5px rgba(216,222,233,0.18);
-  animation: nord-snow 18s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-}
+/* (Falling snow removed by request — the aurora glow above carries the theme.) */
 @keyframes aurora-drift {
   0% {
     background: linear-gradient(180deg,
@@ -8167,12 +8210,6 @@ body.style-nord #main-content::after {
     transform: translateX(30px) scaleX(1.05);
   }
 }
-@keyframes nord-snow {
-  0% { transform: translateY(0) translateX(0); }
-  50% { transform: translateY(55vh) translateX(15px); }
-  100% { transform: translateY(110vh) translateX(-5px); }
-}
-
 /*
  * ROSE — A garden at golden hour. Soft petals drift through warm air.
  * Morning dew catches the light in tiny sparkles. Flowers bloom in
@@ -8498,10 +8535,10 @@ body.style-brutalist #main-content::before {
 }
 /* hazard stripe accent at top */
 body.style-brutalist #header {
-  border-bottom-color: #FF3300 !important;
+  border-bottom-color: var(--accent) !important;
 }
 body.style-brutalist #sidebar {
-  border-right: 3px solid #000000;
+  border-right: 3px solid var(--border-color);
 }
 
 /*
@@ -8638,81 +8675,84 @@ body.style-brutalist .note-due-tag,
 body.style-brutalist .note-link-chip {
   border-radius: 0 !important;
 }
+/* Colors below are driven by the (now toned-down) theme vars — charcoal
+   var(--border-color) instead of pure black, var(--accent) for the calmer red —
+   so Brutalist stays hard-edged without searing contrast on HDR/OLED. */
 body.style-brutalist #header {
-  background: #000000;
-  color: #FFFFF0;
+  background: var(--bg-header);
+  color: var(--bg-primary);
 }
 body.style-brutalist .header-brand {
   background: none;
-  -webkit-text-fill-color: #FF3300;
+  -webkit-text-fill-color: var(--accent);
   font-weight: 900;
   text-transform: uppercase;
 }
 body.style-brutalist .header-btn {
-  background: #FF3300;
-  color: #FFFFF0;
-  box-shadow: 2px 2px 0px #000000;
+  background: var(--accent);
+  color: var(--bg-primary);
+  box-shadow: 2px 2px 0px var(--border-color);
 }
 body.style-brutalist .header-btn:hover {
-  background: #CC2900;
+  background: var(--accent-hover);
 }
 body.style-brutalist .header-tab {
-  color: #999980;
+  color: var(--text-faint);
   font-weight: 600;
   padding: 6px 9px;
   font-size: 11px;
 }
 body.style-brutalist .header-tab.active {
-  background: #FF3300;
-  color: #FFFFF0;
+  background: var(--accent);
+  color: var(--bg-primary);
 }
 body.style-brutalist .header-tab:hover:not(.active) {
-  color: #FFFFF0;
-  background: #333322;
+  color: var(--bg-primary);
+  background: var(--text-secondary);
 }
 body.style-brutalist .sticky-note {
-  border: 3px solid #000000 !important;
-  box-shadow: 4px 4px 0px #000000;
+  border: 3px solid var(--border-color) !important;
+  box-shadow: 4px 4px 0px var(--border-color);
 }
 body.style-brutalist .sticky-note:hover {
-  box-shadow: 6px 6px 0px #000000 !important;
+  box-shadow: 6px 6px 0px var(--border-color) !important;
   transform: translate(-2px, -2px) !important;
 }
 body.style-brutalist .btn-add-main {
-  background: #FF3300;
-  border: 3px solid #000000;
-  box-shadow: 3px 3px 0px #000000;
+  background: var(--accent);
+  border: 3px solid var(--border-color);
+  box-shadow: 3px 3px 0px var(--border-color);
   font-weight: 900;
   text-transform: uppercase;
 }
 body.style-brutalist .btn-add-main:hover {
-  background: #CC2900;
-  box-shadow: 5px 5px 0px #000000;
+  background: var(--accent-hover);
+  box-shadow: 5px 5px 0px var(--border-color);
   transform: translate(-2px, -2px);
 }
 body.style-brutalist .filter-chip {
-  border: 2px solid #000000;
+  border: 2px solid var(--border-color);
   font-weight: 800;
 }
 body.style-brutalist .filter-chip.active {
-  background: #000000;
-  color: #FFFFF0;
-  box-shadow: 2px 2px 0px #FF3300;
+  background: var(--border-color);
+  color: var(--bg-primary);
+  box-shadow: 2px 2px 0px var(--accent);
 }
 body.style-brutalist .sidebar-item.active {
-  background: #000000;
-  color: #FF3300;
+  background: var(--border-color);
+  color: var(--accent);
   font-weight: 900;
 }
 body.style-brutalist .stats-card {
-  border: 3px solid #000000;
-  box-shadow: 4px 4px 0px #000000;
+  border: 3px solid var(--border-color);
+  box-shadow: 4px 4px 0px var(--border-color);
 }
 body.style-brutalist .settings-theme-card {
   border-width: 3px;
 }
 body.style-brutalist .progress-bar-fill {
-  background: #FF3300;
+  background: var(--accent);
 }
 
 /* Soft style - extra rounded, pillowy feel */
@@ -9943,7 +9983,7 @@ body.style-highcontrast :focus-visible {
    behind/through the (translucent) cards, the way a background effect should be. */
 body.style-glass, body.style-dark, body.style-nord, body.style-gradient,
 body.style-neon, body.style-hacker, body.style-grunge { background: var(--bg-primary); }
-body.style-forest { background: linear-gradient(175deg, #F0F7F4 0%, #E6F0EB 40%, #D5E8DD 100%); }
+body.style-forest { background: linear-gradient(175deg, #EEF3EA 0%, #E3EBDD 45%, #D6E5CD 100%); }
 body.style-rose   { background: linear-gradient(170deg, #FFF5F7 0%, #FEE2E8 50%, #FFF1F2 100%); }
 body.style-sand   { background: linear-gradient(170deg, #FAF7F2 0%, #F0EBE1 40%, #E8E0D0 100%); }
 
@@ -10504,14 +10544,16 @@ body.style-hacker .filter-chip.active {
   color: #00FF41;
 }
 
-/* ── GLASS enhanced ──────────────────────────────────────────────────────── */
+/* ── GLASS enhanced ──────────────────────────────────────────────────────────
+   Surfaces use the theme + slider-driven vars (not hardcoded white) so the
+   translucency slider works and dark glass no longer washes out to light gray. */
 body.style-glass .sticky-note {
   backdrop-filter: blur(12px) saturate(1.4) !important;
-  background: rgba(255,255,255,0.55) !important;
-  border: 1.5px solid rgba(255,255,255,0.7) !important;
+  background: var(--bg-card) !important;
+  border: 1.5px solid var(--border-color) !important;
   box-shadow:
     0 4px 16px rgba(100,120,180,0.1),
-    inset 0 1px 0 rgba(255,255,255,0.9),
+    inset 0 1px 0 rgba(255,255,255,0.18),
     inset 0 -1px 0 rgba(0,0,0,0.04) !important;
   transition: transform 0.3s ease, box-shadow 0.3s ease !important;
 }
@@ -10519,13 +10561,13 @@ body.style-glass .sticky-note:hover {
   transform: translateY(-3px) !important;
   box-shadow:
     0 8px 28px rgba(100,120,180,0.18),
-    inset 0 1px 0 rgba(255,255,255,0.95),
-    0 0 0 1.5px rgba(255,255,255,0.8) !important;
+    inset 0 1px 0 rgba(255,255,255,0.22),
+    0 0 0 1.5px var(--border-color) !important;
 }
 body.style-glass .modal-box {
   backdrop-filter: blur(20px) saturate(1.6) !important;
-  background: rgba(255,255,255,0.65) !important;
-  border: 1.5px solid rgba(255,255,255,0.8) !important;
+  background: var(--bg-card) !important;
+  border: 1.5px solid var(--border-color) !important;
 }
 body.style-glass .btn-add-main {
   backdrop-filter: blur(8px);

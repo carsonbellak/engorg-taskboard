@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.2.0': {
+      title: "What's new",
+      intro: 'A pass over the themes — cleaner looks and a new way to tune the glass.',
+      slides: [
+        { emoji: '🫧', title: 'Liquid Glass slider', body: 'Settings → Appearance → Liquid Glass lets you dial how see-through the panels are — from frosted all the way to fully translucent, leaving just text and borders.' },
+        { emoji: '🌙', title: 'Liquid Glass Dark, fixed', body: 'Dark glass no longer washes out to light-gray panels — surfaces now stay properly dark and frosted with a cleaner cool glow.' },
+        { emoji: '🎨', title: 'Calmer themes', body: 'Brutalist is toned down for HDR/OLED, Neon lost its floating orbs, Nord lost the snow (and its notes now match the palette), and Forest is a calmer sage/pine with no more falling leaves.' },
+      ],
+    },
     '1.1.5': {
       title: "What's new",
       intro: 'A friendlier first run and a clearer way to keep up with updates.',

@@ -18,8 +18,22 @@ const STICKY_COLORS_DARK = [
   { bg: '#3A2410', border: '#C06820', label: 'Orange' },
 ];
 
+// Nord-specific palette: Polar Night backgrounds tinted toward each Aurora accent,
+// with Aurora/Frost borders, so notes read as part of the Nord palette instead of
+// the generic dark tints. Slots stay in the same order (Yellow/Green/Blue/Red/
+// Purple/Orange) so category→color mapping is unchanged.
+const STICKY_COLORS_NORD = [
+  { bg: '#3D3A2A', border: '#EBCB8B', label: 'Yellow' }, // Aurora yellow
+  { bg: '#333D31', border: '#A3BE8C', label: 'Green' },  // Aurora green
+  { bg: '#2F3B47', border: '#88C0D0', label: 'Blue' },   // Frost
+  { bg: '#3E2F32', border: '#BF616A', label: 'Red' },    // Aurora red
+  { bg: '#393143', border: '#B48EAD', label: 'Purple' }, // Aurora purple
+  { bg: '#3F342B', border: '#D08770', label: 'Orange' }, // Aurora orange
+];
+
 // Dynamic getter picks the right palette based on current theme
 function getStickyColors() {
+  if (document.body.dataset.theme === 'nord') return STICKY_COLORS_NORD;
   return document.body.classList.contains('theme-dark') ? STICKY_COLORS_DARK : STICKY_COLORS_LIGHT;
 }
 

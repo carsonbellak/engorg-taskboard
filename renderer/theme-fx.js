@@ -200,127 +200,14 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  FOREST — Swaying Branches + Falling Leaves
+  //  FOREST — Soft dappled light only
+  //  (Falling leaves + swaying branches were removed — they read as busy /
+  //  cluttered; the calm dappled-light glow is what makes the theme feel like
+  //  a forest.)
   // ══════════════════════════════════════════════════════════════════════
-  function leafSvgPath() {
-    return 'M 0 0 C -10 -8 -14 -28 0 -38 C 14 -28 10 -8 0 0 Z';
-  }
-
   function initForest(layer) {
-    // Build a branch cluster SVG
-    function makeBranch(mirror) {
-      const svg = svgNS('svg', { viewBox: '0 0 220 420', width: 200, height: 380 });
-      svg.style.cssText = `position:fixed;${mirror ? 'right:-45px' : 'left:-45px'};top:0;pointer-events:none;z-index:0;opacity:0.45;${mirror ? 'transform:scaleX(-1)' : ''}`;
-
-      const trunks = [
-        { d: 'M 20 420 C 40 320 60 260 80 200', sw: 8 },
-        { d: 'M 80 200 C 100 150 140 120 170 90', sw: 5 },
-        { d: 'M 80 200 C 60 170 50 140 40 110', sw: 4 },
-        { d: 'M 40 110 C 30 90 20 70 10 50', sw: 3 },
-        { d: 'M 170 90 C 185 65 195 45 210 20', sw: 3 },
-      ];
-      trunks.forEach(t => {
-        svg.appendChild(svgNS('path', {
-          d: t.d, stroke: '#5D4037', 'stroke-width': t.sw,
-          fill: 'none', 'stroke-linecap': 'round',
-        }));
-      });
-
-      const leafClusters = [
-        { x: 168, y: 88, count: 8, r: 28 },
-        { x: 40,  y: 108, count: 6, r: 22 },
-        { x: 10,  y: 48, count: 5, r: 20 },
-        { x: 210, y: 20, count: 7, r: 25 },
-        { x: 80,  y: 55, count: 4, r: 18 },
-      ];
-      const leafColors = ['#2D6A4F','#40916C','#52B788','#74C69D','#1B4332','#081C15'];
-
-      leafClusters.forEach(cl => {
-        for (let i = 0; i < cl.count; i++) {
-          const lx  = cl.x + (Math.random() - 0.5) * cl.r * 2;
-          const ly  = cl.y + (Math.random() - 0.5) * cl.r * 2;
-          const rot = Math.random() * 360;
-          const sc  = 0.6 + Math.random() * 0.8;
-          const g   = svgNS('g', { transform: `translate(${lx.toFixed(1)} ${ly.toFixed(1)}) rotate(${rot.toFixed(0)}) scale(${sc.toFixed(2)})` });
-          g.appendChild(svgNS('path', {
-            d: leafSvgPath(),
-            fill: leafColors[Math.floor(Math.random() * leafColors.length)],
-            opacity: (0.75 + Math.random() * 0.25).toFixed(2),
-          }));
-          svg.appendChild(g);
-        }
-      });
-
-      // SVG sway animation anchored at trunk base
-      const anim = svgNS('animateTransform', {
-        attributeName: 'transform',
-        type: 'rotate',
-        from: mirror ? '2 220 420' : '-2 0 420',
-        to:   mirror ? '-3 220 420' : '3 0 420',
-        dur: (3.5 + Math.random()).toFixed(1) + 's',
-        repeatCount: 'indefinite',
-        additive: 'sum',
-        calcMode: 'spline',
-        keySplines: '0.45 0 0.55 1',
-        keyTimes: '0;1',
-      });
-      svg.appendChild(anim);
-      return svg;
-    }
-
-    layer.appendChild(makeBranch(false));
-    layer.appendChild(makeBranch(true));
-
-    // Seed initial falling leaves mid-screen
-    for (let i = 0; i < 14; i++) spawnLeaf(layer, true, 'forest');
-
-    // Continuous spawning
-    ival(() => {
-      if (document.body.dataset.theme !== 'forest') return;
-      spawnLeaf(layer, false, 'forest');
-    }, 2200);
-
-    // Dappled light pulse overlay
     const dapple = div('theme-forest-dapple', '');
     layer.appendChild(dapple);
-  }
-
-  function spawnLeaf(layer, instant, themeId) {
-    const colors = ['#2D6A4F','#40916C','#52B788','#74C69D','#95D5B2','#1B4332'];
-    const size   = 18 + Math.random() * 24;
-    const sx     = Math.random() * window.innerWidth;
-    const dur    = 9 + Math.random() * 14;
-    const sy     = instant ? -(Math.random() * window.innerHeight) : -55;
-
-    const svg = svgNS('svg', { width: size, height: size * 2, viewBox: '-15 -40 30 42' });
-    svg.style.cssText = `position:fixed;left:${sx}px;top:${sy}px;pointer-events:none;z-index:0;opacity:${(0.5 + Math.random() * 0.5).toFixed(2)};`;
-    svg.appendChild(svgNS('path', {
-      d: leafSvgPath(),
-      fill: colors[Math.floor(Math.random() * colors.length)],
-    }));
-
-    // Leaf stem
-    svg.appendChild(svgNS('line', {
-      x1: '0', y1: '0', x2: '0', y2: '6',
-      stroke: '#5D4037', 'stroke-width': '1.5', 'stroke-linecap': 'round',
-    }));
-    pickLayer(FRONT_DENSE).appendChild(svg);
-
-    const t0   = performance.now() + (instant ? -Math.random() * dur * 1000 : 0);
-    const drift = (Math.random() - 0.5) * 250;
-    const spin  = (Math.random() > 0.5 ? 1 : -1) * (100 + Math.random() * 200);
-
-    function animate(ts) {
-      const p = (ts - t0) / (dur * 1000);
-      if (p < 0) { requestAnimationFrame(animate); return; }
-      if (p > 1 || document.body.dataset.theme !== themeId) { svg.remove(); return; }
-      const y  = sy + p * (window.innerHeight + 80);
-      const x  = Math.sin(p * Math.PI * 3.5) * 45 + drift * p;
-      const r  = spin * p;
-      svg.style.transform = `translate(${x.toFixed(1)}px, ${(y - sy).toFixed(1)}px) rotate(${r.toFixed(1)}deg)`;
-      requestAnimationFrame(animate);
-    }
-    requestAnimationFrame(animate);
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -458,64 +345,9 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  NORD — Crystalline Snowflakes
+  //  NORD — no particles. The aurora glow (CSS #main-content::before) carries
+  //  the theme; the falling snowflakes were removed by request.
   // ══════════════════════════════════════════════════════════════════════
-  function initNord(layer) {
-    for (let i = 0; i < 28; i++) spawnSnowflake(layer, true);
-    ival(() => {
-      if (document.body.dataset.theme !== 'nord') return;
-      spawnSnowflake(layer, false);
-    }, 1800);
-  }
-
-  function spawnSnowflake(layer, instant) {
-    const size = 10 + Math.random() * 20;
-    const sx   = Math.random() * window.innerWidth;
-    const sy   = instant ? -(Math.random() * window.innerHeight) : -35;
-    const dur  = 16 + Math.random() * 22;
-
-    const svg = svgNS('svg', { width: size, height: size, viewBox: '-10 -10 20 20' });
-    svg.style.cssText = `position:fixed;left:${sx}px;top:${sy}px;pointer-events:none;z-index:0;opacity:${(0.35 + Math.random() * 0.55).toFixed(2)};`;
-
-    const g = svgNS('g', { stroke: '#D8DEE9', 'stroke-linecap': 'round' });
-    for (let a = 0; a < 6; a++) {
-      const ang = (a / 6) * Math.PI * 2;
-      const ex = (Math.cos(ang) * 9).toFixed(2), ey = (Math.sin(ang) * 9).toFixed(2);
-      g.appendChild(svgNS('line', { x1: 0, y1: 0, x2: ex, y2: ey, 'stroke-width': 1.4 }));
-      // Branch bars at 40% and 70%
-      [0.4, 0.72].forEach(frac => {
-        const bx = (Math.cos(ang) * 9 * frac).toFixed(2);
-        const by = (Math.sin(ang) * 9 * frac).toFixed(2);
-        const perp = ang + Math.PI / 2;
-        const bl = 9 * (1 - frac) * 0.45;
-        g.appendChild(svgNS('line', {
-          x1: (parseFloat(bx) + Math.cos(perp) * bl).toFixed(2),
-          y1: (parseFloat(by) + Math.sin(perp) * bl).toFixed(2),
-          x2: (parseFloat(bx) - Math.cos(perp) * bl).toFixed(2),
-          y2: (parseFloat(by) - Math.sin(perp) * bl).toFixed(2),
-          'stroke-width': frac < 0.5 ? 1.2 : 0.9,
-        }));
-      });
-    }
-    g.appendChild(svgNS('circle', { r: 1.5, fill: '#ECEFF4', stroke: 'none' }));
-    svg.appendChild(g);
-    pickLayer(FRONT_DENSE).appendChild(svg);
-
-    const t0   = performance.now() + (instant ? -Math.random() * dur * 1000 : 0);
-    const sw   = Math.sin(Math.random() * Math.PI) * 30;
-    const spin = (Math.random() > 0.5 ? 1 : -1) * 60;
-
-    function animate(ts) {
-      const p = (ts - t0) / (dur * 1000);
-      if (p < 0) { requestAnimationFrame(animate); return; }
-      if (p > 1 || document.body.dataset.theme !== 'nord') { svg.remove(); return; }
-      const y = sy + p * (window.innerHeight + 50);
-      const x = Math.sin(p * Math.PI * 2.5) * sw;
-      svg.style.transform = `translate(${x.toFixed(1)}px,${(y-sy).toFixed(1)}px) rotate(${(spin*p).toFixed(1)}deg)`;
-      requestAnimationFrame(animate);
-    }
-    requestAnimationFrame(animate);
-  }
 
   // ══════════════════════════════════════════════════════════════════════
   //  HACKER — Matrix Data Rain (canvas)
@@ -551,23 +383,11 @@
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  //  NEON — Electric Orbs + Glow Pulses
+  //  NEON — Electric arc only (orbs removed)
   // ══════════════════════════════════════════════════════════════════════
   function initNeon(layer) {
-    const orbs = [
-      { left: '10%',  top: '70%', size: 160, color: '0,255,170', delay: 0 },
-      { left: '80%',  top: '15%', size: 120, color: '0,170,255', delay: 1.5 },
-      { left: '50%',  top: '85%', size: 90,  color: '0,255,170', delay: 3 },
-      { left: '70%',  top: '55%', size: 70,  color: '180,0,255', delay: 2 },
-    ];
-    orbs.forEach(o => {
-      const d = div('theme-neon-orb');
-      d.style.cssText = `left:${o.left};top:${o.top};width:${o.size}px;height:${o.size}px;
-        background:radial-gradient(ellipse at 40% 40%, rgba(${o.color},0.12), transparent 70%);
-        box-shadow: 0 0 ${o.size*0.4}px ${o.size*0.15}px rgba(${o.color},0.1);
-        animation-delay:${o.delay}s;`;
-      layer.appendChild(d);
-    });
+    // (Glowing orbs removed by request — the electric arc + the theme's own
+    // neon glows carry the look without floating "balls".)
 
     // Electric arc SVG
     const arcSvg = svgNS('svg', { viewBox: '0 0 100 60', width: 100, height: 60, class: 'theme-neon-arc' });
@@ -665,7 +485,6 @@
         case 'forest':   initForest(layer);   break;
         case 'rose':     initRose(layer);     break;
         case 'dark':     initDark(layer);     break;
-        case 'nord':     initNord(layer);     break;
         case 'hacker':   initHacker(layer);   break;
         case 'neon':     initNeon(layer);     break;
         case 'glassLight':
