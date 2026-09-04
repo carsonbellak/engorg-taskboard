@@ -227,6 +227,8 @@ body[data-style="glass"] .board-column {
   border-radius: 4px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.18));
 }
 .cal-note-card { cursor: pointer; }
+.cal-work-card .event-title { color: var(--text-secondary, #475569); }
+.cal-work-card .event-time { opacity: 0.75; }
 .cal-note-card.completed .event-title,
 .cal-event-card.completed .event-title { text-decoration: line-through; opacity: 0.6; }
 .cal-note-proj { font-size: 11px; color: var(--text-muted); margin-top: 2px; }

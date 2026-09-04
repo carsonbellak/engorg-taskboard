@@ -72,10 +72,6 @@
           <div id="sidebar-archived-projects"></div>
         </div>
       </div>
-      <div class="sidebar-section">
-        <div class="sidebar-label">DAY</div>
-        <div id="sidebar-days"></div>
-      </div>
       <div id="sidebar-progress" class="sidebar-progress hidden">
         <div class="progress-label">Note progress</div>
         <div class="progress-bar-bg">
@@ -385,12 +381,15 @@
 
   <!-- Modal: Add Project -->
   <div id="modal-add-project" class="modal hidden">
-    <div class="modal-box modal-sm">
+    <div class="modal-box">
       <h2>&#128450; New Project</h2>
       <label class="field-label">Project Name</label>
       <input type="text" id="project-name-input" placeholder="e.g. Mechanical Systems">
       <label class="field-label">Categories</label>
       <div id="project-categories" class="category-checkbox-group"></div>
+      <label class="field-label">Work schedule <span class="field-label-hint">— shown on your calendar</span></label>
+      <button type="button" id="btn-open-schedule-picker" class="btn-open-schedule-picker">&#128197; Set weekly schedule&hellip;</button>
+      <div id="project-schedule-summary" class="project-schedule-summary"></div>
       <label class="field-label">Color</label>
       <input type="color" id="project-color-input" value="#6366F1" class="color-input-full" style="display:none;">
       <div id="project-color-preview" class="project-color-preview"></div>
@@ -398,6 +397,20 @@
       <div class="modal-actions">
         <button id="btn-cancel-project" class="btn-modal-cancel">Cancel</button>
         <button id="btn-save-project" class="btn-modal-primary">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Weekly work-schedule picker (drag to paint the times you work on a project) -->
+  <div id="modal-schedule-picker" class="modal hidden">
+    <div class="modal-box modal-schedule-box">
+      <h2>&#128197; <span id="schedule-picker-title">Weekly Schedule</span></h2>
+      <p class="schedule-picker-hint">Click &amp; drag across the days to paint the hours you work on this project. Drag over a painted area again to erase.</p>
+      <div id="schedule-picker-grid" class="schedule-picker-grid"></div>
+      <div class="modal-actions">
+        <button id="btn-clear-schedule" class="btn-modal-cancel schedule-clear-btn">Clear all</button>
+        <button id="btn-cancel-schedule-picker" class="btn-modal-cancel">Cancel</button>
+        <button id="btn-done-schedule-picker" class="btn-modal-primary">Done</button>
       </div>
     </div>
   </div>

@@ -200,7 +200,8 @@ function formatDateShort(dateStr) {
 
 function formatTime12(timeStr) {
   if (!timeStr) return '';
-  const [h, m] = timeStr.split(':').map(Number);
+  const [rawH, m] = timeStr.split(':').map(Number);
+  const h = ((rawH % 24) + 24) % 24;         // 24:00 (midnight end) → 12:00 AM, not 12:00 PM
   const ampm = h >= 12 ? 'PM' : 'AM';
   const hh = h % 12 === 0 ? 12 : h % 12;
   return hh + ':' + String(m).padStart(2, '0') + ' ' + ampm;

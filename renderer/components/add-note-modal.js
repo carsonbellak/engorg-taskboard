@@ -413,6 +413,196 @@ class ModalManager {
     document.getElementById('project-name-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); this._saveProject(); }
     });
+    document.getElementById('btn-open-schedule-picker').addEventListener('click', () => this._openSchedulePicker());
+    this._bindSchedulePicker();
+  }
+
+  // ============ PROJECT WORK-SCHEDULE (drag-to-paint weekly picker) ============
+  // A project's workSchedule is an array of recurring weekly blocks ({ day, start, end }).
+  // It's edited in a calendar-style grid: the grid is a set of 30-min slots per weekday
+  // that the user paints; on "Done" the painted slots are collapsed back into blocks.
+  static get _SCHED_START() { return 0; }   // grid spans the full 24 hours …
+  static get _SCHED_END()   { return 24; }  // … midnight to midnight
+  static get _SLOT_MIN()      { return 15; } // 15-minute resolution
+  static get _SLOTS_PER_HOUR(){ return 60 / ModalManager._SLOT_MIN; }
+  static get _SLOTS_PER_DAY() { return (ModalManager._SCHED_END - ModalManager._SCHED_START) * ModalManager._SLOTS_PER_HOUR; }
+
+  _slotToTime(slotIdx) {
+    const mins = ModalManager._SCHED_START * 60 + slotIdx * ModalManager._SLOT_MIN;
+    return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+  }
+  _timeToSlot(t) {
+    const [h, m] = (t || '0:0').split(':').map(Number);
+    return Math.round((h * 60 + m - ModalManager._SCHED_START * 60) / ModalManager._SLOT_MIN);
+  }
+
+  // workSchedule blocks → Set of "day|slot" keys
+  _scheduleToSlots(schedule) {
+    const set = new Set();
+    const maxSlot = ModalManager._SLOTS_PER_DAY;
+    (schedule || []).forEach(b => {
+      if (!b || !b.day) return;
+      let s = this._timeToSlot(b.start);
+      let e = this._timeToSlot(b.end || b.start);
+      s = Math.max(0, s); e = Math.min(maxSlot, e);
+      for (let i = s; i < e; i++) set.add(`${b.day}|${i}`);
+    });
+    return set;
+  }
+  // Set of painted slots → workSchedule blocks (contiguous runs per day)
+  _slotsToSchedule(set) {
+    const blocks = [];
+    DAYS.forEach(day => {
+      const slots = [];
+      for (let i = 0; i < ModalManager._SLOTS_PER_DAY; i++) if (set.has(`${day}|${i}`)) slots.push(i);
+      let runStart = null, prev = null;
+      const flush = (end) => { if (runStart !== null) blocks.push({ day, start: this._slotToTime(runStart), end: this._slotToTime(end + 1) }); };
+      slots.forEach(i => {
+        if (runStart === null) { runStart = i; prev = i; }
+        else if (i === prev + 1) { prev = i; }
+        else { flush(prev); runStart = i; prev = i; }
+      });
+      if (runStart !== null) flush(prev);
+    });
+    return blocks;
+  }
+
+  _renderScheduleSummary() {
+    const el = document.getElementById('project-schedule-summary');
+    if (!el) return;
+    const sched = this._workingSchedule || [];
+    if (!sched.length) {
+      el.className = 'project-schedule-summary empty';
+      el.textContent = 'No work schedule set.';
+      return;
+    }
+    const abbr = { Monday: 'Mon', Tuesday: 'Tue', Wednesday: 'Wed', Thursday: 'Thu', Friday: 'Fri', Saturday: 'Sat', Sunday: 'Sun' };
+    const to12 = (t) => (typeof formatTime12 === 'function' ? formatTime12(t) : t);
+    el.className = 'project-schedule-summary';
+    el.innerHTML = sched
+      .slice()
+      .sort((a, b) => DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || (a.start || '').localeCompare(b.start || ''))
+      .map(b => `<span class="schedule-chip"><b>${abbr[b.day] || b.day}</b> ${to12(b.start)}–${to12(b.end)}</span>`)
+      .join('');
+  }
+
+  _bindSchedulePicker() {
+    document.getElementById('btn-cancel-schedule-picker').addEventListener('click', () => this._closeModal('modal-schedule-picker'));
+    document.getElementById('btn-clear-schedule').addEventListener('click', () => {
+      this._pickerSlots = new Set();
+      this._paintScheduleGrid();
+    });
+    document.getElementById('btn-done-schedule-picker').addEventListener('click', () => {
+      this._workingSchedule = this._slotsToSchedule(this._pickerSlots);
+      this._renderScheduleSummary();
+      this._closeModal('modal-schedule-picker');
+    });
+
+    // Drag-to-paint interaction. Uses document-level mousemove + elementFromPoint so a
+    // drag in ANY direction (up/down across hours, left/right across days) reliably paints
+    // every cell the cursor crosses — even on fast drags. Mode (add vs erase) is decided by
+    // the first cell so you can drag to select or drag over a filled area to deselect.
+    const grid = document.getElementById('schedule-picker-grid');
+    let painting = false, mode = 'add', lastKey = null;
+    const cellFromPoint = (x, y) => {
+      const el = document.elementFromPoint(x, y);
+      return el && el.closest ? el.closest('.sched-cell') : null;
+    };
+    const paintCell = (cell) => {
+      if (!cell) return;
+      const day = cell.dataset.day, slot = parseInt(cell.dataset.slot, 10);
+      const key = `${day}|${slot}`;
+      if (key === lastKey) return;      // already handled this cell in the current drag step
+      lastKey = key;
+      if (mode === 'add') this._pickerSlots.add(key); else this._pickerSlots.delete(key);
+      cell.classList.toggle('painted', mode === 'add');
+      // Re-round this cell and its vertical neighbours (run edges shift when one toggles).
+      this._refreshRunEdges(day, slot);
+      this._refreshRunEdges(day, slot - 1);
+      this._refreshRunEdges(day, slot + 1);
+    };
+    grid.addEventListener('mousedown', (e) => {
+      const cell = e.target.closest('.sched-cell');
+      if (!cell) return;
+      e.preventDefault();
+      painting = true;
+      lastKey = null;
+      mode = this._pickerSlots.has(`${cell.dataset.day}|${cell.dataset.slot}`) ? 'erase' : 'add';
+      paintCell(cell);
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!painting) return;
+      paintCell(cellFromPoint(e.clientX, e.clientY));
+    });
+    // End painting wherever the mouse is released.
+    document.addEventListener('mouseup', () => { painting = false; lastKey = null; });
+  }
+
+  _cellEl(day, slot) {
+    const grid = document.getElementById('schedule-picker-grid');
+    return grid ? grid.querySelector(`.sched-cell[data-day="${day}"][data-slot="${slot}"]`) : null;
+  }
+
+  // A painted cell rounds its top when the slot above is empty, and its bottom when the
+  // slot below is empty — so a contiguous run reads as one rounded, padded block.
+  _refreshRunEdges(day, slot) {
+    const cell = this._cellEl(day, slot);
+    if (!cell) return;
+    const on = this._pickerSlots.has(`${day}|${slot}`);
+    cell.classList.toggle('sched-run-top', on && !this._pickerSlots.has(`${day}|${slot - 1}`));
+    cell.classList.toggle('sched-run-bottom', on && !this._pickerSlots.has(`${day}|${slot + 1}`));
+  }
+
+  _openSchedulePicker() {
+    const proj = this._editingProjectId ? this.data.projects.find(p => p.id === this._editingProjectId) : null;
+    this._pickerColor = (proj && proj.color) || '#6366F1';
+    this._pickerSlots = this._scheduleToSlots(this._workingSchedule);
+    const nameVal = (document.getElementById('project-name-input').value || '').trim();
+    document.getElementById('schedule-picker-title').textContent = nameVal ? `Schedule — ${nameVal}` : 'Weekly Schedule';
+    this._buildScheduleGrid();
+    document.getElementById('modal-schedule-picker').classList.remove('hidden');
+    // Open scrolled to ~7 AM so the useful daytime hours are visible first (not midnight).
+    const grid = document.getElementById('schedule-picker-grid');
+    const rowH = grid.querySelector('.sched-hour-col')?.offsetHeight || 31;
+    grid.scrollTop = rowH * (7 - ModalManager._SCHED_START);
+  }
+
+  _buildScheduleGrid() {
+    const grid = document.getElementById('schedule-picker-grid');
+    const START = ModalManager._SCHED_START, END = ModalManager._SCHED_END;
+    const dayAbbr = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    let html = '<div class="sched-corner"></div>';
+    dayAbbr.forEach(d => { html += `<div class="sched-day-head">${d}</div>`; });
+    // Time gutter + 7 day columns; each hour holds four 15-min cells. Alternating hours get
+    // a subtle band (sched-hour-alt) so the grid reads as distinct hour rows; the hour /
+    // half-hour lines come from the column background (see CSS).
+    const perHour = ModalManager._SLOTS_PER_HOUR;
+    for (let h = START; h < END; h++) {
+      const label = h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? '12 PM' : `${h - 12} PM`;
+      const alt = (h % 2 === 1) ? ' sched-hour-alt' : '';
+      html += `<div class="sched-time-label${alt}">${label}</div>`;
+      DAYS.forEach(day => {
+        const base = (h - START) * perHour;   // slot index of :00
+        let cells = '';
+        for (let q = 0; q < perHour; q++) {
+          cells += `<div class="sched-cell" data-day="${day}" data-slot="${base + q}"></div>`;
+        }
+        html += `<div class="sched-hour-col${alt}">${cells}</div>`;
+      });
+    }
+    grid.innerHTML = html;
+    this._paintScheduleGrid();
+  }
+
+  // Reflect this._pickerSlots onto the rendered cells (full repaint: build / clear).
+  _paintScheduleGrid() {
+    const grid = document.getElementById('schedule-picker-grid');
+    if (!grid) return;
+    grid.style.setProperty('--sched-fill', this._pickerColor || '#6366F1');
+    grid.querySelectorAll('.sched-cell').forEach(cell => {
+      cell.classList.toggle('painted', this._pickerSlots.has(`${cell.dataset.day}|${cell.dataset.slot}`));
+      this._refreshRunEdges(cell.dataset.day, parseInt(cell.dataset.slot, 10));
+    });
   }
 
   _updateProjectColorFromCategories() {
@@ -440,12 +630,15 @@ class ModalManager {
       saveBtn.textContent = 'Save Changes';
       document.getElementById('project-name-input').value = editProject.name || '';
       this._populateProjectCategories(editProject.categories || []);
+      this._workingSchedule = (editProject.workSchedule || []).map(b => ({ ...b }));
     } else {
       heading.innerHTML = '&#128450; New Project';
       saveBtn.textContent = 'Create';
       document.getElementById('project-name-input').value = '';
       this._populateProjectCategories([]);
+      this._workingSchedule = [];
     }
+    this._renderScheduleSummary();
     this._updateProjectColorPreview();
 
     document.getElementById('modal-add-project').classList.remove('hidden');
@@ -456,18 +649,19 @@ class ModalManager {
     const name = document.getElementById('project-name-input').value.trim();
     if (!name) return;
     const categories = Array.from(document.querySelectorAll('.project-cat-checkbox:checked')).map(cb => cb.value);
+    const workSchedule = this._workingSchedule || [];
 
     if (this._editingProjectId) {
       const duplicate = this.data.projects.some(p =>
         p.id !== this._editingProjectId && p.name.toLowerCase() === name.toLowerCase()
       );
       if (duplicate) { alert('A project with that name already exists.'); return; }
-      await this.data.updateProject(this._editingProjectId, { name, categories });
+      await this.data.updateProject(this._editingProjectId, { name, categories, workSchedule });
     } else {
       if (this.data.projects.some(p => p.name.toLowerCase() === name.toLowerCase())) {
         alert('Project already exists.'); return;
       }
-      await this.data.addProject({ name, categories });
+      await this.data.addProject({ name, categories, workSchedule });
     }
 
     // Re-assign rainbow colors to all projects

@@ -421,6 +421,21 @@ html.is-embedded .titlebar-drag { -webkit-app-region: no-drag; }
   box-shadow: 0 0 6px currentColor;
 }
 
+/* Vertical-bar indicator variant (Settings → Appearance → Project Indicator). A taller,
+   fuller color accent than the small dot. Applies to the sidebar project + archived rows. */
+body[data-project-indicator="bar"] .sidebar-project-dot {
+  width: 4px;
+  height: 18px;
+  border-radius: 3px;
+  box-shadow: none;
+}
+body[data-project-indicator="bar"] .sidebar-item {
+  align-items: flex-start;
+}
+body[data-project-indicator="bar"] .sidebar-item .sidebar-project-dot {
+  margin-top: 1px;
+}
+
 .sidebar-day {
   width: 100%;
   text-align: left;
@@ -1438,6 +1453,150 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 
 .field-label:first-of-type { margin-top: 0; }
 
+.field-label-hint {
+  font-weight: 500;
+  font-size: 10px;
+  color: var(--text-muted, #94A3B8);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* === PROJECT WORK-SCHEDULE (button + summary in the project modal) === */
+.btn-open-schedule-picker {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px dashed var(--border-color, #CBD5E1);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-open-schedule-picker:hover {
+  border-color: var(--accent, #3B82F6);
+  color: var(--accent, #3B82F6);
+  background: var(--accent-bg, #EFF6FF);
+}
+.project-schedule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+.project-schedule-summary.empty {
+  color: var(--text-muted, #94A3B8);
+  font-size: 12px;
+}
+.project-schedule-summary .schedule-chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-hover, #F1F5F9);
+  color: var(--text-secondary, #475569);
+  white-space: nowrap;
+}
+.project-schedule-summary .schedule-chip b { font-weight: 700; color: var(--text-primary, #1E293B); }
+
+/* === WEEKLY SCHEDULE PICKER (drag-to-paint grid) === */
+.modal-box.modal-schedule-box { max-width: 640px; }
+.schedule-picker-hint {
+  font-size: 12px;
+  color: var(--text-muted, #64748B);
+  margin: 4px 0 14px;
+}
+.schedule-clear-btn { margin-right: auto; }
+
+.schedule-picker-grid {
+  --slot-h: 10px;             /* height of one 15-min cell (4 per hour → 40px/hour) */
+  display: grid;
+  grid-template-columns: 52px repeat(7, 1fr);
+  max-height: 54vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-color, #E2E8F0);
+  border-radius: 10px;
+  user-select: none;
+  background: var(--bg-secondary, #F8FAFC);
+}
+.sched-corner {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-card, #FFFFFF);
+  border-bottom: 1.5px solid var(--border-color, #E2E8F0);
+}
+.sched-day-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-card, #FFFFFF);
+  border-bottom: 1.5px solid var(--border-color, #E2E8F0);
+  border-left: 1px solid var(--border-color, #E2E8F0);
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary, #475569);
+  padding: 7px 0;
+}
+.sched-time-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #475569);
+  text-align: right;
+  padding: 3px 8px 0 0;   /* top-aligned so the label sits at its hour line */
+  line-height: 1;
+  white-space: nowrap;
+}
+/* Legibility comes from alternating HOUR BANDS (each hour is a distinct shaded/unshaded
+   row) plus just two gridlines drawn as the column BACKGROUND — a strong hour line at the
+   top of each band and a faint half-hour line at its middle. No quarter lines: painting
+   still snaps to 15 min, but the grid stays readable. Drawing lines as background (not
+   per-cell borders) means a painted fill fully covers them. */
+.sched-hour-col {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-color, #E2E8F0);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--text-muted, #64748B) 60%, transparent) 1px, transparent 1px),
+    linear-gradient(color-mix(in srgb, var(--text-muted, #64748B) 16%, transparent) 1px, transparent 1px);
+  background-size: 100% calc(var(--slot-h) * 4);
+  background-position: 0 0, 0 calc(var(--slot-h) * 2);
+  background-repeat: repeat-y;
+}
+/* Every other hour gets a subtle band (applied to both the gutter label and the day
+   columns so the whole row reads as one hour). */
+.sched-hour-alt { background-color: color-mix(in srgb, var(--text-muted, #64748B) 11%, transparent); }
+.sched-cell {
+  position: relative;
+  height: var(--slot-h);       /* one 15-minute slot */
+  cursor: pointer;
+  transition: background 0.05s;
+}
+.sched-cell:not(.painted):hover {
+  background: color-mix(in srgb, var(--accent, #3B82F6) 22%, transparent) !important;
+}
+/* Painted fill: inset from the column edges (padding between box + fill) and rounded at
+   the ends of each contiguous run so a multi-cell selection reads as one rounded block. */
+.sched-cell.painted::before {
+  content: '';
+  position: absolute;
+  left: 3px; right: 3px; top: 0; bottom: 0;
+  background: var(--sched-fill, #6366F1);
+  pointer-events: none;
+}
+.sched-cell.painted.sched-run-top::before {
+  top: 1px;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+.sched-cell.painted.sched-run-bottom::before {
+  bottom: 1px;
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+}
+
 .modal-box input[type="text"],
 .modal-box input[type="number"],
 .modal-box input[type="date"],
@@ -1797,10 +1956,15 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 
 .sidebar-project-name {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   min-width: 0;
+  overflow: hidden;
+  /* Multiline: wrap long project names to at most two lines (no mid-view truncation
+     now that the day selector was removed and freed up vertical space). */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
 }
 
 /* === SIDEBAR PROJECT THREE-DOTS MENU === */
@@ -1822,7 +1986,9 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 
 .sidebar-project-row .sidebar-item {
   flex: 1;
+  min-width: 0;           /* allow the item (and its name) to shrink so the ⋯ menu always fits */
   margin-bottom: 0;
+  padding-right: 4px;     /* give the name room; the ⋯ button carries the row's right padding */
 }
 
 .sidebar-project-menu {
@@ -1831,13 +1997,19 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   cursor: pointer;
   font-size: 12px;
   color: var(--text-muted, #64748B);
-  padding: 4px 6px;
+  width: 22px;            /* fixed slot so the ⋯ never gets pushed past the sidebar edge */
+  height: 24px;
+  padding: 0;
+  margin-right: 2px;      /* breathing room from the sidebar's right edge */
   border-radius: 4px;
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
   flex-shrink: 0;
   opacity: 0;
   letter-spacing: 1px;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sidebar-project-row:hover .sidebar-project-menu {
@@ -2266,6 +2438,8 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   transition: all 0.15s;
   border: 2px solid transparent;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .cal-day-cell:hover:not(.cal-empty) {
@@ -2316,6 +2490,9 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cal-event-dot {
@@ -2334,12 +2511,25 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   display: block;
 }
 
+/* Completed items on the month grid: dimmed + struck through, sorted after the rest. */
+.cal-event-dot.cal-event-done { opacity: 0.4; filter: grayscale(0.5); }
+.cal-event-dot.cal-event-done .cal-event-text { text-decoration: line-through; }
+
+/* Month-grid work-session pill: outlined in the project color rather than filled solid. */
+.cal-work-dot {
+  background: color-mix(in srgb, var(--wb-color) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--wb-color) 45%, transparent);
+}
+.cal-work-dot .cal-event-text { color: var(--wb-color); }
+
 .cal-more-events {
   font-size: 10px;
   color: var(--text-muted, #64748B);
   font-weight: 600;
   padding: 1px 4px;
+  flex-shrink: 0;
 }
+.cal-event-dot { flex-shrink: 0; }
 
 /* Selected-day highlight (grid cell / week column head / agenda row) */
 .cal-day-cell.cal-selected {
@@ -2393,6 +2583,8 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .cal-side-empty-icon { font-size: 30px; opacity: 0.5; margin-bottom: 10px; }
 .cal-side-empty-hint { font-size: 11px; opacity: 0.7; margin-top: 6px; }
 .cal-side-note { cursor: pointer; }
+.cal-side-work { cursor: pointer; }
+.cal-side-work .schedule-title { color: var(--text-secondary, #475569); }
 .cal-side .cal-detail-section-label { margin-bottom: 6px; }
 .cal-side-alldone {
   text-align: center;
@@ -2569,6 +2761,8 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   grid-template-columns: 52px repeat(7, 1fr);
   border-bottom: 1.5px solid var(--border-color, #E2E8F0);
   min-height: 28px;
+  max-height: 116px;      /* heavy deadline days scroll instead of shoving the grid down */
+  overflow-y: auto;
   flex-shrink: 0;
 }
 
@@ -2590,6 +2784,8 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;      /* let the 7 equal (1fr) columns stay equal */
+  overflow: hidden;
 }
 
 .cal-week-allday-event {
@@ -2601,6 +2797,9 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;          /* shrink to the column width instead of overflowing it */
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Scrollable body */
@@ -2704,6 +2903,41 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   border-left: 3px solid rgba(255,255,255,0.6);
 }
 
+/* Project work-schedule block — a hatched, translucent "blocked-out time" look so it
+   reads distinctly from solid one-off events and sits behind them. */
+.cal-week-workblock {
+  z-index: 1;
+  background:
+    repeating-linear-gradient(45deg,
+      transparent, transparent 5px,
+      color-mix(in srgb, var(--wb-color) 14%, transparent) 5px,
+      color-mix(in srgb, var(--wb-color) 14%, transparent) 10px),
+    color-mix(in srgb, var(--wb-color) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wb-color) 40%, transparent);
+  border-left: 3px solid var(--wb-color);
+}
+.cal-week-workblock:hover { filter: none; background:
+    repeating-linear-gradient(45deg,
+      transparent, transparent 5px,
+      color-mix(in srgb, var(--wb-color) 22%, transparent) 5px,
+      color-mix(in srgb, var(--wb-color) 22%, transparent) 10px),
+    color-mix(in srgb, var(--wb-color) 20%, transparent); }
+.cal-week-workblock .cal-week-event-title { color: var(--wb-color); }
+.cal-week-workblock .cal-week-event-time  { color: color-mix(in srgb, var(--wb-color) 75%, var(--text-muted, #64748B)); }
+/* A completed occurrence reads as done. */
+.cal-week-workblock-done { opacity: 0.45; }
+.cal-week-workblock-done .cal-week-event-title { text-decoration: line-through; }
+
+/* Week-view deadline chips (all note due-dates live in the top "Due" strip now). */
+.cal-week-note-chip {
+  cursor: pointer;
+  font-weight: 700;
+}
+.cal-week-note-chip.cal-week-note-done {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
 .cal-week-event-title {
   font-size: 11px;
   font-weight: 700;
@@ -2728,10 +2962,11 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .cal-agenda {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 10px;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  padding: 4px 2px 8px;
 }
 
 .cal-agenda-empty {
@@ -2747,21 +2982,29 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   align-items: stretch;
   border-radius: 10px;
   overflow: hidden;
+  border: 1.5px solid var(--border-color, #E2E8F0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  /* The agenda is a fixed-height scroller; without this, flexbox compresses every
+     day card to fit the viewport (the "squashed" rows) instead of letting the list
+     scroll. flex-shrink:0 keeps each card at its natural height. */
+  flex-shrink: 0;
 }
 
 .cal-agenda-today {
-  box-shadow: 0 0 0 2px var(--accent, #3B82F6);
+  border-color: var(--accent, #3B82F6);
+  box-shadow: 0 0 0 1px var(--accent, #3B82F6);
 }
 
 .cal-agenda-date-col {
-  width: 52px;
+  width: 60px;
   flex-shrink: 0;
-  background: var(--bg-card, #FFFFFF);
+  background: var(--bg-hover, #F8FAFC);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding: 10px 6px 8px;
+  justify-content: center;
+  gap: 2px;
+  padding: 10px 6px;
 }
 
 .cal-agenda-dow {
@@ -2785,37 +3028,45 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 
 .cal-agenda-items {
   flex: 1;
+  min-width: 0;
   background: var(--bg-card, #FFFFFF);
   border-left: 1.5px solid var(--border-color, #E2E8F0);
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 4px 0;
+  gap: 2px;
+  padding: 6px;
 }
 
 .cal-agenda-item {
   display: flex;
-  align-items: stretch;
-  min-height: 36px;
+  align-items: center;
+  min-height: 40px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .cal-agenda-note {
   opacity: 0.9;
 }
 
+.cal-agenda-work { cursor: pointer; }
+.cal-agenda-work .cal-agenda-item-title { color: var(--text-secondary, #475569); }
+
 .cal-agenda-item-bar {
   width: 4px;
+  align-self: stretch;
   flex-shrink: 0;
-  border-radius: 0 2px 2px 0;
-  margin: 4px 0;
+  border-radius: 3px;
+  margin: 6px 0 6px 4px;
 }
 
 .cal-agenda-item-content {
   flex: 1;
+  min-width: 0;
   padding: 6px 10px;
   cursor: pointer;
   transition: background 0.12s;
-  border-radius: 0 6px 6px 0;
+  border-radius: 6px;
 }
 
 .cal-agenda-item-content:hover {
@@ -7139,6 +7390,10 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
   font-size: 14px; font-weight: 700; color: var(--text-secondary, #334155);
   margin-bottom: 14px; text-transform: uppercase; letter-spacing: 0.5px;
 }
+.settings-section-hint {
+  font-size: 12px; color: var(--text-muted, #64748B);
+  margin: -8px 0 12px;
+}
 
 /* ── Tabbed settings layout ─────────────────────────────────────────────── */
 .settings-tabbed { max-width: 1080px; margin: 0 auto; padding: 0; display: flex; gap: 0; align-items: flex-start; }
@@ -7291,6 +7546,27 @@ body.compact-sidebar .sidebar-day { font-size: 10px; padding: 3px 6px; }
 .settings-size-lines div:nth-child(1) { width: 70%; }
 .settings-size-lines div:nth-child(2) { width: 50%; }
 .settings-size-lines div:nth-child(3) { width: 60%; }
+
+/* Project-indicator picker (reuses the size-button shell) */
+.settings-indicator-btn {
+  background: var(--bg-card, #FFFFFF); border: 2px solid var(--border-color, #E2E8F0);
+  border-radius: 10px; padding: 12px 18px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  transition: all 0.15s; color: var(--text-secondary, #334155); font-size: 12px; font-weight: 600;
+}
+.settings-indicator-btn:hover { border-color: var(--accent, #3B82F6); }
+.settings-indicator-btn.active { border-color: var(--accent, #3B82F6); background: var(--accent-bg, #EFF6FF); color: var(--accent-text, #2563EB); }
+.settings-indicator-preview {
+  width: 64px; height: 34px; border-radius: 6px; background: var(--bg-hover, #F1F5F9);
+  display: flex; align-items: center; gap: 7px; padding: 0 10px;
+}
+.settings-indicator-sample { flex-shrink: 0; background: #6366F1; }
+.settings-indicator-sample-dot { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 6px #6366F1; }
+.settings-indicator-sample-bar { width: 4px; height: 18px; border-radius: 3px; }
+.settings-indicator-lines { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; flex: 1; }
+.settings-indicator-lines span { height: 3px; background: var(--text-faint, #94A3B8); border-radius: 1px; }
+.settings-indicator-lines span:nth-child(1) { width: 80%; }
+.settings-indicator-lines span:nth-child(2) { width: 55%; }
 
 /* Toggle rows */
 .settings-list { display: flex; flex-direction: column; gap: 2px; }
@@ -10990,23 +11266,38 @@ body.theme-light .syn-builtin { color: #059669; }
 .email-icon-btn:hover { color: var(--accent, #3B82F6); }
 .email-list { flex: 1; overflow-y: auto; min-height: 0; }
 .email-list-item {
-  display: flex; gap: 8px; align-items: stretch;
-  padding: 10px 12px; border-bottom: 1px solid var(--border-light, #F1F5F9);
+  position: relative;
+  display: flex; gap: 11px; align-items: center;
+  padding: 10px 14px 10px 12px; border-bottom: 1px solid var(--border-light, #F1F5F9);
   cursor: pointer; transition: background 0.1s;
 }
 .email-list-item:hover { background: var(--bg-hover, #F1F5F9); }
-.email-list-item.open { background: var(--accent-bg, rgba(59,130,246,0.12)); }
-.email-list-acct { width: 3px; border-radius: 2px; flex-shrink: 0; }
+.email-list-item.open { background: var(--accent-bg, rgba(59,130,246,0.12)); box-shadow: inset 3px 0 0 var(--accent, #3B82F6); }
+.email-list-acct { position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 2px 2px 0; }
+.email-avatar {
+  width: 38px; height: 38px; flex-shrink: 0;
+  border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 15px; line-height: 1;
+  user-select: none;
+}
 .email-list-main { flex: 1; min-width: 0; }
 .email-list-row1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .email-list-from { font-size: 13px; font-weight: 600; color: var(--text-primary, #1E293B); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .email-list-date { font-size: 11px; color: var(--text-faint, #94A3B8); flex-shrink: 0; }
-.email-list-subject { font-size: 12px; color: var(--text-muted, #64748B); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+.email-list-subject { font-size: 12px; color: var(--text-muted, #64748B); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; }
+.email-mark-answered { color: var(--accent, #3B82F6); font-weight: 700; }
+.email-unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #3B82F6); flex-shrink: 0; }
 .email-list-item.unread .email-list-from { font-weight: 800; }
 .email-list-item.unread .email-list-subject { color: var(--text-secondary, #334155); font-weight: 600; }
-.email-list-item.unread .email-list-main::before {
-  content: ''; /* unread accent handled by weight; keep simple */
+
+/* Reading-pane placeholder (no message selected) */
+.email-read-placeholder {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; color: var(--text-faint, #94A3B8); text-align: center; padding: 40px;
 }
+.email-read-placeholder svg { width: 46px; height: 46px; opacity: 0.5; }
+.email-read-placeholder-text { font-size: 14px; font-weight: 600; }
 
 /* Reading pane */
 .email-read-pane { display: flex; flex-direction: column; min-height: 0; background: var(--bg-primary, #fff); }
@@ -11016,6 +11307,88 @@ body.theme-light .syn-builtin { color: #059669; }
   color: var(--text-muted, #64748B); font-size: 13px; line-height: 1.7;
 }
 .email-error { color: var(--danger, #EF4444); }
+
+/* Onboarding screen (shown when no accounts are connected) */
+.email-onboard {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  background: var(--bg-primary, #fff);
+  overflow-y: auto;
+}
+.email-onboard-card {
+  max-width: 460px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.email-onboard-icon {
+  width: 72px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20px;
+  color: var(--accent, #3B82F6);
+  background: var(--accent-bg, rgba(59,130,246,0.12));
+  margin-bottom: 20px;
+}
+.email-onboard-icon svg { width: 40px; height: 40px; }
+.email-onboard-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary, #1E293B);
+  margin: 0 0 8px;
+}
+.email-onboard-sub {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted, #64748B);
+  margin: 0 0 22px;
+}
+.email-onboard-btn {
+  padding: 12px 22px;
+  border: none;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent, #3B82F6), var(--accent-hover, #2563EB));
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: var(--btn-shadow, 0 4px 14px rgba(59,130,246,0.35));
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.email-onboard-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(59,130,246,0.4); }
+.email-onboard-btn:active { transform: translateY(0); }
+.email-onboard-providers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 22px;
+}
+.email-onboard-provider {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #334155);
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color, #E2E8F0);
+  background: var(--bg-secondary, #F8FAFC);
+}
+.email-onboard-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-faint, #94A3B8);
+  margin: 22px 0 0;
+  max-width: 400px;
+}
 .email-read-head { padding: 16px 20px; border-bottom: 1px solid var(--border-color, #E2E8F0); }
 .email-read-subject { font-size: 17px; font-weight: 800; color: var(--text-primary, #1E293B); margin-bottom: 8px; }
 .email-read-meta { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
@@ -11049,6 +11422,8 @@ body.theme-light .syn-builtin { color: #059669; }
 .email-btn-primary:hover { background: var(--accent-hover, #2563EB); color: #fff; }
 .email-btn-ghost { background: transparent; }
 .email-btn-danger:hover { border-color: var(--danger, #EF4444); color: var(--danger, #EF4444); }
+.email-btn-active { border-color: var(--warning, #EAB308); color: var(--warning, #EAB308); background: rgba(234,179,8,0.10); }
+.email-btn-active:hover { border-color: var(--warning, #EAB308); color: var(--warning, #EAB308); }
 
 /* Modals */
 .email-modal-box, .email-compose-box { width: 480px; max-width: 92vw; display: flex; flex-direction: column; gap: 12px; }

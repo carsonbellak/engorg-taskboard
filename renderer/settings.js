@@ -883,6 +883,7 @@ function renderSettings() {
   const container = document.getElementById('view-settings');
   const currentTheme = dataManager.settings.theme || 'default';
   const noteSize = dataManager.settings.noteSize || 'medium';
+  const projIndicator = dataManager.settings.projectIndicator || 'dot';
 
   container.innerHTML = `
     <div class="settings-page settings-tabbed">
@@ -945,6 +946,23 @@ function renderSettings() {
                 <div class="settings-size-lines">
                   <div></div><div></div><div></div>
                 </div>
+              </div>
+              <span>${label}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Sidebar project indicator -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Project Indicator</h3>
+        <p class="settings-section-hint">How each project's color shows in the sidebar.</p>
+        <div class="settings-option-row">
+          ${[['dot', 'Dot'], ['bar', 'Vertical bar']].map(([mode, label]) => `
+            <button class="settings-indicator-btn ${mode === projIndicator ? 'active' : ''}" data-indicator="${mode}">
+              <div class="settings-indicator-preview">
+                <span class="settings-indicator-sample settings-indicator-sample-${mode}"></span>
+                <span class="settings-indicator-lines"><span></span><span></span></span>
               </div>
               <span>${label}</span>
             </button>
@@ -1306,6 +1324,16 @@ function renderSettings() {
       const size = btn.dataset.size;
       document.body.dataset.noteSize = size;
       dataManager.updateSettings({ noteSize: size });
+      renderSettings();
+    });
+  });
+
+  container.querySelectorAll('.settings-indicator-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.indicator;
+      document.body.dataset.projectIndicator = mode;
+      dataManager.updateSettings({ projectIndicator: mode });
+      window.dispatchEvent(new CustomEvent('projects-changed')); // rebuild sidebar
       renderSettings();
     });
   });
@@ -2171,6 +2199,7 @@ function initTheme() {
   applyTheme(theme);
   const noteSize = dataManager.settings.noteSize || 'medium';
   document.body.dataset.noteSize = noteSize;
+  document.body.dataset.projectIndicator = dataManager.settings.projectIndicator || 'dot';
   if (dataManager.settings.staleAnimations === false) {
     document.body.classList.add('no-stale-anim');
   }

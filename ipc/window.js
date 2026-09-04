@@ -2,7 +2,7 @@
 // and the menu actions that the themed titlebar reproduces from the (now hidden)
 // native application menu. See renderer/titlebar.js for the UI.
 
-const { ipcMain, app } = require('electron');
+const { ipcMain, app, screen } = require('electron');
 
 module.exports = function registerWindow(getMainWindow) {
   const win = () => getMainWindow();
@@ -10,11 +10,25 @@ module.exports = function registerWindow(getMainWindow) {
   ipcMain.handle('win:minimize', () => { const w = win(); if (w) w.minimize(); });
   ipcMain.handle('win:maximizeToggle', () => {
     const w = win(); if (!w) return false;
-    if (w.isMaximized()) w.unmaximize(); else w.maximize();
-    return w.isMaximized();
+    const expanded = w.isMaximized() || (typeof w.isWorkAreaSized === 'function' && w.isWorkAreaSized());
+    if (expanded) {
+      if (w.isMaximized()) w.unmaximize();
+      if (w._normalBounds) w.setBounds(w._normalBounds);   // restore pre-maximize size
+      w.webContents.send('win:maximized', false);
+      return false;
+    }
+    // Expand to fill the display work area (respects the taskbar) instead of native maximize.
+    w._normalBounds = w.getBounds();
+    if (typeof w.fitToWorkArea === 'function') w.fitToWorkArea();
+    else w.setBounds(screen.getDisplayMatching(w.getBounds()).workArea);
+    w.webContents.send('win:maximized', true);
+    return true;
   });
   ipcMain.handle('win:close', () => { const w = win(); if (w) w.close(); });
-  ipcMain.handle('win:isMaximized', () => { const w = win(); return !!(w && w.isMaximized()); });
+  ipcMain.handle('win:isMaximized', () => {
+    const w = win();
+    return !!(w && (w.isMaximized() || (typeof w.isWorkAreaSized === 'function' && w.isWorkAreaSized())));
+  });
 
   // Mirror of the native menu roles so the titlebar dropdowns do the same thing.
   ipcMain.handle('appmenu:action', (e, name) => {

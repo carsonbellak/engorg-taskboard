@@ -14,14 +14,14 @@ class EmailView {
     this.loadImages = false;
     this.composeAttachments = [];
     this.built = false;
+    this.shellBuilt = false;        // whether the 3-pane shell (vs the onboarding screen) is mounted
   }
 
   // ── lifecycle ──
   async init() {
-    this._buildShell();
     this._buildModals();
     this.providers = await window.api.email.listProviders().catch(() => ({}));
-    await this._loadAccounts();
+    await this._loadAccounts();   // builds the 3-pane shell, or the onboarding screen if no accounts
     this.built = true;
   }
 
@@ -43,6 +43,7 @@ class EmailView {
 
   // ── shell ──
   _buildShell() {
+    this.shellBuilt = true;
     const root = document.getElementById('view-email');
     root.innerHTML = `
       <div class="email-layout">
@@ -58,9 +59,7 @@ class EmailView {
           </div>
           <div class="email-list" id="email-list"></div>
         </section>
-        <section class="email-read-pane" id="email-read">
-          <div class="email-read-empty">Select a message to read</div>
-        </section>
+        <section class="email-read-pane" id="email-read">${this._placeholderHtml('Select a message to read')}</section>
       </div>`;
 
     root.querySelector('#email-compose').addEventListener('click', () => this._openCompose());
@@ -73,17 +72,42 @@ class EmailView {
   // ── accounts / nav ──
   async _loadAccounts() {
     this.accounts = await window.api.email.listAccounts().catch(() => []);
+    if (this.accounts.length === 0) { this._renderEmptyState(); return; }
+    if (!this.shellBuilt) this._buildShell();   // coming back from the onboarding screen
     this._renderNav();
-    if (this.accounts.length === 0) {
-      document.getElementById('email-list').innerHTML =
-        `<div class="email-empty">No accounts yet.<br>Click <b>+ Add account</b> to connect Gmail, Outlook, or any IMAP mailbox.</div>`;
-      document.getElementById('email-read').innerHTML = `<div class="email-read-empty">No accounts connected</div>`;
-      return;
-    }
     if (this.selection !== 'unified' && !this.accounts.find(a => a.id === this.selection)) {
       this.selection = 'unified';
     }
     this._loadMessages();
+  }
+
+  // Full-panel onboarding shown when no accounts are connected (replaces the old
+  // cramped placeholder wedged into the narrow list column).
+  _renderEmptyState() {
+    this.shellBuilt = false;
+    const root = document.getElementById('view-email');
+    root.innerHTML = `
+      <div class="email-onboard">
+        <div class="email-onboard-card">
+          <div class="email-onboard-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/>
+              <path d="M3 6l9 6.5L21 6"/>
+            </svg>
+          </div>
+          <h2 class="email-onboard-title">Connect your email</h2>
+          <p class="email-onboard-sub">Read, search, and send mail without leaving EngOrg — with Gmail, Outlook / Microsoft&nbsp;365, or any IMAP mailbox.</p>
+          <button class="email-onboard-btn" id="email-onboard-add">&#43;&nbsp; Add an account</button>
+          <div class="email-onboard-providers">
+            <span class="email-onboard-provider">Gmail</span>
+            <span class="email-onboard-provider">Outlook</span>
+            <span class="email-onboard-provider">Microsoft 365</span>
+            <span class="email-onboard-provider">IMAP</span>
+          </div>
+          <p class="email-onboard-hint">Gmail &amp; Outlook use an <b>app password</b> (or Microsoft sign-in) — never your normal password.</p>
+        </div>
+      </div>`;
+    root.querySelector('#email-onboard-add').addEventListener('click', () => this._openAccountModal());
   }
 
   _renderNav() {
@@ -188,28 +212,46 @@ class EmailView {
       listEl.innerHTML = `<div class="email-empty">No messages</div>`;
       return;
     }
-    // Group consecutive messages by threadKey for light threading.
     listEl.innerHTML = this.messages.map(m => {
       const open = this.openMsg && this.openMsg.accountId === m.accountId && this.openMsg.uid === m.uid && this.openMsg.folder === m.folder;
       const who = m.from ? (m.from.name || m.from.address) : '(unknown)';
       const acctTag = (this.selection === 'unified' && m.accountColor)
         ? `<span class="email-list-acct" style="background:${this._esc(m.accountColor)}"></span>` : '';
+      const initial = this._avatarInitial(m.from && m.from.name, m.from && m.from.address);
+      const avColor = this._avatarColor((m.from && (m.from.address || m.from.name)) || who);
+      const markers = `${m.flagged ? '<span class="email-mark-flag">&#11088;</span> ' : ''}${m.answered ? '<span class="email-mark-answered" title="Replied">&#8617;</span> ' : ''}`;
       return `<div class="email-list-item ${m.seen ? '' : 'unread'} ${open ? 'open' : ''}"
                    data-acct="${this._esc(m.accountId)}" data-folder="${this._esc(m.folder)}" data-uid="${m.uid}">
         ${acctTag}
+        <div class="email-avatar" style="background:${avColor}">${this._esc(initial)}</div>
         <div class="email-list-main">
           <div class="email-list-row1">
             <span class="email-list-from">${this._esc(who)}</span>
             <span class="email-list-date">${this._fmtDate(m.date)}</span>
           </div>
-          <div class="email-list-subject">${m.flagged ? '&#11088; ' : ''}${this._esc(m.subject)}</div>
+          <div class="email-list-subject">${markers}${this._esc(m.subject)}</div>
         </div>
+        ${m.seen ? '' : '<span class="email-unread-dot" title="Unread"></span>'}
       </div>`;
     }).join('');
 
     listEl.querySelectorAll('.email-list-item').forEach(el => {
       el.addEventListener('click', () => this._open(el.dataset.acct, el.dataset.folder, parseInt(el.dataset.uid, 10)));
     });
+  }
+
+  // Deterministic avatar for a sender: first letter + a colour hashed from the address.
+  _avatarInitial(name, address) {
+    const src = String(name || address || '?').trim();
+    const ch = src.replace(/[^A-Za-z0-9]/g, '').charAt(0);
+    return (ch || '?').toUpperCase();
+  }
+  _avatarColor(seed) {
+    const palette = ['#3B82F6', '#8B5CF6', '#EC4899', '#F97316', '#0EA5E9', '#22C55E', '#14B8A6', '#6366F1', '#F43F5E', '#EAB308'];
+    const s = String(seed || '?');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return palette[h % palette.length];
   }
 
   async _search(query) {
@@ -229,7 +271,7 @@ class EmailView {
   // ── reading pane ──
   async _open(accountId, folder, uid) {
     this.openMsg = { accountId, folder, uid };
-    this.loadImages = false;
+    this.loadImages = true;   // images load by default now; a toggle can block them
     const pane = document.getElementById('email-read');
     pane.innerHTML = `<div class="email-loading">Loading message…</div>`;
     this._renderList(); // highlight + clear unread
@@ -246,9 +288,14 @@ class EmailView {
 
   _renderMessage(msg, accountId, folder, uid) {
     const pane = document.getElementById('email-read');
+    this.openMsgData = msg;   // kept so action toggles (flag/images) can re-render in place
     const fromName = msg.from ? (msg.from.name || msg.from.address) : '(unknown)';
     const fromAddr = msg.from ? msg.from.address : '';
     const toLine = msg.to.map(t => this._esc(t.name || t.address)).join(', ');
+    const listItem = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
+    const isFlagged = !!(listItem && listItem.flagged);
+    const folders = this.foldersByAccount[accountId] || [];
+    const archiveFolder = (folders.find(f => f.specialUse === '\\Archive') || {}).path;
 
     const attachHtml = msg.attachments.length ? `
       <div class="email-attachments">
@@ -271,8 +318,11 @@ class EmailView {
           <button class="email-btn" data-act="reply">&#8617; Reply</button>
           <button class="email-btn" data-act="replyAll">&#8617; Reply All</button>
           <button class="email-btn" data-act="forward">&#8618; Forward</button>
+          <button class="email-btn ${isFlagged ? 'email-btn-active' : ''}" data-act="flag">${isFlagged ? '&#11088; Flagged' : '&#9734; Flag'}</button>
+          <button class="email-btn" data-act="unread">&#9993; Mark unread</button>
+          ${archiveFolder ? `<button class="email-btn" data-act="archive">&#128230; Archive</button>` : ''}
           <button class="email-btn email-btn-danger" data-act="delete">&#128465; Delete</button>
-          ${(msg.html && !this.loadImages) ? `<button class="email-btn email-btn-ghost" data-act="images">Load remote images</button>` : ''}
+          ${msg.html ? `<button class="email-btn email-btn-ghost" data-act="images">${this.loadImages ? 'Block images' : 'Load images'}</button>` : ''}
         </div>
         ${attachHtml}
       </div>
@@ -288,7 +338,10 @@ class EmailView {
         else if (act === 'replyAll') this._openCompose({ mode: 'replyAll', msg, accountId });
         else if (act === 'forward') this._openCompose({ mode: 'forward', msg, accountId });
         else if (act === 'delete') this._deleteOpen(accountId, folder, uid);
-        else if (act === 'images') { this.loadImages = true; this._renderMessage(msg, accountId, folder, uid); }
+        else if (act === 'flag') this._toggleFlag(accountId, folder, uid);
+        else if (act === 'unread') this._markUnread(accountId, folder, uid);
+        else if (act === 'archive') this._archiveOpen(accountId, folder, uid, archiveFolder);
+        else if (act === 'images') { this.loadImages = !this.loadImages; this._renderMessage(msg, accountId, folder, uid); }
       });
     });
     pane.querySelectorAll('.email-attach-chip').forEach(chip => {
@@ -317,10 +370,49 @@ class EmailView {
   async _deleteOpen(accountId, folder, uid) {
     try {
       await window.api.email.deleteMessage(accountId, folder, uid);
-      this.openMsg = null;
-      document.getElementById('email-read').innerHTML = `<div class="email-read-empty">Message deleted</div>`;
+      this.openMsg = null; this.openMsgData = null;
+      document.getElementById('email-read').innerHTML = this._placeholderHtml('Message deleted');
       this._loadMessages();
     } catch (err) { alert('Delete failed: ' + err.message); }
+  }
+
+  // Star / unstar the open message and reflect it in the list + button.
+  async _toggleFlag(accountId, folder, uid) {
+    const item = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
+    const add = !(item && item.flagged);
+    try { await window.api.email.setFlags(accountId, folder, uid, ['\\Flagged'], add); }
+    catch (err) { alert('Flag failed: ' + err.message); return; }
+    if (item) item.flagged = add;
+    this._renderList();
+    if (this.openMsgData) this._renderMessage(this.openMsgData, accountId, folder, uid);
+  }
+
+  // Mark the open message unread again (it was marked seen when opened).
+  async _markUnread(accountId, folder, uid) {
+    try { await window.api.email.setFlags(accountId, folder, uid, ['\\Seen'], false); }
+    catch (err) { alert('Failed: ' + err.message); return; }
+    const item = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
+    if (item) item.seen = false;
+    this._renderList();
+  }
+
+  // Move the open message to the account's Archive folder.
+  async _archiveOpen(accountId, folder, uid, target) {
+    if (!target) { alert('This account has no Archive folder.'); return; }
+    try { await window.api.email.move(accountId, folder, uid, target); }
+    catch (err) { alert('Archive failed: ' + err.message); return; }
+    this.openMsg = null; this.openMsgData = null;
+    document.getElementById('email-read').innerHTML = this._placeholderHtml('Message archived');
+    this._loadMessages();
+  }
+
+  _placeholderHtml(text) {
+    return `<div class="email-read-placeholder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6h16M4 12h16M4 18h10"/>
+      </svg>
+      <div class="email-read-placeholder-text">${this._esc(text)}</div>
+    </div>`;
   }
 
   async _removeAccount(id) {

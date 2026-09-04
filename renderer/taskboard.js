@@ -856,7 +856,47 @@ class ViewRenderer {
         (this.selectedProject === 'all' || note.projectId === this.selectedProject);
     });
 
-    return { events, notes };
+    const workBlocks = this._getWorkBlocks(dayName, dateStr);
+
+    return { events, notes, workBlocks };
+  }
+
+  // Synthesize a project's recurring work-schedule blocks (project.workSchedule) into
+  // calendar-ready pseudo-events for the given weekday. The source of truth is the project
+  // itself (never stored as scheduleItems). A block auto-completes once its end time has
+  // passed for that date, so finished sessions move to the day panel's Completed section on
+  // their own (past days are entirely completed; today's earlier blocks complete as the day
+  // goes; future days stay active).
+  _getWorkBlocks(dayName, dateStr) {
+    const blocks = [];
+    const now = new Date();
+    (this.data.projects || []).forEach(proj => {
+      if (this.selectedProject !== 'all' && proj.id !== this.selectedProject) return;
+      (proj.workSchedule || []).forEach((wb, i) => {
+        if (!wb || wb.day !== dayName || !wb.start) return;
+        const endDT = new Date(dateStr + 'T00:00:00');
+        const [eh, em] = (wb.end || wb.start).split(':').map(Number);
+        endDT.setHours(eh, em || 0, 0, 0);   // 24:00 rolls to next-day midnight
+        blocks.push({
+          id: `wblock_${proj.id}_${i}`,
+          title: proj.name,
+          projectId: proj.id,
+          day: dayName,
+          date: dateStr,
+          startTime: wb.start,
+          endTime: wb.end || wb.start,
+          _workBlock: true,
+          completed: endDT <= now,
+        });
+      });
+    });
+    return blocks.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+  }
+
+  // Open a project's settings modal (used when a work-schedule block is clicked).
+  _openProjectSettings(projectId) {
+    const proj = this.getProject(projectId);
+    if (proj) window.dispatchEvent(new CustomEvent('edit-project', { detail: proj }));
   }
 
   // ── Shared calendar header ────────────────────────────────────────
@@ -985,8 +1025,8 @@ class ViewRenderer {
       const isToday = dateObj.toDateString() === today.toDateString();
       const isPast  = dateObj < new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-      const { events: dayEvents, notes: dayNotes } = this._getDayItems(dateStr, dayName);
-      const allItems = [...dayEvents, ...dayNotes];
+      const { events: dayEvents, notes: dayNotes, workBlocks: dayWork } = this._getDayItems(dateStr, dayName);
+      const allItems = [...dayEvents, ...dayNotes, ...dayWork];
 
       let completionClass = '';
       if (dayNotes.length > 0) {
@@ -997,29 +1037,39 @@ class ViewRenderer {
 
       html += `<div class="cal-day-cell ${isToday ? 'cal-today' : ''} ${completionClass}" data-date="${dateStr}" data-day-name="${dayName}">
         <div class="cal-day-number">${day}</div>
-        <div class="cal-day-events">`;
+        <div class="cal-day-events" data-total="${allItems.length}">`;
 
-      const maxShow = 3;
-      dayEvents.slice(0, maxShow).forEach(item => {
+      // One combined, completion-aware list: incomplete first, completed last (and
+      // dimmed). A post-layout pass (_fitMonthCells) then hides whatever doesn't fit
+      // the cell's actual height and adds a "+N more" line, so we show as many rows as
+      // the (variable-height) cell allows instead of a fixed 3.
+      const CAP = 10;
+      const dayItems = [
+        ...dayEvents.map(x => ({ item: x, kind: 'event' })),
+        ...dayNotes.map(x => ({ item: x, kind: 'note' })),
+        ...dayWork.map(x => ({ item: x, kind: 'work' })),
+      ].sort((a, b) => (a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0));
+
+      dayItems.slice(0, CAP).forEach(({ item, kind }) => {
         const proj = this.getProject(item.projectId);
-        const timeStr = item.startTime ? `${formatTime12(item.startTime)} ` : '';
-        html += `<div class="cal-event-dot" style="background:${proj?.color || '#3B82F6'}">
-          <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}${escapeHtml(item.title)}</span>
-        </div>`;
+        const done = item.completed ? ' cal-event-done' : '';
+        if (kind === 'work') {
+          const timeStr = item.startTime ? `${formatTime12(item.startTime)} ` : '';
+          html += `<div class="cal-event-dot cal-work-dot${done}" style="--wb-color:${proj?.color || '#6366F1'}">
+            <span class="cal-event-text">&#128188; ${timeStr}${escapeHtml(item.title)}</span>
+          </div>`;
+        } else if (kind === 'event') {
+          const timeStr = item.startTime ? `${formatTime12(item.startTime)} ` : '';
+          html += `<div class="cal-event-dot${done}" style="background:${proj?.color || '#3B82F6'}">
+            <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}${escapeHtml(item.title)}</span>
+          </div>`;
+        } else {
+          const timeStr = item.dueTime ? `${formatTime12(item.dueTime)} ` : '';
+          html += `<div class="cal-event-dot cal-note-dot${done}" style="background:${proj?.color || '#6366F1'}88">
+            <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}&#128204; ${escapeHtml(item.title)}</span>
+          </div>`;
+        }
       });
-
-      const noteSlots = maxShow - Math.min(dayEvents.length, maxShow);
-      dayNotes.slice(0, noteSlots).forEach(note => {
-        const proj = this.getProject(note.projectId);
-        const timeStr = note.dueTime ? `${formatTime12(note.dueTime)} ` : '';
-        html += `<div class="cal-event-dot cal-note-dot" style="background:${proj?.color || '#6366F1'}88">
-          <span class="cal-event-text">${sourceLogoSvg(note.source)}${timeStr}&#128204; ${escapeHtml(note.title)}</span>
-        </div>`;
-      });
-
-      if (allItems.length > maxShow) {
-        html += `<div class="cal-more-events">+${allItems.length - maxShow} more</div>`;
-      }
 
       html += `</div></div>`;
     }
@@ -1031,6 +1081,39 @@ class ViewRenderer {
     container.querySelectorAll('.cal-day-cell:not(.cal-empty)').forEach(cell => {
       cell.addEventListener('click', () => this._showDayExpanded(cell.dataset.date, cell.dataset.dayName));
     });
+
+    // Fit as many event rows as each cell's height allows (after layout).
+    requestAnimationFrame(() => this._fitMonthCells());
+  }
+
+  // Per day cell, show as many event dots as physically fit and collapse the rest into
+  // a "+N more" line. Runs after layout so it adapts to the current cell height.
+  _fitMonthCells() {
+    const boxes = document.querySelectorAll('#view-calendar .cal-day-events');
+    boxes.forEach(box => {
+      const total = parseInt(box.dataset.total || '0', 10);
+      const dots = Array.from(box.querySelectorAll('.cal-event-dot'));
+      const oldMore = box.querySelector('.cal-more-events');
+      if (oldMore) oldMore.remove();
+      dots.forEach(d => { d.style.display = ''; });
+      const avail = box.clientHeight;
+      if (!avail || dots.length === 0) return;
+      const MORE_H = 15;
+      let used = 0, shown = 0;
+      for (let i = 0; i < dots.length; i++) {
+        const h = dots[i].offsetHeight + 2;               // + row gap
+        const reserve = (shown + 1 < total) ? MORE_H : 0; // leave room for "+N more" if needed
+        if (used + h + reserve <= avail) { used += h; shown++; } else break;
+      }
+      for (let i = shown; i < dots.length; i++) dots[i].style.display = 'none';
+      const remaining = total - shown;
+      if (remaining > 0) {
+        const more = document.createElement('div');
+        more.className = 'cal-more-events';
+        more.textContent = `+${remaining} more`;
+        box.appendChild(more);
+      }
+    });
   }
 
   // ── WEEK VIEW ────────────────────────────────────────────────────
@@ -1038,8 +1121,8 @@ class ViewRenderer {
     const today      = new Date();
     const weekStart  = this.calendarWeekStart;
     const HOUR_H     = 56; // px per hour
-    const START_HOUR = 6;
-    const END_HOUR   = 22;
+    const START_HOUR = 0;  // full 24-hour grid so work blocks at any hour are visible
+    const END_HOUR   = 24;
     const HOURS      = END_HOUR - START_HOUR;
 
     // Build 7-day array
@@ -1072,18 +1155,24 @@ class ViewRenderer {
     });
     html += `</div>`;
 
-    // All-day strip
-    const hasAllDay = dayData.some(d => d.notes.filter(n => !n.dueTime).length > 0);
-    if (hasAllDay) {
+    // Deadlines strip — ALL note deadlines live here (as chips), not in the timed grid.
+    // Notes are due-by markers, not durations; most are due 11:59 PM, so placing them in
+    // the hour grid just piled them at the bottom. Surfacing them at the top keeps every
+    // deadline visible and the grid reserved for real time blocks.
+    const hasDeadlines = dayData.some(d => d.notes.length > 0);
+    if (hasDeadlines) {
       html += `<div class="cal-week-allday-row">
-        <div class="cal-week-gutter cal-week-allday-label">All day</div>`;
+        <div class="cal-week-gutter cal-week-allday-label">Due</div>`;
       dayData.forEach(({ notes }, i) => {
         const { dateStr } = weekDays[i];
         html += `<div class="cal-week-allday-cell" data-date="${dateStr}">`;
-        notes.filter(n => !n.dueTime).forEach(note => {
+        notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
           const proj = this.getProject(note.projectId);
-          html += `<div class="cal-week-allday-event" style="background:${proj?.color||'#6366F1'}22;border-left:3px solid ${proj?.color||'#6366F1'}">
-            ${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}
+          const t = note.dueTime ? formatTime12(note.dueTime) + ' ' : '';
+          html += `<div class="cal-week-allday-event cal-week-note-chip ${note.completed ? 'cal-week-note-done' : ''}" data-note-id="${note.id}"
+            style="background:${proj?.color||'#6366F1'}1f;border-left:3px solid ${proj?.color||'#6366F1'};color:${proj?.color||'#6366F1'}"
+            title="${escapeHtml(note.title)}">
+            ${sourceLogoSvg(note.source)}&#128204; ${t}${escapeHtml(note.title)}
           </div>`;
         });
         html += `</div>`;
@@ -1105,7 +1194,7 @@ class ViewRenderer {
     // Day columns
     weekDays.forEach(({ date, dateStr, dayName }, ci) => {
       const isToday = date.toDateString() === today.toDateString();
-      const { events, notes } = dayData[ci];
+      const { events, workBlocks } = dayData[ci];
 
       html += `<div class="cal-week-day-col ${isToday ? 'cal-week-col-today' : ''}" data-date="${dateStr}" data-day-name="${dayName}" style="height:${HOURS * HOUR_H}px">`;
 
@@ -1124,6 +1213,25 @@ class ViewRenderer {
         }
       }
 
+      // Project work-schedule blocks — recurring "I work on this project" time blocks,
+      // drawn behind timed events (informational, click opens the project's settings).
+      workBlocks.forEach(item => {
+        const proj = this.getProject(item.projectId);
+        const [sh, sm] = (item.startTime || '00:00').split(':').map(Number);
+        const [eh, em] = (item.endTime   || item.startTime || '00:30').split(':').map(Number);
+        const topMins  = (sh - START_HOUR) * 60 + sm;
+        const durMins  = Math.max(30, (eh * 60 + em) - (sh * 60 + sm));
+        if (topMins < 0 || topMins > HOURS * 60) return;
+        const top  = (topMins / 60) * HOUR_H;
+        const height = Math.min((durMins / 60) * HOUR_H, (HOURS * 60 - topMins) / 60 * HOUR_H);
+        const col = proj?.color || '#6366F1';
+        html += `<div class="cal-week-event cal-week-workblock${item.completed ? ' cal-week-workblock-done' : ''}" data-project-id="${item.projectId}"
+          style="top:${top}px;height:${height-2}px;--wb-color:${col}">
+          <div class="cal-week-event-title">&#128188; ${escapeHtml(item.title)}</div>
+          <div class="cal-week-event-time">${formatTime12(item.startTime)}${item.endTime ? '–'+formatTime12(item.endTime) : ''}</div>
+        </div>`;
+      });
+
       // Timed events
       events.filter(e => e.startTime).forEach(item => {
         const proj = this.getProject(item.projectId);
@@ -1138,19 +1246,6 @@ class ViewRenderer {
           style="top:${top}px;height:${height-2}px;background:${proj?.color||'#3B82F6'};border-color:${proj?.color||'#3B82F6'}">
           <div class="cal-week-event-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div>
           <div class="cal-week-event-time">${formatTime12(item.startTime)}${item.endTime ? '–'+formatTime12(item.endTime) : ''}</div>
-        </div>`;
-      });
-
-      // Timed notes
-      notes.filter(n => n.dueTime).forEach(note => {
-        const proj = this.getProject(note.projectId);
-        const [h, m] = (note.dueTime || '00:00').split(':').map(Number);
-        const topMins = (h - START_HOUR) * 60 + m;
-        if (topMins < 0 || topMins > HOURS * 60) return;
-        const top = (topMins / 60) * HOUR_H;
-        html += `<div class="cal-week-event cal-week-note" data-id="${note.id}"
-          style="top:${top}px;height:28px;background:${proj?.color||'#6366F1'}22;border-color:${proj?.color||'#6366F1'}">
-          <div class="cal-week-event-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
         </div>`;
       });
 
@@ -1169,6 +1264,23 @@ class ViewRenderer {
         const d = new Date(el.dataset.date + 'T00:00:00');
         const dayName = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
         this._showDayExpanded(el.dataset.date, dayName);
+      });
+    });
+
+    // Click a work block → jump to the project's settings to edit its schedule.
+    container.querySelectorAll('.cal-week-workblock').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openProjectSettings(el.dataset.projectId);
+      });
+    });
+
+    // Click a deadline chip → open the note editor.
+    container.querySelectorAll('.cal-week-note-chip').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const note = this.data.tasks.find(t => t.id === el.dataset.noteId);
+        if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
       });
     });
 
@@ -1209,9 +1321,9 @@ class ViewRenderer {
       const dateObj = new Date(year, month, day);
       const dateStr = this._dateStr(dateObj);
       const dayName = DAYS[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1];
-      const { events, notes } = this._getDayItems(dateStr, dayName);
-      if (events.length || notes.length) {
-        items.push({ dateObj, dateStr, dayName, events, notes });
+      const { events, notes, workBlocks } = this._getDayItems(dateStr, dayName);
+      if (events.length || notes.length || workBlocks.length) {
+        items.push({ dateObj, dateStr, dayName, events, notes, workBlocks });
       }
     }
 
@@ -1222,7 +1334,7 @@ class ViewRenderer {
     if (items.length === 0) {
       html += `<div class="cal-agenda-empty">No events this month.</div>`;
     } else {
-      items.forEach(({ dateObj, dateStr, dayName, events, notes }) => {
+      items.forEach(({ dateObj, dateStr, dayName, events, notes, workBlocks }) => {
         const isToday = dateObj.toDateString() === today.toDateString();
         const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
         html += `<div class="cal-agenda-day ${isToday ? 'cal-agenda-today' : ''}" data-date="${dateStr}">
@@ -1231,6 +1343,19 @@ class ViewRenderer {
             <div class="cal-agenda-num ${isToday ? 'cal-agenda-num-today' : ''}">${dateObj.getDate()}</div>
           </div>
           <div class="cal-agenda-items">`;
+
+        (workBlocks || []).forEach(item => {
+          const proj = this.getProject(item.projectId);
+          const timeStr = formatTime12(item.startTime) + (item.endTime ? ' – ' + formatTime12(item.endTime) : '');
+          html += `<div class="cal-agenda-item cal-agenda-work" data-project-id="${item.projectId}">
+            <div class="cal-agenda-item-bar" style="background:${proj?.color||'#6366F1'}"></div>
+            <div class="cal-agenda-item-content">
+              <div class="cal-agenda-item-title">&#128188; ${escapeHtml(item.title)}</div>
+              <div class="cal-agenda-item-meta">${timeStr} · Schedule</div>
+            </div>
+            ${item.completed ? '<span class="cal-agenda-done">&#10003;</span>' : ''}
+          </div>`;
+        });
 
         events.forEach(item => {
           const proj = this.getProject(item.projectId);
@@ -1269,6 +1394,14 @@ class ViewRenderer {
     html += `</div></div>`; // agenda + container
     container.innerHTML = html;
     this._bindCalHeader(container);
+
+    // Click a work session → open its project's settings.
+    container.querySelectorAll('.cal-agenda-work').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._openProjectSettings(el.dataset.projectId);
+      });
+    });
 
     // Click agenda day → expand detail
     container.querySelectorAll('.cal-agenda-day').forEach(row => {
@@ -1316,7 +1449,7 @@ class ViewRenderer {
     const dateObj = new Date(dateStr + 'T00:00:00');
     const dayName = DAYS[dateObj.getDay() === 0 ? 6 : dateObj.getDay() - 1];
     // Reuse the same source the grid uses (project-filtered); sort for tidy display.
-    const { events, notes } = this._getDayItems(dateStr, dayName);
+    const { events, notes, workBlocks } = this._getDayItems(dateStr, dayName);
     events.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
     notes.sort((a, b) => (a.dueTime || '~').localeCompare(b.dueTime || '~'));
 
@@ -1354,26 +1487,49 @@ class ViewRenderer {
         <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
       </div>`;
     };
+    // Schedule blocks — recurring; auto-complete once their time has passed (then they
+    // drop into Completed). Click the card to edit the schedule in the project settings.
+    const workCard = (item) => {
+      const proj = this.getProject(item.projectId);
+      return `<div class="schedule-card cal-side-work ${item.completed ? 'done' : ''}" data-project-id="${item.projectId}" style="border-left-color: ${proj?.color || '#6366F1'}">
+        <div class="schedule-time">
+          <div class="schedule-time-start">${formatTime12(item.startTime)}</div>
+          <div class="schedule-time-end">&rarr; ${formatTime12(item.endTime)}</div>
+        </div>
+        <div class="schedule-info">
+          <div class="schedule-title">&#128188; ${escapeHtml(item.title)}</div>
+          <span class="cal-event-type-badge recurring">Weekly</span>
+        </div>
+      </div>`;
+    };
 
     const isDone = (x) => !!x.completed;
     const activeEvents = events.filter(e => !isDone(e)), doneEvents = events.filter(isDone);
     const activeNotes  = notes.filter(n => !isDone(n)),  doneNotes  = notes.filter(isDone);
-    const doneCount = doneEvents.length + doneNotes.length;
-    const hasActive = activeEvents.length + activeNotes.length > 0;
+    const activeWork   = (workBlocks || []).filter(w => !isDone(w)), doneWork = (workBlocks || []).filter(isDone);
+    const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
+    const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
 
     let html = `<div class="cal-side-header">
       <div class="cal-side-date">${formattedDate}<span class="cal-side-year">${dateObj.getFullYear()}</span>${isToday ? '<span class="cal-side-today">Today</span>' : ''}</div>
     </div>`;
 
-    if (events.length === 0 && notes.length === 0) {
+    if (events.length === 0 && notes.length === 0 && (!workBlocks || workBlocks.length === 0)) {
       html += `<div class="cal-side-empty">
         <div class="cal-side-empty-icon">&#128197;</div>
         <div>Nothing scheduled for this day.</div>
         <div class="cal-side-empty-hint">Pick another day to see what&rsquo;s on it.</div>
       </div>`;
     } else {
+      // Recurring project schedule blocks (active occurrences).
+      if (activeWork.length > 0) {
+        html += `<div class="cal-detail-section-label">Schedule</div><div class="schedule-list">`;
+        html += activeWork.map(workCard).join('');
+        html += `</div>`;
+      }
       // Active (incomplete) items — the default view.
       if (activeEvents.length > 0) {
+        if (activeWork.length > 0) html += `<div style="height:14px"></div>`;
         html += `<div class="cal-detail-section-label">Events</div><div class="schedule-list">`;
         html += activeEvents.map(eventCard).join('');
         html += `</div>`;
@@ -1396,7 +1552,7 @@ class ViewRenderer {
         </button>`;
         if (this.calShowCompleted) {
           html += `<div class="cal-side-completed-list schedule-list">`;
-          html += doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
+          html += doneWork.map(workCard).join('') + doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
           html += `</div>`;
         }
       }
@@ -1446,6 +1602,11 @@ class ViewRenderer {
         const note = this.data.tasks.find(t => t.id === card.dataset.noteId);
         if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
       });
+    });
+
+    // Click a schedule block → open its project's settings.
+    side.querySelectorAll('.cal-side-work').forEach(card => {
+      card.addEventListener('click', () => this._openProjectSettings(card.dataset.projectId));
     });
   }
 

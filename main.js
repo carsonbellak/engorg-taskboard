@@ -83,9 +83,38 @@ function createWindow() {
   // the custom titlebar reproduces the menu items visually.
   mainWindow.setMenuBarVisibility(false);
 
-  // Notify the renderer so the custom titlebar can swap the maximize/restore icon.
-  mainWindow.on('maximize', () => mainWindow.webContents.send('win:maximized', true));
-  mainWindow.on('unmaximize', () => mainWindow.webContents.send('win:maximized', false));
+  // ── Maximize that respects the taskbar ────────────────────────────────────
+  // A native maximize on a hidden-title-bar window can spill a few px under the
+  // Windows taskbar, hiding the bottom of the app. We convert every maximize into an
+  // explicit "fit the display work area" resize (work area already excludes the
+  // taskbar) and remember the pre-maximize bounds so Restore returns to them.
+  const workAreaFor = () => screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+  const isWorkAreaSized = () => {
+    const wa = workAreaFor(); const b = mainWindow.getBounds();
+    return Math.abs(b.x - wa.x) <= 2 && Math.abs(b.y - wa.y) <= 2 &&
+           Math.abs(b.width - wa.width) <= 2 && Math.abs(b.height - wa.height) <= 2;
+  };
+  // Remember the last "normal" (non-expanded) bounds for Restore.
+  const trackNormal = () => {
+    if (mainWindow && !mainWindow.isMaximized() && !isWorkAreaSized()) {
+      mainWindow._normalBounds = mainWindow.getBounds();
+    }
+  };
+  mainWindow.on('resize', trackNormal);
+  mainWindow.on('move', trackNormal);
+  mainWindow.fitToWorkArea = () => { mainWindow.setBounds(workAreaFor()); };
+  mainWindow.isWorkAreaSized = isWorkAreaSized;
+
+  let _fitting = false;
+  mainWindow.on('maximize', () => {
+    if (_fitting) return;                 // our own fit — ignore the re-entrant event
+    _fitting = true;
+    mainWindow.unmaximize();              // drop the native (possibly-overflowing) maximize
+    mainWindow.setBounds(workAreaFor());  // …and fit the work area instead
+    _fitting = false;
+    mainWindow.webContents.send('win:maximized', true);
+  });
+  mainWindow.on('unmaximize', () => { if (!_fitting) mainWindow.webContents.send('win:maximized', false); });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) shell.openExternal(url);

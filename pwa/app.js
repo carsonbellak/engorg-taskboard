@@ -465,6 +465,32 @@ function render() {
 function getProjectName(id) { return data.projects.find(p => p.id === id)?.name || ''; }
 function getProjectColor(id) { return data.projects.find(p => p.id === id)?.color || '#818CF8'; }
 
+// Recurring project work-schedule blocks (project.workSchedule) as calendar pseudo-events
+// for a given weekday. Mirrors the desktop taskboard so schedules set on the desktop show
+// up on the mobile calendar too (edited on desktop; the data syncs via projects.json).
+function getWorkBlocks(dayName, dateStr) {
+  const blocks = [];
+  const now = new Date();
+  (data.projects || []).forEach(proj => {
+    (proj.workSchedule || []).forEach((wb, i) => {
+      if (!wb || wb.day !== dayName || !wb.start) return;
+      const endDT = new Date(dateStr + 'T00:00:00');
+      const [eh, em] = (wb.end || wb.start).split(':').map(Number);
+      endDT.setHours(eh, em || 0, 0, 0);   // auto-complete once the session's end time passes
+      blocks.push({
+        id: `wblock_${proj.id}_${i}`,
+        title: proj.name,
+        projectId: proj.id,
+        startTime: wb.start,
+        endTime: wb.end || wb.start,
+        _workBlock: true,
+        completed: endDT <= now,
+      });
+    });
+  });
+  return blocks.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+}
+
 // Build <option>/<optgroup> markup for project selectors, mirroring the desktop
 // project groups (settings.projectGroups + each project's groupId).
 function projectOptionGroups(selectedId) {
@@ -1249,7 +1275,7 @@ function renderCalendar() {
     // Notes with a due date show on the calendar too — an assignment note IS its own
     // calendar entry (no duplicate schedule event is created for it).
     const dayNotes = data.tasks.filter(n => n.dueDate === dateStr);
-    const dayItems = [...dayEvents, ...dayNotes];
+    const dayItems = [...dayEvents, ...dayNotes, ...getWorkBlocks(dayName, dateStr)];
     if (dayItems.length > 0) eventMap[d] = dayItems;
   }
 
@@ -1302,15 +1328,16 @@ function bindCalendarEvents() {
       const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const dayName = DAYS[date.getDay()];
 
+      // Incomplete first, then completed (completed rows render dimmed/struck through).
       const events = data.scheduleItems.filter(item => {
         if (item.date === dateStr) return true;
         if (!item.date && item.day === dayName) return true;
         return false;
-      }).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+      }).sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0) || (a.startTime || '').localeCompare(b.startTime || ''));
 
       // Notes due this day show alongside events (assignment notes drive the calendar).
       const notes = data.tasks.filter(n => n.dueDate === dateStr)
-        .sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || ''));
+        .sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0) || (a.dueTime || '').localeCompare(b.dueTime || ''));
 
       const eventsEl = document.getElementById('cal-day-events');
       if (!eventsEl) return;
@@ -1318,8 +1345,10 @@ function bindCalendarEvents() {
       document.querySelectorAll('.cal-cell').forEach(c => c.classList.remove('selected'));
       cell.classList.add('selected');
 
+      const workBlocks = getWorkBlocks(dayName, dateStr);
+
       const dateTitle = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      if (events.length === 0 && notes.length === 0) {
+      if (events.length === 0 && notes.length === 0 && workBlocks.length === 0) {
         eventsEl.innerHTML = `<div class="cal-no-events">${dateTitle} — No events</div>`;
         return;
       }
@@ -1329,6 +1358,15 @@ function bindCalendarEvents() {
           <div style="flex:1"><div class="event-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div></div>
           <button class="event-edit-btn" data-id="${item.id}">&#9998;</button>
         </div>`;
+      // Schedule blocks (edited on desktop) auto-complete once their time has passed.
+      const wCard = (item) => {
+        const col = getProjectColor(item.projectId);
+        return `<div class="event-card cal-event-card cal-work-card ${item.completed ? 'completed' : ''}" style="border-left:3px solid ${col}">
+          <div class="event-time">${item.startTime || ''}<br>${item.endTime || ''}</div>
+          <div style="flex:1"><div class="event-title">&#128188; ${escapeHtml(item.title)}</div>
+          <div class="cal-note-proj">Schedule</div></div>
+        </div>`;
+      };
       const nCard = (note) => {
         const projName = getProjectName(note.projectId);
         return `<div class="event-card cal-event-card cal-note-card ${note.completed ? 'completed' : ''}" data-note-id="${note.id}">
@@ -1340,15 +1378,16 @@ function bindCalendarEvents() {
 
       const activeEvents = events.filter(e => !e.completed), doneEvents = events.filter(e => e.completed);
       const activeNotes = notes.filter(n => !n.completed), doneNotes = notes.filter(n => n.completed);
-      const doneCount = doneEvents.length + doneNotes.length;
-      const hasActive = activeEvents.length + activeNotes.length > 0;
+      const activeWork = workBlocks.filter(w => !w.completed), doneWork = workBlocks.filter(w => w.completed);
+      const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
+      const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
 
       let ehtml = `<div class="cal-events-title">${dateTitle}</div>`;
-      ehtml += activeEvents.map(evCard).join('') + activeNotes.map(nCard).join('');
+      ehtml += activeWork.map(wCard).join('') + activeEvents.map(evCard).join('') + activeNotes.map(nCard).join('');
       if (!hasActive && doneCount > 0) ehtml += `<div class="cal-alldone">&#127881; All done for this day</div>`;
       if (doneCount > 0) {
         ehtml += `<button class="cal-completed-toggle ${calShowCompleted ? 'open' : ''}"><span class="cal-chevron">&#9656;</span> ${calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
-        if (calShowCompleted) ehtml += `<div class="cal-completed-list">${doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
+        if (calShowCompleted) ehtml += `<div class="cal-completed-list">${doneWork.map(wCard).join('') + doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
       }
       eventsEl.innerHTML = ehtml;
 

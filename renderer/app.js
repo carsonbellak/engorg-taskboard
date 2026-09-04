@@ -124,20 +124,6 @@
         archiveWrapper.style.display = 'none';
       }
 
-      // Days - with completion status dots
-      const dayContainer = document.getElementById('sidebar-days');
-      dayContainer.innerHTML = DAYS.map(d => {
-        const status = viewRenderer.getDayCompletionStatus(d);
-        let dotHtml = '';
-        if (status === 'complete') dotHtml = '<span class="day-status-dot day-status-green"></span>';
-        else if (status === 'partial') dotHtml = '<span class="day-status-dot day-status-yellow"></span>';
-        else if (status === 'empty') dotHtml = '<span class="day-status-dot day-status-red"></span>';
-
-        return `<button class="sidebar-day ${d === viewRenderer.selectedDay ? 'active' : ''}" data-day="${d}">
-          ${d.slice(0, 3)}${dotHtml}
-        </button>`;
-      }).join('');
-
       // Bind project clicks (sidebar-item buttons) — skip archived items
       document.querySelectorAll('#sidebar-active-section .sidebar-item[data-project]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -258,17 +244,6 @@
           if (action === 'edit-group') editGroupFlow(gid);
           else if (action === 'archive-group') archiveGroupFlow(gid);
           else if (action === 'delete-group') deleteGroupFlow(gid);
-        });
-      });
-
-      // Bind day clicks
-      document.querySelectorAll('#sidebar .sidebar-day').forEach(btn => {
-        btn.addEventListener('click', () => {
-          document.querySelectorAll('#sidebar .sidebar-day').forEach(b => b.classList.remove('active'));
-          btn.classList.add('active');
-          viewRenderer.selectedDay = btn.dataset.day;
-          updateContentHeader();
-          renderCurrentView();
         });
       });
 
