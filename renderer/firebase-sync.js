@@ -258,7 +258,8 @@ class FirebaseSync {
     // keys (printer, installed utilities, hotbar layout, git repos, etc.) are left
     // untouched, and `localTheme`/`splitLayout` live in localStorage by design.
     const SYNCED_SETTINGS = ['projectGroups', 'categories', 'noteSortMode',
-      'noteColorMode', 'noteTertiarySort', 'calendarFeeds', 'linkedAccounts', 'alarms', 'ecosystem'];
+      'noteColorMode', 'noteTertiarySort', 'calendarFeeds', 'linkedAccounts', 'alarms', 'ecosystem',
+      'excludedCourses'];
     const settingsUnsub = base.doc('settings').onSnapshot(snapshot => {
       if (!snapshot.exists || snapshot.metadata.hasPendingWrites) return;
       const data = snapshot.data();

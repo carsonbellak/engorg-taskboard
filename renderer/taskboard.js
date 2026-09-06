@@ -752,6 +752,9 @@ class ViewRenderer {
         `<span class="slate-cat-badge" style="background:${PROJECT_CATEGORY_COLORS[cat] || '#64748B'}22; color:${PROJECT_CATEGORY_COLORS[cat] || '#64748B'}">${CATEGORY_LABELS[cat] || cat}</span>`
       ).join('');
 
+      // A "class" project (Gradescope/Brightspace) can be excluded to stop importing it.
+      const isClass = !!((project.categories || []).includes('assignment') || project.gradescopeCourseId || project.courseCode || project.courseShort);
+
       const card = document.createElement('div');
       card.className = `project-slate${isArchiveView ? ' project-slate-archived' : ''}`;
       card.style.borderLeftColor = project.color;
@@ -770,6 +773,7 @@ class ViewRenderer {
             ` : `
               <button class="slate-dropdown-item" data-action="edit" data-project-id="${project.id}">&#9998; Edit</button>
               <button class="slate-dropdown-item" data-action="archive" data-project-id="${project.id}">&#128230; Archive</button>
+              ${isClass ? `<button class="slate-dropdown-item" data-action="exclude-class" data-project-id="${project.id}" title="Archive this class and stop importing it from Gradescope/Brightspace">&#128683; Exclude class</button>` : ''}
               <button class="slate-dropdown-item slate-dropdown-danger" data-action="delete" data-project-id="${project.id}">&#128465; Delete</button>
             `}
           </div>
@@ -822,6 +826,7 @@ class ViewRenderer {
           if (action === 'edit') window.dispatchEvent(new CustomEvent('edit-project', { detail: project }));
           else if (action === 'delete') window.dispatchEvent(new CustomEvent('delete-project', { detail: project }));
           else if (action === 'archive') window.dispatchEvent(new CustomEvent('archive-project', { detail: project }));
+          else if (action === 'exclude-class') window.dispatchEvent(new CustomEvent('exclude-class', { detail: project }));
           else if (action === 'unarchive') window.dispatchEvent(new CustomEvent('unarchive-project', { detail: { id: project.id } }));
           else if (action === 'delete-archived') window.dispatchEvent(new CustomEvent('delete-archived-project', { detail: { id: project.id } }));
         });

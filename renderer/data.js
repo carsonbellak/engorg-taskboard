@@ -271,6 +271,10 @@ class DataManager {
     if (_todos) this.todos.push(..._todos);
     if (_purchases) this.purchases.push(..._purchases);
     this.archivedProjects.splice(idx, 1);
+    // Bringing a class back also re-enables its Gradescope/Brightspace import.
+    if ((this.settings.excludedCourses || []).length) {
+      await this.removeExcludedCourse({ gradescopeCourseId: project.gradescopeCourseId, courseCode: project.courseCode, name: project.name });
+    }
     await Promise.all([
       this._saveProjects(), this._saveArchivedProjects(),
       this._saveTasks(), this._saveSchedule(), this._saveTodos(), this._savePurchases()
@@ -280,6 +284,58 @@ class DataManager {
   async deleteArchivedProject(id) {
     this.archivedProjects = this.archivedProjects.filter(p => p.id !== id);
     await this._saveArchivedProjects();
+  }
+
+  // === Excluded courses (Gradescope/Brightspace classes the user opted out of) ===
+  // Stored in settings (synced) so an excluded class stays excluded across devices and
+  // future syncs skip re-creating its project/notes. Matched loosely by any stable id
+  // we hold: Gradescope course id, padded course code, short code, or normalized name.
+  _courseKey(s) {
+    return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
+  getExcludedCourses() {
+    return this.settings.excludedCourses || [];
+  }
+
+  isCourseExcluded({ gradescopeCourseId, courseCode, courseShort, name } = {}) {
+    const list = this.settings.excludedCourses || [];
+    if (!list.length) return false;
+    const nm = this._courseKey(name);
+    const sh = this._courseKey(courseShort);
+    return list.some(e =>
+      (gradescopeCourseId && e.gradescopeCourseId && String(e.gradescopeCourseId) === String(gradescopeCourseId)) ||
+      (courseCode && e.courseCode && e.courseCode === courseCode) ||
+      (sh && e.courseShort && this._courseKey(e.courseShort) === sh) ||
+      (nm && e.name && this._courseKey(e.name) === nm)
+    );
+  }
+
+  async addExcludedCourse(entry = {}) {
+    if (!Array.isArray(this.settings.excludedCourses)) this.settings.excludedCourses = [];
+    if (this.isCourseExcluded(entry)) return; // already excluded — don't pile up duplicates
+    this.settings.excludedCourses.push({
+      gradescopeCourseId: entry.gradescopeCourseId || null,
+      courseCode: entry.courseCode || null,
+      courseShort: entry.courseShort || null,
+      name: entry.name || null,
+      excludedAt: new Date().toISOString(),
+    });
+    await this._saveSettings();
+  }
+
+  async removeExcludedCourse(entry = {}) {
+    const list = this.settings.excludedCourses || [];
+    if (!list.length) return;
+    const nm = this._courseKey(entry.name);
+    const kept = list.filter(e => !(
+      (entry.gradescopeCourseId && e.gradescopeCourseId && String(e.gradescopeCourseId) === String(entry.gradescopeCourseId)) ||
+      (entry.courseCode && e.courseCode && e.courseCode === entry.courseCode) ||
+      (nm && e.name && this._courseKey(e.name) === nm)
+    ));
+    if (kept.length === list.length) return; // nothing matched
+    this.settings.excludedCourses = kept;
+    await this._saveSettings();
   }
 
   // === Project Groups (stored in settings so they sync with everything else) ===

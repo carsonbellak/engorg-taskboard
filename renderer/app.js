@@ -55,6 +55,10 @@
         return items.join('');
       };
 
+      // A "class" project is one that comes from Gradescope/Brightspace (marked as an
+      // assignment project or carrying a course id/code). Only these can be excluded.
+      const isClassProject = (p) => !!((p.categories || []).includes('assignment') || p.gradescopeCourseId || p.courseCode || p.courseShort);
+
       const projectRowHtml = (p) => {
         const catBadges = catBadgesHtml(p);
         return `<div class="sidebar-project-row" data-project="${p.id}">
@@ -67,6 +71,7 @@
           <div class="sidebar-project-dropdown hidden" data-project-id="${p.id}">
             <button class="sidebar-dropdown-item" data-action="edit" data-project-id="${p.id}">&#9998; Edit</button>
             <button class="sidebar-dropdown-item" data-action="archive" data-project-id="${p.id}">&#128230; Archive</button>
+            ${isClassProject(p) ? `<button class="sidebar-dropdown-item" data-action="exclude-class" data-project-id="${p.id}" title="Archive this class and stop importing it from Gradescope/Brightspace">&#128683; Exclude class</button>` : ''}
             <button class="sidebar-dropdown-item sidebar-dropdown-danger" data-action="delete" data-project-id="${p.id}">&#128465; Delete</button>
             <div class="sidebar-dropdown-divider"></div>
             <div class="sidebar-dropdown-label">Move to</div>
@@ -203,6 +208,9 @@
           } else if (action === 'archive') {
             const project = dataManager.projects.find(p => p.id === projId);
             if (project) window.dispatchEvent(new CustomEvent('archive-project', { detail: project }));
+          } else if (action === 'exclude-class') {
+            const project = dataManager.projects.find(p => p.id === projId);
+            if (project) window.dispatchEvent(new CustomEvent('exclude-class', { detail: project }));
           } else if (action === 'unarchive') {
             window.dispatchEvent(new CustomEvent('unarchive-project', { detail: { id: projId } }));
           } else if (action === 'delete-archived') {
@@ -1139,6 +1147,8 @@
         if (!rawCourse) continue;               // need a course to attach to
         const cleanName = cleanCourseName(rawCourse);
         const code = courseCodeOf(rawCourse);
+        // Excluded class → drop the deadline: no note, and keep it out of the schedule import.
+        if (dataManager.isCourseExcluded({ courseCode: code, name: cleanName })) { ev._noteBacked = true; continue; }
         let proj = findCourseProject(code, cleanName);
         if (!proj) {
           const meta = code ? { courseCode: code } : {};
@@ -1204,6 +1214,8 @@
       const projByCourse = {};
       for (const c of (res.courses || [])) {
         const code = courseCodeOf(c.short || c.name);
+        // Skip classes the user explicitly excluded — don't adopt/create their project.
+        if (dataManager.isCourseExcluded({ gradescopeCourseId: c.id, courseCode: code, courseShort: c.short, name: c.name })) continue;
         let proj = dataManager.projects.find(p => p.gradescopeCourseId === c.id) || findCourseProject(code, c.name);
         // Store the code/short so Brightspace (which only has the code) can merge into
         // this same project instead of creating a duplicate.
@@ -1227,6 +1239,8 @@
       let notesCreated = 0;
       const activeGids = new Set();
       for (const ev of events) {
+        // Excluded class → no project was created above, so skip its assignments entirely.
+        if (dataManager.isCourseExcluded({ gradescopeCourseId: ev.courseId })) continue;
         const projectId = projByCourse[ev.courseId] || null;
         ev.projectId = projectId; // so the calendar entry attaches to the class project
         const gid = ev.extId;     // gradescope:courseId:assignmentId — stable per assignment
@@ -1509,6 +1523,42 @@
         buildSidebar();
         renderCurrentView();
       }
+    });
+
+    // Exclude a class: record it so future Gradescope/Brightspace syncs skip it, then
+    // archive the project (its notes/events move to the archive like any archived project).
+    // Unarchiving it later removes the exclusion and resumes importing.
+    window.addEventListener('exclude-class', async (e) => {
+      const project = e.detail;
+      if (!project) return;
+      const ok = window._showConfirm
+        ? await window._showConfirm({
+            title: 'Exclude this class?',
+            message: `"${project.name}" will be archived and future Gradescope/Brightspace syncs will stop importing it. Unarchive it later to resume.`,
+            confirmText: 'Exclude class',
+            danger: true,
+          })
+        : confirm(`Exclude "${project.name}"? It will be archived and no longer imported.`);
+      if (!ok) return;
+      await dataManager.addExcludedCourse({
+        gradescopeCourseId: project.gradescopeCourseId || null,
+        courseCode: project.courseCode || courseCodeOf(project.courseShort || project.name),
+        courseShort: project.courseShort || null,
+        name: project.name || null,
+      });
+      await dataManager.archiveProject(project.id);
+      assignRainbowColors(dataManager.projects);
+      await dataManager._saveProjects();
+      viewRenderer.selectedProject = 'all';
+      viewRenderer.currentView = 'projects';
+      document.querySelectorAll('.header-tab').forEach(t => t.classList.remove('active'));
+      const projTab = document.querySelector('.header-tab[data-view="projects"]');
+      if (projTab) projTab.classList.add('active');
+      document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('view-projects').classList.add('active');
+      updateContentHeader();
+      buildSidebar();
+      renderCurrentView();
     });
 
     // Unarchive project
