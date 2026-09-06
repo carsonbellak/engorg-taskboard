@@ -11288,6 +11288,10 @@ body.theme-light .syn-builtin { color: #059669; }
 .email-nav-item:hover { background: var(--bg-hover, #F1F5F9); }
 .email-nav-item.active { background: var(--accent-bg, rgba(59,130,246,0.12)); color: var(--accent-text, #2563EB); }
 .email-nav-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+/* Account icon: a small colour dot by default; once its domain logo loads it becomes a
+   slightly larger rounded tile showing the fetched favicon. */
+.email-acct-ic { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.email-acct-ic.has-logo { width: 18px; height: 18px; border-radius: 5px; box-shadow: 0 0 0 1px rgba(0,0,0,0.06) inset; }
 .email-account-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .email-acct-remove {
   background: none; border: none; color: var(--text-faint, #94A3B8);

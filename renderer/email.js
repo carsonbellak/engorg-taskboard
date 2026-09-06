@@ -117,11 +117,22 @@ class EmailView {
       html += `<div class="email-nav-item ${this.selection === 'unified' ? 'active' : ''}" data-sel="unified">
         <span class="email-nav-dot" style="background:linear-gradient(135deg,#3B82F6,#8B5CF6)"></span>All Inboxes</div>`;
     }
+    this._logoCache = this._logoCache || {};
     for (const a of this.accounts) {
       const active = this.selection === a.id;
+      const domain = (a.email || '').split('@')[1] || '';
+      // A domain logo we've already resolved is inlined immediately (no flicker on
+      // re-render); otherwise show the colour dot and fetch the logo async below.
+      const cached = domain ? this._logoCache[domain] : null;
+      // Note: use background-color (NOT the `background` shorthand) — the shorthand resets
+      // background-size to auto inline, which would override the stylesheet's `cover` and
+      // make the favicon paint at its natural size.
+      const icStyle = cached
+        ? `background-image:url("${cached}");background-color:transparent;background-size:cover`
+        : `background-color:${this._esc(a.color)}`;
       html += `<div class="email-account">
         <div class="email-nav-item email-account-head ${active ? 'active' : ''}" data-sel="${a.id}">
-          <span class="email-nav-dot" style="background:${this._esc(a.color)}"></span>
+          <span class="email-nav-dot email-acct-ic${cached ? ' has-logo' : ''}" data-logo-domain="${this._esc(domain)}" style="${icStyle}"></span>
           <span class="email-account-name" title="${this._esc(a.email)}">${this._esc(a.name || a.email)}</span>
           <button class="email-acct-remove" data-remove="${a.id}" title="Remove account">&times;</button>
         </div>
@@ -129,6 +140,7 @@ class EmailView {
       </div>`;
     }
     nav.innerHTML = html;
+    this._decorateAccountLogos();
 
     nav.querySelectorAll('.email-nav-item').forEach(el => {
       el.addEventListener('click', (e) => {
@@ -142,6 +154,28 @@ class EmailView {
     nav.querySelectorAll('.email-folder').forEach(el => {
       el.addEventListener('click', () => { this.folder = el.dataset.folder; this._renderNav(); this._loadMessages(); });
     });
+  }
+
+  // Lazily resolve each account's domain logo (once per domain) and paint it onto the
+  // account icon. Cached on the instance so re-renders apply synchronously; a null result
+  // (no logo available) is remembered too so we don't refetch, and the colour dot stays.
+  async _decorateAccountLogos() {
+    this._logoCache = this._logoCache || {};
+    const domains = [...new Set(this.accounts.map(a => (a.email || '').split('@')[1] || '').filter(Boolean))];
+    for (const domain of domains) {
+      if (this._logoCache[domain] === undefined) {
+        this._logoCache[domain] = await window.api.email.fetchLogo(domain).catch(() => null);
+      }
+      const url = this._logoCache[domain];
+      if (!url) continue;
+      // Re-query live nodes each time; an interleaved re-render may have replaced them.
+      document.querySelectorAll(`#email-nav .email-acct-ic[data-logo-domain="${CSS.escape(domain)}"]`).forEach(el => {
+        el.style.backgroundImage = `url("${url}")`;
+        el.style.backgroundColor = 'transparent';
+        el.style.backgroundSize = 'cover'; // explicit, in case an inline shorthand reset it
+        el.classList.add('has-logo');
+      });
+    }
   }
 
   _renderFolders(accountId) {

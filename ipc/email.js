@@ -9,12 +9,86 @@
 const { ipcMain, safeStorage, dialog, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const https = require('https');
 const { ImapFlow } = require('imapflow');
 const nodemailer = require('nodemailer');
 const { simpleParser } = require('mailparser');
-const { EMAIL_ACCOUNTS_FILE, EMAIL_ATTACH_DIR, EMAIL_PROVIDERS } = require('../config');
+const { DATA_DIR, EMAIL_ACCOUNTS_FILE, EMAIL_ATTACH_DIR, EMAIL_PROVIDERS } = require('../config');
 const oauth = require('./oauth');
 const { normalizeIcs } = require('./calendar');
+
+// ───────────────────────── Account brand logos ─────────────────────────
+// Best-effort brand icon for an account, derived from its email domain (the part after
+// the @). Fetched once from a public favicon service in the MAIN process — the renderer's
+// CSP blocks external images — and cached on disk, then handed back as a data: URL the UI
+// can show. Device-local, never synced. Returns null on any failure so the UI falls back
+// to the account's colour dot.
+const EMAIL_LOGO_DIR = path.join(DATA_DIR, 'email_logos');
+
+function sanitizeDomain(d) {
+  return String(d || '').toLowerCase().trim().replace(/^.*@/, '').replace(/[^a-z0-9.-]/g, '');
+}
+
+// The favicon service may return PNG/JPEG/GIF/ICO/WEBP/SVG — sniff the bytes so the data:
+// URL carries the right MIME (a wrong one won't decode). Empty buffer → null.
+function bufToDataUrl(buf) {
+  if (!buf || !buf.length) return null;
+  const b = buf;
+  let mime = 'image/png';
+  if (b[0] === 0x89 && b[1] === 0x50) mime = 'image/png';
+  else if (b[0] === 0xff && b[1] === 0xd8) mime = 'image/jpeg';
+  else if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) mime = 'image/gif';
+  else if (b[0] === 0x00 && b[1] === 0x00 && (b[2] === 0x01 || b[2] === 0x02)) mime = 'image/x-icon';
+  else if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46) mime = 'image/webp';
+  else if (b[0] === 0x3c) mime = 'image/svg+xml'; // '<'
+  return `data:${mime};base64,` + b.toString('base64');
+}
+
+// GET a URL into a Buffer, following a few redirects, size- and time-capped.
+function httpGetBuffer(url, redirects = 3) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'EngOrg-TaskBoard' }, timeout: 8000 }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && redirects > 0) {
+        res.resume();
+        let next;
+        try { next = new URL(res.headers.location, url).toString(); } catch { return reject(new Error('bad redirect')); }
+        return resolve(httpGetBuffer(next, redirects - 1));
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      const chunks = [];
+      let size = 0;
+      res.on('data', (c) => {
+        size += c.length;
+        if (size > 1024 * 1024) { req.destroy(); reject(new Error('too large')); }
+        else chunks.push(c);
+      });
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', reject);
+  });
+}
+
+async function fetchDomainLogo(domain) {
+  const d = sanitizeDomain(domain);
+  if (!d || !d.includes('.')) return null;
+  fs.mkdirSync(EMAIL_LOGO_DIR, { recursive: true });
+  const cacheFile = path.join(EMAIL_LOGO_DIR, d + '.ico');
+  // Cached hit (non-empty) or cached miss (empty file → null, so we don't re-hammer).
+  try {
+    return bufToDataUrl(fs.readFileSync(cacheFile));
+  } catch { /* not cached yet */ }
+  // Google's favicon service returns a 64px icon (PNG/JPEG/ICO) for any domain.
+  try {
+    const buf = await httpGetBuffer(`https://www.google.com/s2/favicons?domain=${encodeURIComponent(d)}&sz=64`);
+    if (!buf || buf.length < 100) throw new Error('empty icon');
+    fs.writeFileSync(cacheFile, buf);
+    return bufToDataUrl(buf);
+  } catch {
+    try { fs.writeFileSync(cacheFile, Buffer.alloc(0)); } catch {} // remember the miss
+    return null;
+  }
+}
 
 // ───────────────────────── Account store (encrypted) ─────────────────────────
 
@@ -377,6 +451,9 @@ module.exports = function register(getMainWindow) {
   ipcMain.handle('email:oauthConfigured', () => oauth.isConfigured());
 
   ipcMain.handle('email:listAccounts', () => loadAccounts().map(publicAccount));
+
+  // Brand logo (data: URL) for an email domain — cached on disk, null if unavailable.
+  ipcMain.handle('email:fetchLogo', (e, domain) => fetchDomainLogo(domain).catch(() => null));
 
   ipcMain.handle('email:testConnection', async (e, cfg, password) => testConnection(cfg, password));
 

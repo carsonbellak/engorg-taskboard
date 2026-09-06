@@ -48,6 +48,11 @@ module.exports = {
   // Create an Azure app registration: Mobile/desktop platform, "Allow public client
   // flows" = Yes, delegated scopes IMAP.AccessAsUser.All + SMTP.Send + offline_access.
   // Paste its Application (client) ID below. Empty = OAuth disabled (app-password only).
+  //
+  // Per-machine override (wins over these, survives in-app updates): settings.json →
+  //   "msOAuthClientId", "msOAuthRedirect", "msOAuthAuthority"
+  // (see ipc/oauth.js). Use that instead of editing this file so the value isn't shipped
+  // as the public default and isn't clobbered when the app updates.
   MS_OAUTH_CLIENT_ID: '',
   MS_OAUTH_AUTHORITY: 'https://login.microsoftonline.com/common',
   MS_OAUTH_REDIRECT: 'http://localhost',

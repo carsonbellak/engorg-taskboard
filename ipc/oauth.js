@@ -8,7 +8,27 @@
 const { BrowserWindow } = require('electron');
 const crypto = require('crypto');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const config = require('../config');
+
+// Per-machine overrides live in settings.json (appdata) and win over the shipped config
+// defaults, so the mail OAuth app can be pointed at a different registration without
+// editing source — and, unlike config.js, an in-app update never overwrites it. Client
+// id, loopback redirect, and authority are public values, not secrets.
+const SETTINGS_FILE = path.join(config.DATA_DIR, 'settings.json');
+function settingsOverride(key) {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8'));
+      if (s && s[key] != null && String(s[key]).trim()) return String(s[key]).trim();
+    }
+  } catch { /* unreadable/parse error → fall back to config */ }
+  return '';
+}
+function clientId()   { return settingsOverride('msOAuthClientId') || (config.MS_OAUTH_CLIENT_ID || '').trim(); }
+function redirectUri() { return settingsOverride('msOAuthRedirect') || (config.MS_OAUTH_REDIRECT || 'http://localhost').trim(); }
+function authority()  { return settingsOverride('msOAuthAuthority') || (config.MS_OAUTH_AUTHORITY || 'https://login.microsoftonline.com/common').trim(); }
 
 // Exchange Online resource scopes (NOT Microsoft Graph) for IMAP + SMTP,
 // plus offline_access so we receive a refresh token.
@@ -23,7 +43,7 @@ function b64url(buf) {
 }
 
 function tokenEndpoint() {
-  return `${config.MS_OAUTH_AUTHORITY}/oauth2/v2.0/token`;
+  return `${authority()}/oauth2/v2.0/token`;
 }
 
 // POST application/x-www-form-urlencoded and parse the JSON token response.
@@ -62,7 +82,7 @@ function authorizeUrl({ clientId, challenge, state }) {
   const p = new URLSearchParams({
     client_id: clientId,
     response_type: 'code',
-    redirect_uri: config.MS_OAUTH_REDIRECT,
+    redirect_uri: redirectUri(),
     response_mode: 'query',
     scope: MS_SCOPES.join(' '),
     code_challenge: challenge,
@@ -70,17 +90,18 @@ function authorizeUrl({ clientId, challenge, state }) {
     state,
     prompt: 'select_account',
   });
-  return `${config.MS_OAUTH_AUTHORITY}/oauth2/v2.0/authorize?` + p.toString();
+  return `${authority()}/oauth2/v2.0/authorize?` + p.toString();
 }
 
 function isConfigured() {
-  return !!config.MS_OAUTH_CLIENT_ID;
+  return !!clientId();
 }
 
 // Interactive sign-in. Resolves { email, refreshToken, accessToken, expiresIn }.
 function interactiveSignIn(getMainWindow) {
-  const clientId = config.MS_OAUTH_CLIENT_ID;
-  if (!clientId) return Promise.reject(new Error('Microsoft OAuth is not configured (set MS_OAUTH_CLIENT_ID in config.js).'));
+  const cid = clientId();
+  const redirect = redirectUri();
+  if (!cid) return Promise.reject(new Error('Microsoft OAuth is not configured (set msOAuthClientId in settings.json or MS_OAUTH_CLIENT_ID in config.js).'));
 
   const verifier = b64url(crypto.randomBytes(32));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
@@ -99,7 +120,7 @@ function interactiveSignIn(getMainWindow) {
 
     // Intercept navigation to the loopback redirect; the code/error is in the query string.
     const handleUrl = (url) => {
-      if (!url || !url.startsWith(config.MS_OAUTH_REDIRECT)) return false;
+      if (!url || !url.startsWith(redirect)) return false;
       let parsed;
       try { parsed = new URL(url); } catch { return false; }
       const code = parsed.searchParams.get('code');
@@ -109,10 +130,10 @@ function interactiveSignIn(getMainWindow) {
       if (!code) return false;
       if (returnedState !== state) { finish(() => reject(new Error('OAuth state mismatch'))); return true; }
       postForm(tokenEndpoint(), {
-        client_id: clientId,
+        client_id: cid,
         grant_type: 'authorization_code',
         code,
-        redirect_uri: config.MS_OAUTH_REDIRECT,
+        redirect_uri: redirect,
         code_verifier: verifier,
         scope: MS_SCOPES.join(' '),
       }).then(tok => finish(() => resolve({
@@ -128,17 +149,17 @@ function interactiveSignIn(getMainWindow) {
     win.webContents.on('will-navigate', (e, url) => { if (handleUrl(url)) e.preventDefault(); });
     win.on('closed', () => { if (!settled) { settled = true; reject(new Error('Sign-in window was closed')); } });
 
-    win.loadURL(authorizeUrl({ clientId, challenge, state }));
+    win.loadURL(authorizeUrl({ clientId: cid, challenge, state }));
   });
 }
 
 // Mint a fresh access token from a stored refresh token. Microsoft rotates refresh
 // tokens, so the caller should persist refreshToken if it differs from the input.
 function refresh(refreshToken) {
-  const clientId = config.MS_OAUTH_CLIENT_ID;
-  if (!clientId) return Promise.reject(new Error('Microsoft OAuth is not configured.'));
+  const cid = clientId();
+  if (!cid) return Promise.reject(new Error('Microsoft OAuth is not configured.'));
   return postForm(tokenEndpoint(), {
-    client_id: clientId,
+    client_id: cid,
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     scope: MS_SCOPES.join(' '),

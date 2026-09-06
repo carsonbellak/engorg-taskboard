@@ -165,6 +165,7 @@ const __api = {
     listProviders: () => ipcRenderer.invoke('email:listProviders'),
     oauthConfigured: () => ipcRenderer.invoke('email:oauthConfigured'),
     listAccounts: () => ipcRenderer.invoke('email:listAccounts'),
+    fetchLogo: (domain) => ipcRenderer.invoke('email:fetchLogo', domain),
     testConnection: (cfg, password) => ipcRenderer.invoke('email:testConnection', cfg, password),
     addAccount: (cfg, password) => ipcRenderer.invoke('email:addAccount', cfg, password),
     addOAuthAccount: (opts) => ipcRenderer.invoke('email:addOAuthAccount', opts),
