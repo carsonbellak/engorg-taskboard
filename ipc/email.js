@@ -238,6 +238,14 @@ function threadKey(subject) {
     .toLowerCase() || '(no subject)';
 }
 
+// Thunderbird-compatible colour labels are IMAP keywords ($Label1..$Label5), so they
+// persist server-side and interop with other clients. First match wins.
+const LABEL_KEYS = ['$Label1', '$Label2', '$Label3', '$Label4', '$Label5'];
+function labelOf(flags) {
+  for (const k of LABEL_KEYS) if (flags.has(k)) return k;
+  return null;
+}
+
 function mapEnvelope(msg) {
   const env = msg.envelope || {};
   const flags = msg.flags || new Set();
@@ -253,6 +261,7 @@ function mapEnvelope(msg) {
     seen: flags.has('\\Seen'),
     flagged: flags.has('\\Flagged'),
     answered: flags.has('\\Answered'),
+    label: labelOf(flags),
     threadKey: threadKey(env.subject),
   };
 }
@@ -306,6 +315,7 @@ async function getMessage(accountId, folder, uid, { markSeen = true } = {}) {
       messageId: parsed.messageId || '',
       inReplyTo: parsed.inReplyTo || '',
       references: [].concat(parsed.references || []),
+      label: labelOf(msg.flags || new Set()),
       html: parsed.html || null,
       text: parsed.text || '',
       textAsHtml: parsed.textAsHtml || '',

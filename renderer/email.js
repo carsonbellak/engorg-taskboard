@@ -1,6 +1,17 @@
 // Email hub view — IMAP/SMTP client UI. Renders into #view-email.
 // All network/credential work happens in the main process via window.api.email.*.
 
+// Colour flags map to Thunderbird-compatible IMAP keywords ($Label1..$Label5), so they
+// persist server-side and interop with other mail clients.
+const EMAIL_LABELS = [
+  { key: '$Label1', color: '#EF4444', name: 'Red' },
+  { key: '$Label2', color: '#F59E0B', name: 'Orange' },
+  { key: '$Label3', color: '#22C55E', name: 'Green' },
+  { key: '$Label4', color: '#3B82F6', name: 'Blue' },
+  { key: '$Label5', color: '#A855F7', name: 'Purple' },
+];
+const EMAIL_LABEL_COLOR = (key) => (EMAIL_LABELS.find(l => l.key === key) || {}).color || '';
+
 class EmailView {
   constructor() {
     this.accounts = [];
@@ -55,6 +66,7 @@ class EmailView {
         <section class="email-list-pane">
           <div class="email-list-header">
             <input type="search" class="email-search" id="email-search" placeholder="Search mail…">
+            <button class="email-icon-btn" id="email-rules" title="Mail rules (sender → folder)">&#9776;</button>
             <button class="email-icon-btn" id="email-refresh" title="Refresh">&#10227;</button>
           </div>
           <div class="email-list" id="email-list"></div>
@@ -65,6 +77,7 @@ class EmailView {
     root.querySelector('#email-compose').addEventListener('click', () => this._openCompose());
     root.querySelector('#email-add-account').addEventListener('click', () => this._openAccountModal());
     root.querySelector('#email-refresh').addEventListener('click', () => this._refreshList());
+    root.querySelector('#email-rules').addEventListener('click', () => this._openRulesManager());
     const search = root.querySelector('#email-search');
     search.addEventListener('keydown', (e) => { if (e.key === 'Enter') this._search(search.value.trim()); });
   }
@@ -229,6 +242,7 @@ class EmailView {
         this.messages = messages.map(m => ({ ...m, accountId: this.selection, folder: this.folder }));
       }
       this._renderList();
+      this._applyRules().catch(() => {}); // move rule-matched senders out of the inbox
     } catch (err) {
       listEl.innerHTML = `<div class="email-empty email-error">Could not load mail:<br>${this._esc(err.message)}</div>`;
     }
@@ -254,8 +268,10 @@ class EmailView {
       const initial = this._avatarInitial(m.from && m.from.name, m.from && m.from.address);
       const avColor = this._avatarColor((m.from && (m.from.address || m.from.name)) || who);
       const markers = `${m.flagged ? '<span class="email-mark-flag">&#11088;</span> ' : ''}${m.answered ? '<span class="email-mark-answered" title="Replied">&#8617;</span> ' : ''}`;
+      const labelColor = m.label ? EMAIL_LABEL_COLOR(m.label) : '';
       return `<div class="email-list-item ${m.seen ? '' : 'unread'} ${open ? 'open' : ''}"
-                   data-acct="${this._esc(m.accountId)}" data-folder="${this._esc(m.folder)}" data-uid="${m.uid}">
+                   data-acct="${this._esc(m.accountId)}" data-folder="${this._esc(m.folder)}" data-uid="${m.uid}"
+                   ${labelColor ? `style="box-shadow: inset 3px 0 0 ${labelColor}"` : ''}>
         ${acctTag}
         <div class="email-avatar" style="background:${avColor}">${this._esc(initial)}</div>
         <div class="email-list-main">
@@ -328,6 +344,11 @@ class EmailView {
     const toLine = msg.to.map(t => this._esc(t.name || t.address)).join(', ');
     const listItem = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
     const isFlagged = !!(listItem && listItem.flagged);
+    const curLabel = (listItem && listItem.label) || msg.label || null;
+    const labelPicker = `<span class="email-label-picker" title="Colour flag">
+      ${EMAIL_LABELS.map(l => `<button class="email-label-swatch ${curLabel === l.key ? 'active' : ''}" data-label="${l.key}" style="background:${l.color}" title="${l.name} flag"></button>`).join('')}
+      <button class="email-label-swatch email-label-none ${!curLabel ? 'active' : ''}" data-label="" title="No flag">&times;</button>
+    </span>`;
     const folders = this.foldersByAccount[accountId] || [];
     const archiveFolder = (folders.find(f => f.specialUse === '\\Archive') || {}).path;
 
@@ -355,8 +376,10 @@ class EmailView {
           <button class="email-btn ${isFlagged ? 'email-btn-active' : ''}" data-act="flag">${isFlagged ? '&#11088; Flagged' : '&#9734; Flag'}</button>
           <button class="email-btn" data-act="unread">&#9993; Mark unread</button>
           ${archiveFolder ? `<button class="email-btn" data-act="archive">&#128230; Archive</button>` : ''}
+          <button class="email-btn" data-act="rule" title="Always move mail from this sender to a folder">&#9202; Rule…</button>
           <button class="email-btn email-btn-danger" data-act="delete">&#128465; Delete</button>
           ${msg.html ? `<button class="email-btn email-btn-ghost" data-act="images">${this.loadImages ? 'Block images' : 'Load images'}</button>` : ''}
+          ${labelPicker}
         </div>
         ${attachHtml}
       </div>
@@ -375,29 +398,71 @@ class EmailView {
         else if (act === 'flag') this._toggleFlag(accountId, folder, uid);
         else if (act === 'unread') this._markUnread(accountId, folder, uid);
         else if (act === 'archive') this._archiveOpen(accountId, folder, uid, archiveFolder);
+        else if (act === 'rule') this._openRuleForSender(accountId, msg);
         else if (act === 'images') { this.loadImages = !this.loadImages; this._renderMessage(msg, accountId, folder, uid); }
       });
     });
+    pane.querySelectorAll('.email-label-swatch').forEach(sw => {
+      sw.addEventListener('click', () => this._setLabel(accountId, folder, uid, sw.dataset.label));
+    });
     pane.querySelectorAll('.email-attach-chip').forEach(chip => {
-      chip.addEventListener('click', (e) => {
+      chip.addEventListener('click', async (e) => {
+        if (chip.classList.contains('loading')) return;      // ignore double-clicks while busy
         const idx = parseInt(chip.dataset.att, 10);
         const save = e.target.closest('[data-dl]');
-        window.api.email.saveAttachment(accountId, folder, uid, idx, !save).catch(err => alert('Attachment failed: ' + err.message));
+        // Immediate visual feedback — the fetch/decode can take a couple of seconds and
+        // otherwise the click feels like it did nothing.
+        chip.classList.add('loading');
+        chip.dataset.busy = save ? 'Saving…' : 'Opening…';
+        try {
+          const r = await window.api.email.saveAttachment(accountId, folder, uid, idx, !save);
+          if (r && r.canceled) { /* user dismissed the Save dialog */ }
+        } catch (err) {
+          alert('Attachment failed: ' + err.message);
+        } finally {
+          chip.classList.remove('loading');
+          delete chip.dataset.busy;
+        }
       });
     });
   }
 
   // Build the sandboxed document. A CSP meta blocks remote images until the user opts in.
+  // The message is repainted in the app theme (user preference): we pull the live theme
+  // colours from the app, repaint the surface + text, and neutralise senders' own (usually
+  // white) backgrounds so the body blends with the app instead of a white block. Some
+  // heavily-designed HTML emails will therefore look plainer — an accepted trade-off.
   _buildBodyDoc(msg) {
     const imgPolicy = this.loadImages ? 'img-src data: cid: https: http:' : 'img-src data: cid:';
     const csp = `default-src 'none'; style-src 'unsafe-inline'; ${imgPolicy};`;
     const body = msg.html || msg.textAsHtml || `<pre>${this._esc(msg.text)}</pre>`;
+    // Read the *actual rendered* theme colours off the live pane instead of guessing CSS
+    // variable names (those may be defined on an inner wrapper, so reading them from an
+    // arbitrary element returns empty and we'd fall back to white-on-white). `color` is
+    // always concrete; for the surface we walk up to the first element with an opaque
+    // background so a transparent pane doesn't defeat us.
+    const readEl = document.getElementById('email-read') || document.body;
+    const csRead = getComputedStyle(readEl);
+    const isTransparent = (c) => !c || c === 'transparent' || /,\s*0\)\s*$/.test(c);
+    const opaqueBg = (el) => { while (el) { const c = getComputedStyle(el).backgroundColor; if (!isTransparent(c)) return c; el = el.parentElement; } return ''; };
+    const fg = csRead.color || '#e2e8f0';
+    const bg = opaqueBg(readEl) || '#0f172a';
+    const v = (name, fb) => ((csRead.getPropertyValue(name) || '').trim() || fb);
+    const link = v('--accent-text', v('--accent', '#60a5fa'));
+    const border = v('--border-color', 'rgba(148,163,184,0.35)');
     return `<!doctype html><html><head>
       <meta http-equiv="Content-Security-Policy" content="${csp}">
       <style>
-        html,body{margin:0;padding:14px;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a;background:#fff;word-wrap:break-word;}
-        img{max-width:100%;height:auto;} a{color:#2563eb;} pre{white-space:pre-wrap;font:inherit;}
-        table{max-width:100%;}
+        html,body{margin:0;padding:14px;font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;color:${fg} !important;background:${bg} !important;word-wrap:break-word;}
+        /* Force app theme: drop senders' own backgrounds and inherit the theme text colour
+           so no white boxes remain; re-tint links, borders, quotes. */
+        *{background-color:transparent !important;background-image:none !important;color:inherit !important;border-color:${border} !important;}
+        a,a *{color:${link} !important;text-decoration:underline;}
+        img{max-width:100%;height:auto;}
+        pre{white-space:pre-wrap;font:inherit;}
+        table{max-width:100%;border-collapse:collapse;}
+        blockquote{border-left:3px solid ${border};margin:.5em 0;padding-left:10px;opacity:.9;}
+        hr{border:0;border-top:1px solid ${border};}
       </style></head><body>${body}</body></html>`;
   }
 
@@ -419,6 +484,135 @@ class EmailView {
     if (item) item.flagged = add;
     this._renderList();
     if (this.openMsgData) this._renderMessage(this.openMsgData, accountId, folder, uid);
+  }
+
+  // Set (or clear, key='') the colour flag on a message — one $LabelN keyword at a time.
+  async _setLabel(accountId, folder, uid, key) {
+    const item = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
+    try {
+      const others = EMAIL_LABELS.map(l => l.key).filter(k => k !== key);
+      if (others.length) await window.api.email.setFlags(accountId, folder, uid, others, false);
+      if (key) await window.api.email.setFlags(accountId, folder, uid, [key], true);
+    } catch (err) { alert('Flag failed: ' + err.message); return; }
+    if (item) item.label = key || null;
+    if (this.openMsgData) this.openMsgData.label = key || null;
+    this._renderList();
+    if (this.openMsgData) this._renderMessage(this.openMsgData, accountId, folder, uid);
+  }
+
+  // ── rules (sender → folder) ──
+  // Stored in app settings so they persist (and sync). Each rule: { id, accountId, from, target }.
+  _getRules() {
+    const dm = (typeof dataManager !== 'undefined') ? dataManager : null;
+    return (dm && Array.isArray(dm.settings.emailRules)) ? dm.settings.emailRules : [];
+  }
+  async _saveRules(rules) {
+    const dm = (typeof dataManager !== 'undefined') ? dataManager : null;
+    if (dm) await dm.updateSettings({ emailRules: rules });
+  }
+
+  // Build a rule from the open message's sender, then apply it to the current inbox.
+  async _openRuleForSender(accountId, msg) {
+    const sender = msg.from ? (msg.from.address || '').toLowerCase() : '';
+    if (!sender) { alert('This message has no sender address.'); return; }
+    let folders = this.foldersByAccount[accountId];
+    if (!folders) { await this._loadFolders(accountId); folders = this.foldersByAccount[accountId] || []; }
+    const choices = folders.filter(f => f.path && f.path !== 'INBOX').map(f => ({ value: f.path, label: f.name || f.path }));
+    if (!choices.length) { alert('No destination folders found. Create a folder in your mailbox first.'); return; }
+    const target = await this._promptSelect('Always move this sender to…', choices, `From: ${sender}`);
+    if (!target) return;
+    const rules = this._getRules().slice();
+    // Replace any existing rule for the same sender+account.
+    const idx = rules.findIndex(r => r.from === sender && (r.accountId || accountId) === accountId);
+    const rule = { id: 'rule_' + Date.now(), accountId, from: sender, target };
+    if (idx >= 0) rules[idx] = rule; else rules.push(rule);
+    await this._saveRules(rules);
+    const n = await this._applyRules(true);
+    this._toast(n ? `Rule saved · moved ${n} message${n > 1 ? 's' : ''}.` : 'Rule saved.');
+  }
+
+  // Move any currently-listed inbox messages that match a rule into their target folder.
+  // Only runs for a specific account's INBOX (not the unified view or other folders).
+  async _applyRules(force) {
+    if (this.selection === 'unified' || this.folder !== 'INBOX') return 0;
+    const rules = this._getRules().filter(r => !r.accountId || r.accountId === this.selection);
+    if (!rules.length) return 0;
+    const moved = [];
+    for (const m of this.messages.slice()) {
+      const from = (m.from && m.from.address || '').toLowerCase();
+      if (!from) continue;
+      const rule = rules.find(r => from === r.from || (r.from.indexOf('@') === -1 && from.endsWith('@' + r.from)));
+      if (!rule || rule.target === m.folder) continue;
+      try {
+        await window.api.email.move(this.selection, m.folder, m.uid, rule.target);
+        moved.push(m);
+      } catch (e) { console.warn('[email] rule move failed:', e.message); }
+    }
+    if (moved.length) {
+      this.messages = this.messages.filter(m => !moved.includes(m));
+      this._renderList();
+    }
+    return moved.length;
+  }
+
+  _openRulesManager() {
+    const rules = this._getRules();
+    const acctName = (id) => { const a = this.accounts.find(x => x.id === id); return a ? (a.name || a.email) : 'Any account'; };
+    const ov = document.createElement('div');
+    ov.className = 'modal email-prompt-modal';
+    ov.innerHTML = `<div class="modal-box email-rules-box">
+      <h3 class="email-modal-title">Mail rules</h3>
+      <p class="email-rules-sub">Mail from these senders is moved to its folder when you open or refresh that inbox.</p>
+      <div class="email-rules-list">${rules.length ? rules.map(r => `
+        <div class="email-rule-row">
+          <span class="email-rule-from">${this._esc(r.from)}</span>
+          <span class="email-rule-arrow">&#8594;</span>
+          <span class="email-rule-target">${this._esc(r.target)}</span>
+          <span class="email-rule-acct">${this._esc(acctName(r.accountId))}</span>
+          <button class="email-btn email-btn-danger email-rule-del" data-del="${r.id}">Delete</button>
+        </div>`).join('') : '<div class="email-rules-empty">No rules yet. Open a message and click “Rule…” to add one.</div>'}</div>
+      <div class="email-modal-actions"><span style="flex:1"></span><button class="email-btn email-btn-ghost" data-x="close">Close</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    ov.querySelector('[data-x="close"]').addEventListener('click', close);
+    ov.addEventListener('mousedown', (e) => { if (e.target === ov) close(); });
+    ov.querySelectorAll('.email-rule-del').forEach(b => b.addEventListener('click', async () => {
+      await this._saveRules(this._getRules().filter(r => r.id !== b.dataset.del));
+      close(); this._openRulesManager();
+    }));
+  }
+
+  // Themed single-select prompt (returns the chosen value or null).
+  _promptSelect(title, options, subtitle = '') {
+    return new Promise((resolve) => {
+      const ov = document.createElement('div');
+      ov.className = 'modal email-prompt-modal';
+      ov.innerHTML = `<div class="modal-box email-prompt-box">
+        <h3 class="email-modal-title">${this._esc(title)}</h3>
+        ${subtitle ? `<p class="email-rules-sub">${this._esc(subtitle)}</p>` : ''}
+        <select class="email-prompt-input">${options.map(o => `<option value="${this._esc(o.value)}">${this._esc(o.label)}</option>`).join('')}</select>
+        <div class="email-modal-actions"><span style="flex:1"></span>
+          <button class="email-btn email-btn-ghost" data-x="cancel">Cancel</button>
+          <button class="email-btn email-btn-primary" data-x="ok">OK</button></div>
+      </div>`;
+      document.body.appendChild(ov);
+      const sel = ov.querySelector('select');
+      const done = (v) => { ov.remove(); resolve(v); };
+      ov.querySelector('[data-x="cancel"]').addEventListener('click', () => done(null));
+      ov.querySelector('[data-x="ok"]').addEventListener('click', () => done(sel.value || null));
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) done(null); });
+      setTimeout(() => sel.focus(), 30);
+    });
+  }
+
+  _toast(text) {
+    const t = document.createElement('div');
+    t.className = 'email-toast';
+    t.textContent = text;
+    document.body.appendChild(t);
+    requestAnimationFrame(() => t.classList.add('show'));
+    setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2600);
   }
 
   // Mark the open message unread again (it was marked seen when opened).
@@ -507,7 +701,27 @@ class EmailView {
           <label class="email-field"><span>To</span><input id="email-c-to" placeholder="recipient@example.com, ..."></label>
           <label class="email-field"><span>Cc</span><input id="email-c-cc" placeholder="optional"></label>
           <label class="email-field"><span>Subject</span><input id="email-c-subject"></label>
-          <textarea id="email-c-body" class="email-c-body" placeholder="Write your message…"></textarea>
+          <div class="email-c-toolbar" id="email-c-toolbar">
+            <button type="button" class="email-c-tool" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+            <button type="button" class="email-c-tool" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+            <button type="button" class="email-c-tool" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+            <button type="button" class="email-c-tool" data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+            <span class="email-c-sep"></span>
+            <button type="button" class="email-c-tool" data-cmd="formatBlock" data-val="h3" title="Heading">H</button>
+            <button type="button" class="email-c-tool" data-cmd="formatBlock" data-val="blockquote" title="Quote">&#10078;</button>
+            <button type="button" class="email-c-tool" data-cmd="insertUnorderedList" title="Bulleted list">&#8226;</button>
+            <button type="button" class="email-c-tool" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+            <span class="email-c-sep"></span>
+            <button type="button" class="email-c-tool" data-cmd="justifyLeft" title="Align left">&#8676;</button>
+            <button type="button" class="email-c-tool" data-cmd="justifyCenter" title="Align center">&#8596;</button>
+            <span class="email-c-sep"></span>
+            <button type="button" class="email-c-tool" data-cmd="createLink" title="Insert link">&#128279;</button>
+            <label class="email-c-tool email-c-color" title="Text colour">A<span class="email-c-bar" style="background:#2563eb"></span><input type="color" id="email-c-fore" value="#2563eb"></label>
+            <label class="email-c-tool email-c-color" title="Highlight">&#9639;<span class="email-c-bar" style="background:#ffe066"></span><input type="color" id="email-c-back" value="#ffe066"></label>
+            <span class="email-c-sep"></span>
+            <button type="button" class="email-c-tool" data-cmd="removeFormat" title="Clear formatting">&#10006;</button>
+          </div>
+          <div id="email-c-body" class="email-c-body" contenteditable="true" data-placeholder="Write your message…"></div>
           <div class="email-c-attachments" id="email-c-attachments"></div>
           <div class="email-modal-status" id="email-compose-status"></div>
           <div class="email-modal-actions">
@@ -531,6 +745,87 @@ class EmailView {
     document.getElementById('email-c-cancel').addEventListener('click', () => this._closeModal('email-compose-modal'));
     document.getElementById('email-c-send').addEventListener('click', () => this._send());
     document.getElementById('email-c-attach').addEventListener('click', () => this._attach());
+
+    // Rich-text toolbar. mousedown-preventDefault keeps the editor selection while the
+    // button is clicked; foreColor/hiliteColor come from the two colour inputs.
+    const toolbar = document.getElementById('email-c-toolbar');
+    toolbar.querySelectorAll('.email-c-tool[data-cmd]').forEach(b => {
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => this._execCmd(b.dataset.cmd, b.dataset.val));
+    });
+    toolbar.querySelectorAll('.email-c-color').forEach(l => l.addEventListener('mousedown', () => {
+      // Opening the native colour picker steals focus, so snapshot the selection first.
+      this._saveEditorRange();
+    }));
+    const fore = document.getElementById('email-c-fore');
+    const back = document.getElementById('email-c-back');
+    fore.addEventListener('input', (e) => { fore.previousElementSibling.style.background = e.target.value; this._applyColor('foreColor', e.target.value); });
+    back.addEventListener('input', (e) => { back.previousElementSibling.style.background = e.target.value; this._applyColor('hiliteColor', e.target.value); });
+  }
+
+  // Save/restore the caret/selection inside the compose editor so opening a colour picker
+  // or link dialog (which moves focus) doesn't lose where formatting should apply.
+  _saveEditorRange() {
+    const sel = window.getSelection();
+    const editor = document.getElementById('email-c-body');
+    if (sel && sel.rangeCount && editor && editor.contains(sel.anchorNode)) this._editorRange = sel.getRangeAt(0);
+  }
+  _restoreEditorRange() {
+    const editor = document.getElementById('email-c-body');
+    editor.focus();
+    if (this._editorRange) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(this._editorRange);
+    }
+  }
+
+  async _execCmd(cmd, val) {
+    const editor = document.getElementById('email-c-body');
+    if (cmd === 'createLink') {
+      // The prompt modal moves focus, so save the selection and put it back after.
+      this._saveEditorRange();
+      const url = await this._promptText('Insert link', 'https://…');
+      this._restoreEditorRange();
+      if (!url) return;
+      document.execCommand('createLink', false, url);
+      return;
+    }
+    // Toolbar buttons preventDefault on mousedown, so the live selection is still intact —
+    // just refocus (without clobbering it with a stale saved range) and run the command.
+    editor.focus();
+    try { document.execCommand(cmd, false, val || null); } catch {}
+  }
+
+  // Colour commands come from the native picker, which stole focus — restore the saved range.
+  _applyColor(cmd, val) {
+    this._restoreEditorRange();
+    try { document.execCommand(cmd, false, val); } catch {}
+  }
+
+  // Themed one-field text prompt (window.prompt is a no-op in Electron). Resolves the
+  // trimmed value, or null on cancel/empty.
+  _promptText(title, placeholder = '', value = '') {
+    return new Promise((resolve) => {
+      const ov = document.createElement('div');
+      ov.className = 'modal email-prompt-modal';
+      ov.innerHTML = `<div class="modal-box email-prompt-box">
+        <h3 class="email-modal-title">${this._esc(title)}</h3>
+        <input class="email-prompt-input" type="text" placeholder="${this._esc(placeholder)}" value="${this._esc(value)}">
+        <div class="email-modal-actions">
+          <span style="flex:1"></span>
+          <button class="email-btn email-btn-ghost" data-x="cancel">Cancel</button>
+          <button class="email-btn email-btn-primary" data-x="ok">OK</button>
+        </div></div>`;
+      document.body.appendChild(ov);
+      const input = ov.querySelector('.email-prompt-input');
+      const done = (v) => { ov.remove(); resolve(v); };
+      ov.querySelector('[data-x="cancel"]').addEventListener('click', () => done(null));
+      ov.querySelector('[data-x="ok"]').addEventListener('click', () => done(input.value.trim() || null));
+      ov.addEventListener('mousedown', (e) => { if (e.target === ov) done(null); });
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(input.value.trim() || null); else if (e.key === 'Escape') done(null); });
+      setTimeout(() => input.focus(), 30);
+    });
   }
 
   async _openAccountModal() {
@@ -707,8 +1002,10 @@ class EmailView {
     const cc = document.getElementById('email-c-cc');
     const subject = document.getElementById('email-c-subject');
     const body = document.getElementById('email-c-body');
-    to.value = ''; cc.value = ''; subject.value = ''; body.value = '';
+    to.value = ''; cc.value = ''; subject.value = ''; body.innerHTML = '';
     this._replyContext = null;
+    this._editorRange = null;
+    const quote = (m) => `<blockquote class="email-quote">${this._esc(m.text || '').replace(/\n/g, '<br>') || '&nbsp;'}</blockquote>`;
 
     if (opts.msg) {
       if (opts.accountId) fromSel.value = opts.accountId;
@@ -717,7 +1014,7 @@ class EmailView {
       if (opts.mode === 'forward') {
         subject.value = 'Fwd: ' + m.subject.replace(/^fwd:\s*/i, '');
         document.getElementById('email-compose-title').textContent = 'Forward message';
-        body.value = `\n\n---------- Forwarded message ----------\nFrom: ${origFrom}\nSubject: ${m.subject}\n\n${m.text || ''}`;
+        body.innerHTML = `<p><br></p><div class="email-quote-head">---------- Forwarded message ----------<br>From: ${this._esc(origFrom)}<br>Subject: ${this._esc(m.subject)}</div>${quote(m)}`;
       } else {
         subject.value = 'Re: ' + m.subject.replace(/^re:\s*/i, '');
         to.value = origFrom;
@@ -725,13 +1022,15 @@ class EmailView {
           cc.value = (m.to || []).map(t => t.address).filter(a => a && a !== origFrom).join(', ');
         }
         document.getElementById('email-compose-title').textContent = 'Reply';
-        body.value = `\n\nOn ${this._fmtDate(m.date, true)}, ${origFrom} wrote:\n> ${(m.text || '').replace(/\n/g, '\n> ')}`;
+        body.innerHTML = `<p><br></p><div class="email-quote-head">On ${this._esc(this._fmtDate(m.date, true))}, ${this._esc(origFrom)} wrote:</div>${quote(m)}`;
         this._replyContext = { inReplyTo: m.messageId, references: [...(m.references || []), m.messageId].filter(Boolean) };
       }
     } else {
       document.getElementById('email-compose-title').textContent = 'New message';
     }
     this._showModal('email-compose-modal');
+    // Put the caret at the very top so the user types above any quoted content.
+    setTimeout(() => { body.focus(); const sel = window.getSelection(); sel.selectAllChildren(body); sel.collapseToStart(); }, 30);
   }
 
   async _attach() {
@@ -756,12 +1055,15 @@ class EmailView {
     const status = document.getElementById('email-compose-status');
     const to = document.getElementById('email-c-to').value.trim();
     if (!to) { status.className = 'email-modal-status email-error'; status.textContent = 'Add at least one recipient.'; return; }
+    const editor = document.getElementById('email-c-body');
+    const html = editor.innerHTML;
     const payload = {
       accountId: document.getElementById('email-c-from').value,
       to,
       cc: document.getElementById('email-c-cc').value.trim() || undefined,
       subject: document.getElementById('email-c-subject').value.trim(),
-      body: document.getElementById('email-c-body').value,
+      body: editor.innerText,                     // plain-text fallback part
+      html: `<div style="font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif">${html}</div>`,
       inReplyTo: this._replyContext?.inReplyTo,
       references: this._replyContext?.references,
       attachments: this.composeAttachments.map(f => ({ name: f.name, path: f.path })),
