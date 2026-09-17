@@ -881,6 +881,11 @@ function applyTheme(themeId) {
     document.body.classList.add('style-' + theme.style);
   }
 
+  // Tell the main process whether Liquid Glass is active, so its "maximize" leaves a small
+  // inset — that keeps the window from fully covering the screen, which is what lets Win11
+  // keep the acrylic desktop-see-through alive while expanded.
+  try { if (window.api && window.api.win && window.api.win.setGlassMode) window.api.win.setGlassMode(theme.style === 'glass'); } catch {}
+
   // Liquid-glass translucency (0 = frosted/opaque, 1 = fully translucent)
   applyGlassStrength();
 
@@ -1236,9 +1241,10 @@ function renderSettings() {
       </div>
       <div class="settings-section">
         <h3 class="settings-section-title">Tour &amp; Tips</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update.</p>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update. The weekly briefing normally pops on Monday (week ahead) and Friday (week wrapped) — show it any time here.</p>
         <button id="settings-replay-tour" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Take the tour</button>
         <button id="settings-replay-whatsnew" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">What's new</button>
+        <button id="settings-show-briefing" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">Weekly briefing</button>
       </div>
       <!-- App Distribution (Build Installer) -->
       <div class="settings-section">
@@ -1296,6 +1302,7 @@ function renderSettings() {
   // Replay the guided tour / What's New (onboarding.js closes Settings first)
   container.querySelector('#settings-replay-tour')?.addEventListener('click', () => window.onboarding?.replayFirstRun());
   container.querySelector('#settings-replay-whatsnew')?.addEventListener('click', () => window.onboarding?.replayWhatsNew());
+  container.querySelector('#settings-show-briefing')?.addEventListener('click', () => { window.closeSettings?.(); window.briefings?.preview(); });
 
   // Version (local + GitHub-synced)
   refreshVersionInfo();
@@ -1976,6 +1983,10 @@ async function refreshLinkedAccounts() {
   try { if (window.api && window.api.gradescope) gs = await window.api.gradescope.status(); } catch {}
   const gsReg = reg.gradescope || null;
 
+  let vt = { connected: false };
+  try { if (window.api && window.api.variate) vt = await window.api.variate.status(); } catch {}
+  const vtReg = reg.variate || null;
+
   let emailAccts = [];
   try { if (window.api && window.api.email) emailAccts = await window.api.email.listAccounts() || []; } catch {}
   // Mirror local email accounts into the synced registry (metadata only).
@@ -2066,6 +2077,36 @@ async function refreshLinkedAccounts() {
     });
   }
 
+  // --- Variate card (Purdue StudioKit — SSO login, no stored password) ---
+  const vtName = (o) => `Variate${o && (o.name || o.email) ? ' · ' + escapeHtmlS(o.name || o.email) : ''}`;
+  let variateCard;
+  if (vt.connected) {
+    variateCard = accountCard({
+      icon: '<span class="acct-emoji">✖️</span>',
+      name: vtName(vt),
+      sub: '<span class="acct-sub-line">Classes → projects, assignments → notes with auto priority. Syncs every 30 min.</span>',
+      status: 'Connected', statusClass: 'ok',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="vt-sync">Sync now</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="vt-out">Disconnect</button>',
+    });
+  } else if (vtReg && (vtReg.email || vtReg.name)) {
+    variateCard = accountCard({
+      icon: '<span class="acct-emoji">✖️</span>',
+      name: vtName(vtReg),
+      sub: '<span class="acct-sub-line acct-reconnect">Linked on another device — sign in here to sync due dates.</span>',
+      status: 'Reconnect', statusClass: 'warn',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="vt-connect">Connect</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-act="vt-forget">Remove</button>',
+    });
+  } else {
+    variateCard = accountCard({
+      icon: '<span class="acct-emoji">✖️</span>',
+      name: 'Variate',
+      sub: '<span class="acct-sub-line">Purdue’s assessment platform. Turn your classes into projects and assignments into notes + calendar entries with auto-updating priority.</span>'
+        + '<p class="settings-field-hint">Signs in with your Purdue Career Account (BoilerKey + Duo) in a secure window — no password is stored on this device.</p>',
+      status: 'Not linked', statusClass: '',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="vt-connect">Connect</button>',
+    });
+  }
+
   // --- Email cards ---
   const provIcon = (p) => ({ gmail: '📧', outlook: '📨', office365: '📨', yahoo: '📬', icloud: '✉️' }[(p || '').toLowerCase()] || '✉️');
   const localEmails = new Set(emailAccts.map(a => (a.email || a.user || '').toLowerCase()));
@@ -2094,6 +2135,7 @@ async function refreshLinkedAccounts() {
     ${githubCard}
     <div class="acct-group-label">School</div>
     ${gradescopeCard}
+    ${variateCard}
     <div class="acct-group-label">Email <button class="settings-btn settings-btn-sm acct-add-btn" data-act="email-add">+ Add account</button></div>
     ${emailCards || '<div class="acct-empty">No email accounts linked yet.</div>'}
     <div id="acct-status" class="settings-inline-status"></div>`;
@@ -2186,6 +2228,31 @@ function bindLinkedAccounts(body) {
       refreshLinkedAccounts();
     }
     else if (act === 'gs-forget') { await setLinkedRegistry({ gradescope: null }); refreshLinkedAccounts(); }
+    else if (act === 'vt-connect') {
+      st('Opening Purdue sign-in…');
+      try {
+        const res = await window.api.variate.connect();
+        if (res.error) { st('Failed: ' + res.error); return; }
+        await setLinkedRegistry({ variate: { name: res.name || null, email: res.email || null, addedAt: new Date().toISOString() } });
+        st('Connected — pulling due dates…');
+        let r = {};
+        if (window.syncVariate) r = await window.syncVariate(false);
+        st(r && r.error ? 'Failed: ' + r.error : (gsSyncSummary(r) || 'Connected. No upcoming due dates found yet.'));
+        refreshLinkedAccounts();
+      } catch (e) { st('Failed: ' + (e.message || e)); }
+    }
+    else if (act === 'vt-sync') {
+      st('Syncing…');
+      try { const r = window.syncVariate ? await window.syncVariate(false) : {}; st(r && r.error ? 'Failed: ' + r.error : gsSyncSummary(r)); }
+      catch (e) { st('Failed: ' + (e.message || e)); }
+      refreshLinkedAccounts();
+    }
+    else if (act === 'vt-out') {
+      try { await window.api.variate.disconnect(); } catch {}
+      await setLinkedRegistry({ variate: null });
+      refreshLinkedAccounts();
+    }
+    else if (act === 'vt-forget') { await setLinkedRegistry({ variate: null }); refreshLinkedAccounts(); }
     else if (act === 'email-add' || act === 'email-manage') { goEmailTab(); }
     else if (act === 'email-forget') {
       const email = (el.dataset.email || '').toLowerCase();

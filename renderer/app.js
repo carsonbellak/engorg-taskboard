@@ -1353,6 +1353,118 @@
       setInterval(() => { syncGradescope(true).catch(() => {}); }, 30 * 60 * 1000); // every 30 min
     }
 
+    // ============ VARIATE SYNC (linked account → projects + assignment notes) ============
+    // Variate (Purdue's StudioKit assessment platform) is scraped via its JSON API from
+    // the main process (SSO session in a persistent BrowserWindow). Same renderer shape
+    // as Gradescope: (1) find-or-create a project per class — merged with the Gradescope/
+    // Brightspace project of the same course code, (2) tag each due date with that
+    // project, (3) create/update one "assignment" note per assessment with a time-based
+    // priority recomputed every sync, marking submitted/completed ones done. The note's
+    // due date IS its calendar entry, so no separate scheduleItem is created (step 4
+    // prunes any left by older versions).
+    async function syncVariate(silent = true) {
+      if (!window.api.variate) return { imported: 0 };
+      const status = await window.api.variate.status();
+      if (!status.connected) return { imported: 0 };
+      const res = await window.api.variate.fetchAssignments();
+      if (res.error) { if (!silent) alert('Variate sync failed: ' + res.error); else console.warn('Variate sync failed:', res.error); return { error: res.error }; }
+      const events = res.events || [];
+      // If the API answered but nothing mapped, log the raw counts so a shape mismatch
+      // is diagnosable without reproducing the SSO login.
+      if (!events.length && res.debug) console.info('[Variate] no assignments mapped —', res.debug);
+
+      try { await dataManager.addCategory({ id: 'assignment', name: 'Assignment', label: 'ASGN', color: '#8B5CF6' }); } catch (e) {}
+
+      // (1) Project per course, linked by variateGroupId (or an existing class project
+      // by course code / name so Gradescope + Brightspace + Variate share one project).
+      const projByCourse = {};
+      const excludedCourseIds = new Set(); // variateGroupId isn't an isCourseExcluded key, so track locally
+      for (const c of (res.courses || [])) {
+        const code = courseCodeOf(c.short || c.name);
+        if (dataManager.isCourseExcluded({ variateGroupId: c.id, courseCode: code, courseShort: c.short, name: c.name })) { excludedCourseIds.add(c.id); continue; }
+        let proj = dataManager.projects.find(p => p.variateGroupId === c.id) || findCourseProject(code, c.name);
+        const meta = { variateGroupId: c.id };
+        if (c.short) meta.courseShort = c.short;
+        if (code) meta.courseCode = code;
+        if (proj) {
+          await dataManager.updateProject(proj.id, meta);
+        } else {
+          proj = await dataManager.addProject({
+            name: c.name,
+            color: GS_PALETTE[dataManager.projects.length % GS_PALETTE.length],
+            categories: ['assignment'],
+            ...meta,
+          });
+        }
+        projByCourse[c.id] = proj.id;
+      }
+
+      // (2)+(3) Create/update assignment notes.
+      let notesCreated = 0;
+      for (const ev of events) {
+        if (excludedCourseIds.has(ev.courseId)) continue;
+        const projectId = projByCourse[ev.courseId] || null;
+        ev.projectId = projectId;
+        const vid = ev.extId; // variate:groupId:groupAssessmentId — stable per assignment
+        const priority = gsPriority(ev.dueISO);
+        const desc = `Variate · ${ev.course}`;
+        const existing = dataManager.tasks.find(t => t.variateId === vid);
+        if (existing) {
+          const patch = {};
+          if (existing.title !== ev.title) patch.title = ev.title;
+          if (existing.projectId !== projectId) patch.projectId = projectId;
+          if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
+          if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.priority !== priority) patch.priority = priority;
+          if (ev.url && !(existing.links || []).some(l => l.url === ev.url)) {
+            patch.links = (existing.links || []).concat([{ label: 'Open in Variate', url: ev.url }]);
+          }
+          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+          // Variate is the source of truth for submission — mark done when submitted,
+          // but never auto-un-complete a note the user finished.
+          if (ev.submitted && existing.status !== 'done') await dataManager.updateTaskStatus(existing.id, 'done');
+        } else {
+          await dataManager.addTask({
+            title: ev.title,
+            description: desc,
+            links: ev.url ? [{ label: 'Open in Variate', url: ev.url }] : [],
+            projectId,
+            category: 'assignment',
+            priority,
+            dueDate: ev.date,
+            dueTime: ev.startTime,
+            day: gsWeekday(ev.dueISO),
+            status: ev.submitted ? 'done' : 'backlog',
+            completed: !!ev.submitted,
+            checklist: [],
+            attachments: [],
+            source: 'variate',
+            variateId: vid,
+            variateGroupId: ev.courseId,
+            variateAssessmentId: ev.variateAssessmentId,
+          });
+          notesCreated++;
+        }
+      }
+
+      // (4) Each assignment note's due date already surfaces on the calendar — prune any
+      // duplicate schedule items earlier versions may have imported.
+      const { changed } = await dataManager.importExternalEvents([], { source: 'variate', prune: true });
+
+      if (changed || notesCreated) {
+        window.dispatchEvent(new CustomEvent('schedule-changed'));
+        window.dispatchEvent(new CustomEvent('tasks-changed'));
+        window.dispatchEvent(new CustomEvent('projects-changed'));
+      }
+      return { imported: events.length, notesCreated, courses: res.courses || [] };
+    }
+    window.syncVariate = syncVariate; // Settings "Connect"/"Sync now" call this
+
+    if (!EMB) {
+      setTimeout(() => { syncVariate(true).catch(e => console.warn('Initial Variate sync failed:', e.message)); }, 6000);
+      setInterval(() => { syncVariate(true).catch(() => {}); }, 30 * 60 * 1000); // every 30 min
+    }
+
     // ============ QUICK FILTERS ============
     const activeFilters = { priority: null, overdue: false, category: null };
     viewRenderer.activeFilters = activeFilters;
@@ -1717,9 +1829,25 @@
       setTimeout(async () => {
         try {
           const ranTour = await onboarding.maybeRunFirstRun();
-          if (!ranTour) await onboarding.maybeShowWhatsNew();
+          if (!ranTour) {
+            const ranWhatsNew = await onboarding.maybeShowWhatsNew();
+            // Weekly briefings: Monday "week ahead" itinerary + Friday "week wrapped"
+            // recap. Only when nothing else is popping, so surfaces don't stack.
+            if (!ranWhatsNew && typeof briefings !== 'undefined') await briefings.maybeShow();
+          }
         } catch (e) { console.warn('[Onboarding]', e.message); }
       }, 700);
+    }
+
+    // Re-check the Friday briefing whenever notes change, so the "week wrapped" recap
+    // pops the moment the last assignment of the week is marked done (it's gated to
+    // show once per week, so this is a no-op the rest of the time).
+    if (!EMB && typeof briefings !== 'undefined') {
+      let briefTimer = null;
+      window.addEventListener('tasks-changed', () => {
+        clearTimeout(briefTimer);
+        briefTimer = setTimeout(() => { briefings.maybeShow().catch(() => {}); }, 1200);
+      });
     }
 
     // Scan the canonical repo for newer commits and prompt to update. Non-blocking,

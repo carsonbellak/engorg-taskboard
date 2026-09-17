@@ -238,6 +238,14 @@ body[data-style="glass"] .board-column {
   vertical-align: -0.22em; margin-right: 5px;
   border-radius: 4px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.18));
 }
+/* Source badge acting as a launcher (calendar cards) — tap to open the linked app. */
+.src-launch {
+  cursor: pointer; display: inline-flex; align-items: center;
+  margin-right: 5px; border-radius: 5px;
+  transition: transform 0.08s ease;
+}
+.src-launch:active { transform: scale(1.18); }
+.src-launch .src-logo { margin-right: 0; }
 .cal-note-card { cursor: pointer; }
 .cal-work-card .event-title { color: var(--text-secondary, #475569); }
 .cal-work-card .event-time { opacity: 0.75; }
@@ -1154,6 +1162,20 @@ select.form-input option { background: var(--bg); color: var(--text); }
   transition: color 0.15s;
 }
 .event-edit-btn:active { color: var(--accent); }
+/* Synced cards launch their source app on tap; the ✎ opens details instead. */
+.cal-event-card.launches-src { cursor: pointer; }
+.cal-note-detail-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 4px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.cal-note-detail-btn:active { color: var(--accent); }
 
 /* === PURCHASE ENHANCEMENTS === */
 .purchase-header {

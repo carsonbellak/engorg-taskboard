@@ -191,6 +191,9 @@ class CadViewerInstance {
     if (this._resizeObserver) this._resizeObserver.disconnect();
     this.controls.dispose();
     this.renderer.dispose();
+    // Release the WebGL context / GPU memory promptly rather than waiting for GC to
+    // reclaim it — matters on a long-lived session that opens several models.
+    try { this.renderer.forceContextLoss(); } catch (e) {}
     this.scene.traverse(child => {
       if (child.isMesh) {
         child.geometry.dispose();

@@ -249,6 +249,12 @@ function sourceLogoSvg(source) {
       `<circle cx="8" cy="15.8" r="2.15" fill="#fff"/>` +
       `</svg>`;
   }
+  if (s === 'variate') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Variate"><title>Variate</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#1B2A6B"/>` +
+      `<path d="M7.5 7.5 L16.5 16.5 M16.5 7.5 L7.5 16.5" fill="none" stroke="#2FE3C6" stroke-width="2.6" stroke-linecap="round"/>` +
+      `</svg>`;
+  }
   if (s === 'outlook') {
     return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Outlook"><title>Outlook</title>` +
       `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#0F6CBD"/>` +

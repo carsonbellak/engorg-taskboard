@@ -8,27 +8,21 @@ module.exports = function registerWindow(getMainWindow) {
   const win = () => getMainWindow();
 
   ipcMain.handle('win:minimize', () => { const w = win(); if (w) w.minimize(); });
+  // Expand/restore is owned by main.js (main window keeps an _expanded flag + glass inset).
   ipcMain.handle('win:maximizeToggle', () => {
     const w = win(); if (!w) return false;
-    const expanded = w.isMaximized() || (typeof w.isWorkAreaSized === 'function' && w.isWorkAreaSized());
-    if (expanded) {
-      if (w.isMaximized()) w.unmaximize();
-      if (w._normalBounds) w.setBounds(w._normalBounds);   // restore pre-maximize size
-      w.webContents.send('win:maximized', false);
-      return false;
-    }
-    // Expand to fill the display work area (respects the taskbar) instead of native maximize.
-    w._normalBounds = w.getBounds();
-    if (typeof w.fitToWorkArea === 'function') w.fitToWorkArea();
-    else w.setBounds(screen.getDisplayMatching(w.getBounds()).workArea);
-    w.webContents.send('win:maximized', true);
-    return true;
+    if (typeof w.toggleExpand === 'function') return w.toggleExpand();
+    // Fallback for any window without the helpers.
+    if (w.isMaximized()) { w.unmaximize(); return false; }
+    w.maximize(); return true;
   });
   ipcMain.handle('win:close', () => { const w = win(); if (w) w.close(); });
   ipcMain.handle('win:isMaximized', () => {
     const w = win();
-    return !!(w && (w.isMaximized() || (typeof w.isWorkAreaSized === 'function' && w.isWorkAreaSized())));
+    return !!(w && (typeof w.isExpanded === 'function' ? w.isExpanded() : w.isMaximized()));
   });
+  // Renderer signals when the Liquid Glass theme is active so "maximize" uses the inset.
+  ipcMain.handle('win:setGlassMode', (e, on) => { const w = win(); if (w && typeof w.setGlassMode === 'function') w.setGlassMode(on); });
 
   // Mirror of the native menu roles so the titlebar dropdowns do the same thing.
   ipcMain.handle('appmenu:action', (e, name) => {

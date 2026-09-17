@@ -106,8 +106,11 @@ class ViewRenderer {
         case 'created-asc':
           primary = new Date(a.createdAt || 0) - new Date(b.createdAt || 0); break;
         case 'due': {
-          const da = a.dueDate ? new Date(a.dueDate) : new Date('2999-12-31');
-          const db = b.dueDate ? new Date(b.dueDate) : new Date('2999-12-31');
+          // Consider due TIME, not just the date — notes due the same day order by
+          // their time (a note with no time is treated as end-of-day, matching the
+          // grouping logic in _buildGroups / the calendar).
+          const da = a.dueDate ? new Date(a.dueDate + 'T' + (a.dueTime || '23:59')) : new Date('2999-12-31');
+          const db = b.dueDate ? new Date(b.dueDate + 'T' + (b.dueTime || '23:59')) : new Date('2999-12-31');
           primary = da - db; break;
         }
         case 'alpha':
@@ -1084,7 +1087,9 @@ class ViewRenderer {
           </div>`;
         } else {
           const timeStr = item.dueTime ? `${formatTime12(item.dueTime)} ` : '';
-          html += `<div class="cal-event-dot cal-note-dot${done}" style="background:${proj?.color || '#6366F1'}88">
+          // Note pills follow the calendar's color-mode selector, like the day panel.
+          const nc = getStickyColors()[resolveAutoColor(item, this.colorMode || 'category', this.data.projects)].border;
+          html += `<div class="cal-event-dot cal-note-dot${done}" style="background:${nc}88">
             <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}&#128204; ${escapeHtml(item.title)}</span>
           </div>`;
         }
@@ -1186,10 +1191,11 @@ class ViewRenderer {
         const { dateStr } = weekDays[i];
         html += `<div class="cal-week-allday-cell" data-date="${dateStr}">`;
         notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
-          const proj = this.getProject(note.projectId);
           const t = note.dueTime ? formatTime12(note.dueTime) + ' ' : '';
+          // Due chips follow the calendar's color-mode selector, like the day panel.
+          const nc = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)].border;
           html += `<div class="cal-week-allday-event cal-week-note-chip ${note.completed ? 'cal-week-note-done' : ''}" data-note-id="${note.id}"
-            style="background:${proj?.color||'#6366F1'}1f;border-left:3px solid ${proj?.color||'#6366F1'};color:${proj?.color||'#6366F1'}"
+            style="background:${nc}1f;border-left:3px solid ${nc};color:${nc}"
             title="${escapeHtml(note.title)}">
             ${sourceLogoSvg(note.source)}&#128204; ${t}${escapeHtml(note.title)}
           </div>`;
@@ -1475,17 +1481,38 @@ class ViewRenderer {
     const isToday = dateObj.toDateString() === new Date().toDateString();
     const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
+    // The source badge doubles as a launcher: for items that came from a linked app
+    // (Gradescope/Variate store the source page as a note link), clicking the brand
+    // logo opens that page — same as clicking the link chip on the sticky note.
+    const launchLink = (item) => {
+      const links = item && item.links;
+      if (!links || !links.length) return null;
+      const src = (item.source || '').toLowerCase();
+      return links.find(l => l.url && (l.label || '').toLowerCase().includes(src)) || links.find(l => l.url) || null;
+    };
+    const srcLaunch = (item) => {
+      const svg = sourceLogoSvg(item.source);
+      if (!svg) return '';
+      const link = launchLink(item);
+      if (!link) return svg;
+      return `<span class="src-launch" data-open-url="${escapeHtml(link.url)}" role="button" tabindex="0" title="${escapeHtml(link.label || 'Open source')}">${svg}</span>`;
+    };
+
     // Card builders (shared by the active list and the collapsed "completed" section).
+    // Items that came from a linked app (Gradescope/Variate/Brightspace store the source
+    // page as a note/event link) become click-to-launch: the whole card opens that page.
     const eventCard = (item) => {
       const proj = this.getProject(item.projectId);
-      return `<div class="schedule-card ${item.completed ? 'done' : ''}" style="border-left-color: ${proj?.color || '#3B82F6'}">
+      const link = launchLink(item);
+      const launches = !!link;
+      return `<div class="schedule-card cal-side-event ${item.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-id="${item.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}" title="${escapeHtml(link.label || 'Open source')}"` : ''} style="border-left-color: ${proj?.color || '#3B82F6'}">
         <button class="schedule-check ${item.completed ? 'checked' : ''}" data-id="${item.id}">${item.completed ? '&#10003;' : ''}</button>
         <div class="schedule-time">
           <div class="schedule-time-start">${formatTime12(item.startTime)}</div>
           <div class="schedule-time-end">&rarr; ${formatTime12(item.endTime)}</div>
         </div>
         <div class="schedule-info">
-          <div class="schedule-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div>
+          <div class="schedule-title">${srcLaunch(item)}${escapeHtml(item.title)}</div>
           ${item.description ? `<div class="schedule-desc">${escapeHtml(item.description)}</div>` : ''}
           <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
           ${item.date ? '<span class="cal-event-type-badge">One-time</span>' : '<span class="cal-event-type-badge recurring">Weekly</span>'}
@@ -1495,15 +1522,25 @@ class ViewRenderer {
     };
     const noteCard = (note) => {
       const proj = this.getProject(note.projectId);
-      return `<div class="schedule-card cal-side-note ${note.completed ? 'done' : ''}" data-note-id="${note.id}" style="border-left-color: ${proj?.color || '#6366F1'}">
+      // Color the whole tile like a sticky note in the notes board — same
+      // resolveAutoColor + getStickyColors path — so the color-mode selector drives it
+      // consistently across the app. Priority stays as a small footer dot, exactly as
+      // the sticky notes render it.
+      const c = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)];
+      // Synced notes carry a source link → the card launches that source and a ✎ button
+      // still opens the editor. Plain notes keep the old behavior (card → editor).
+      const link = launchLink(note);
+      const launches = !!link;
+      return `<div class="schedule-card cal-side-note sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${c.bg}; border-color:${c.border}; border-left-color:${c.border}" title="${launches ? escapeHtml(link.label || 'Open source') : 'Open note'}">
         <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
         ${note.dueTime ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(note.dueTime)}</div></div>` : ''}
         <div class="schedule-info">
-          <div class="schedule-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
+          <div class="schedule-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
           ${note.description ? `<div class="schedule-desc">${escapeHtml(note.description)}</div>` : ''}
           <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
         </div>
         <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
+        ${launches ? `<button class="cal-side-edit" data-id="${note.id}" title="Edit note">&#9998;</button>` : ''}
       </div>`;
     };
     // Schedule blocks — recurring; auto-complete once their time has passed (then they
@@ -1579,6 +1616,16 @@ class ViewRenderer {
 
     side.innerHTML = html;
 
+    // Click a source badge → open that item's linked app (Gradescope/Variate/…),
+    // just like the link chip on the sticky note. Stops the click from also opening
+    // the note editor / project settings on the surrounding card.
+    side.querySelectorAll('[data-open-url]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.api.openExternal(el.dataset.openUrl);
+      });
+    });
+
     const toggleBtn = side.querySelector('.cal-side-completed-toggle');
     if (toggleBtn) toggleBtn.addEventListener('click', () => {
       this.calShowCompleted = !this.calShowCompleted;
@@ -1614,12 +1661,31 @@ class ViewRenderer {
       });
     });
 
-    // Click a note row (outside its buttons) to open the full note editor.
+    // Click a note row: synced notes (with a source link) launch that source; the ✎
+    // button still opens the editor. Plain notes open the editor on card click.
     side.querySelectorAll('.cal-side-note').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.schedule-check')) return;
+        if (e.target.closest('.schedule-check') || e.target.closest('.cal-side-edit') || e.target.closest('[data-open-url]')) return;
+        const url = card.dataset.launchUrl;
+        if (url) { window.api.openExternal(url); return; }
         const note = this.data.tasks.find(t => t.id === card.dataset.noteId);
         if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
+      });
+    });
+    // The ✎ on a synced note card opens the full editor.
+    side.querySelectorAll('.cal-side-edit').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const note = this.data.tasks.find(t => t.id === btn.dataset.id);
+        if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
+      });
+    });
+    // Click an event that carries a source link → open it (its check/close/delete
+    // buttons and the source logo are guarded so they don't also launch).
+    side.querySelectorAll('.cal-side-event.launches-src').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.schedule-check') || e.target.closest('.schedule-close') || e.target.closest('[data-open-url]')) return;
+        if (card.dataset.launchUrl) window.api.openExternal(card.dataset.launchUrl);
       });
     });
 
@@ -1750,6 +1816,50 @@ class ViewRenderer {
       });
     });
 
+    // Archived projects: their FINISHED work still counts toward your history and
+    // spend totals. Fold in ONLY completed tasks and purchases (money) — never their
+    // incomplete/overdue tasks — so accomplishments survive archiving without stale
+    // to-dos leaking back in. (Aggregate "All Projects" view, or that archived project.)
+    const archProjs = (this.data.archivedProjects || []).filter(ap =>
+      this.selectedProject === 'all' || ap.id === this.selectedProject);
+    const archCompletedTasks = [];  // [{ task, proj }]
+    const archPurchases = [];       // [{ pur, proj }]
+    archProjs.forEach(ap => {
+      (ap._tasks || []).forEach(t => { if (t.completed) archCompletedTasks.push({ task: t, proj: ap }); });
+      (ap._purchases || []).forEach(p => archPurchases.push({ pur: p, proj: ap }));
+    });
+    archCompletedTasks.forEach(({ task, proj }) => {
+      events.push({
+        date: task.completedAt || task.modifiedAt || proj.archivedAt || '2024-01-01T00:00:00Z',
+        type: 'note-completed',
+        icon: '✅',
+        title: 'Completed: ' + task.title,
+        subtitle: (proj ? proj.name : '') + ' · Archived',
+        color: '#22C55E',
+        completed: true
+      });
+      (task.checklist || []).forEach(cl => {
+        if (cl.done && cl.completedAt) events.push({
+          date: cl.completedAt, type: 'checklist-completed', icon: '☑️',
+          title: cl.text, subtitle: (proj ? proj.name + ' · ' : '') + task.title,
+          color: '#16A34A', completed: true
+        });
+      });
+    });
+    archPurchases.forEach(({ pur, proj }) => {
+      if (pur.status === 'toPlace') return; // unplaced orders aren't feed events (still counted in "Still to Spend")
+      events.push({
+        date: pur.createdAt || proj.archivedAt || '2024-01-01T00:00:00Z',
+        type: 'purchase-created',
+        icon: '📦',
+        title: pur.item,
+        subtitle: (proj ? proj.name + ' · ' : '') + (pur.supplier || 'Unknown supplier') + ' · Archived',
+        color: proj?.color || '#22C55E',
+        cost: pur.cost,
+        status: pur.status
+      });
+    });
+
     // Weekly summaries for past weeks
     const projFilter = p => this.selectedProject === 'all' || p.projectId === this.selectedProject;
     const weekMap = {};
@@ -1820,23 +1930,37 @@ class ViewRenderer {
       grouped[dateKey].push(ev);
     });
 
-    // Compute summary stats
-    const totalNotes = this.data.tasks.filter(projFilter).length;
-    const completedNotes = this.data.tasks.filter(t => projFilter(t) && t.completed).length;
+    // Compute summary stats. Archived projects contribute their COMPLETED tasks and
+    // their purchases only (see archCompletedTasks/archPurchases above) — never their
+    // incomplete/overdue tasks, so "Overdue" and incomplete counts stay active-only.
+    const archSpent = archPurchases
+      .filter(x => x.pur.status !== 'toPlace')
+      .reduce((sum, x) => sum + ((x.pur.cost || 0) * (x.pur.quantity || 1)), 0);
+    const archStillToSpend = archPurchases
+      .filter(x => x.pur.status === 'toPlace')
+      .reduce((sum, x) => sum + ((x.pur.cost || 0) * (x.pur.quantity || 1)), 0);
+    const archChecklistTotal = archCompletedTasks.reduce((s, x) => s + (x.task.checklist ? x.task.checklist.length : 0), 0);
+    const archChecklistDone = archCompletedTasks.reduce((s, x) => s + (x.task.checklist ? x.task.checklist.filter(c => c.done).length : 0), 0);
+
+    // Each archived completed task counts as one completed note (added to both total and
+    // completed, so completion % isn't skewed and no incomplete archived work is counted).
+    const totalNotes = this.data.tasks.filter(projFilter).length + archCompletedTasks.length;
+    const completedNotes = this.data.tasks.filter(t => projFilter(t) && t.completed).length + archCompletedTasks.length;
     const totalEvents = this.data.scheduleItems.filter(projFilter).length;
-    const totalPurchases = this.data.purchases.filter(p => projFilter(p) && p.status !== 'toPlace').length;
+    const totalPurchases = this.data.purchases.filter(p => projFilter(p) && p.status !== 'toPlace').length
+      + archPurchases.filter(x => x.pur.status !== 'toPlace').length;
     const totalSpent = this.data.purchases
       .filter(p => projFilter(p) && p.status !== 'toPlace')
-      .reduce((sum, p) => sum + ((p.cost || 0) * (p.quantity || 1)), 0);
+      .reduce((sum, p) => sum + ((p.cost || 0) * (p.quantity || 1)), 0) + archSpent;
     const stillToSpend = this.data.purchases
       .filter(p => projFilter(p) && p.status === 'toPlace')
-      .reduce((sum, p) => sum + ((p.cost || 0) * (p.quantity || 1)), 0);
+      .reduce((sum, p) => sum + ((p.cost || 0) * (p.quantity || 1)), 0) + archStillToSpend;
     const checklistTotal = this.data.tasks
       .filter(projFilter)
-      .reduce((sum, t) => sum + (t.checklist ? t.checklist.length : 0), 0);
+      .reduce((sum, t) => sum + (t.checklist ? t.checklist.length : 0), 0) + archChecklistTotal;
     const checklistDone = this.data.tasks
       .filter(projFilter)
-      .reduce((sum, t) => sum + (t.checklist ? t.checklist.filter(c => c.done).length : 0), 0);
+      .reduce((sum, t) => sum + (t.checklist ? t.checklist.filter(c => c.done).length : 0), 0) + archChecklistDone;
     const overdueNotes = this.data.tasks.filter(t => projFilter(t) && isOverdue(t)).length;
 
     let html = '<div class="timeline-container">';

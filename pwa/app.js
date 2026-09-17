@@ -543,6 +543,11 @@ function sourceLogoSvg(source) {
       `<path d="M8 8.2 L15.5 12 L8 15.8" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>` +
       `<circle cx="8" cy="8.2" r="2.15" fill="#fff"/><circle cx="15.5" cy="12" r="2.15" fill="#fff"/><circle cx="8" cy="15.8" r="2.15" fill="#fff"/></svg>`;
   }
+  if (s === 'variate') {
+    return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Variate"><title>Variate</title>` +
+      `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#1B2A6B"/>` +
+      `<path d="M7.5 7.5 L16.5 16.5 M16.5 7.5 L7.5 16.5" fill="none" stroke="#2FE3C6" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+  }
   if (s === 'outlook') {
     return `<svg class="src-logo" viewBox="0 0 24 24" role="img" aria-label="Outlook"><title>Outlook</title>` +
       `<rect x="1.5" y="1.5" width="21" height="21" rx="5.5" fill="#0F6CBD"/>` +
@@ -552,6 +557,22 @@ function sourceLogoSvg(source) {
       `<ellipse cx="7.4" cy="12" rx="2.9" ry="3.5" fill="none" stroke="#fff" stroke-width="1.9"/></svg>`;
   }
   return '';
+}
+// The source badge doubles as a launcher: items imported from a linked app
+// (Gradescope/Variate store the source page as a note link) open that page when
+// the brand logo is tapped — the same as the note's link chip on desktop.
+function launchLink(item) {
+  const links = item && item.links;
+  if (!links || !links.length) return null;
+  const src = (item.source || '').toLowerCase();
+  return links.find(l => l.url && (l.label || '').toLowerCase().includes(src)) || links.find(l => l.url) || null;
+}
+function srcLaunch(item) {
+  const svg = sourceLogoSvg(item.source);
+  if (!svg) return '';
+  const link = launchLink(item);
+  if (!link) return svg;
+  return `<span class="src-launch" data-open-url="${escapeHtml(link.url)}" role="button" tabindex="0" title="${escapeHtml(link.label || 'Open source')}">${svg}</span>`;
 }
 function filterByProject(items) {
   if (currentProject === 'all') return items;
@@ -678,8 +699,9 @@ function renderNotes() {
       case 'created': primary = new Date(b.createdAt || 0) - new Date(a.createdAt || 0); break;
       case 'created-asc': primary = new Date(a.createdAt || 0) - new Date(b.createdAt || 0); break;
       case 'due': {
-        const da = a.dueDate ? new Date(a.dueDate) : new Date('2999-12-31');
-        const db = b.dueDate ? new Date(b.dueDate) : new Date('2999-12-31');
+        // Consider due TIME too (no time = end-of-day), so same-day notes order by time.
+        const da = a.dueDate ? new Date(a.dueDate + 'T' + (a.dueTime || '23:59')) : new Date('2999-12-31');
+        const db = b.dueDate ? new Date(b.dueDate + 'T' + (b.dueTime || '23:59')) : new Date('2999-12-31');
         primary = da - db; break;
       }
       case 'alpha': primary = (a.title || '').localeCompare(b.title || ''); break;
@@ -841,6 +863,9 @@ function renderNoteCard(t) {
   const pClass = (t.priority || 'medium').toLowerCase();
   const projName = getProjectName(t.projectId);
   const isOverdue = t.dueDate && !t.completed && new Date(t.dueDate) < new Date();
+  // Tint the card like the board/calendar (color-mode selector) — the priority bar
+  // stays as the priority signal, so notes read the same across every section.
+  const sc = resolveBoardStickyColor(t);
 
   let metaHtml = '';
   if (t.category) {
@@ -860,7 +885,7 @@ function renderNoteCard(t) {
     checklistHtml = `<div class="note-checklist-progress"><div class="note-checklist-bar"><div class="note-checklist-fill" style="width:${pct}%"></div></div>${done}/${total}</div>`;
   }
 
-  return `<div class="note-card ${t.completed ? 'completed' : ''}" data-id="${t.id}">
+  return `<div class="note-card ${t.completed ? 'completed' : ''}" data-id="${t.id}" style="background:${sc.bg};border-color:${sc.border}">
     <div class="note-priority-bar ${pClass}"></div>
     <div class="note-header">
       <button class="note-checkbox ${t.completed ? 'checked' : ''}" data-toggle="${t.id}">${t.completed ? '&#10003;' : ''}</button>
@@ -905,8 +930,9 @@ function sortTasksByMode(arr) {
       case 'created': primary = new Date(b.createdAt || 0) - new Date(a.createdAt || 0); break;
       case 'created-asc': primary = new Date(a.createdAt || 0) - new Date(b.createdAt || 0); break;
       case 'due': {
-        const da = a.dueDate ? new Date(a.dueDate) : new Date('2999-12-31');
-        const db = b.dueDate ? new Date(b.dueDate) : new Date('2999-12-31');
+        // Consider due TIME too (no time = end-of-day), so same-day notes order by time.
+        const da = a.dueDate ? new Date(a.dueDate + 'T' + (a.dueTime || '23:59')) : new Date('2999-12-31');
+        const db = b.dueDate ? new Date(b.dueDate + 'T' + (b.dueTime || '23:59')) : new Date('2999-12-31');
         primary = da - db; break;
       }
       case 'alpha': primary = (a.title || '').localeCompare(b.title || ''); break;
@@ -1149,6 +1175,41 @@ function buildTimelineEvents() {
     });
   });
 
+  // Archived projects: fold in their COMPLETED tasks + purchases (money) only — never
+  // their incomplete/overdue tasks — so finished work survives archiving (mirrors desktop).
+  (data.archivedProjects || [])
+    .filter(ap => currentProject === 'all' || ap.id === currentProject)
+    .forEach(ap => {
+      (ap._tasks || []).forEach(task => {
+        if (!task.completed) return;
+        events.push({
+          date: task.completedAt || task.modifiedAt || ap.archivedAt || '2024-01-01T00:00:00Z',
+          type: 'note-completed', icon: '✅',
+          title: 'Completed: ' + task.title,
+          subtitle: (ap.name || '') + ' · Archived',
+          color: '#22C55E', completed: true
+        });
+        (task.checklist || []).forEach(cl => {
+          if (cl.done && cl.completedAt) events.push({
+            date: cl.completedAt, type: 'checklist-completed', icon: '☑️',
+            title: cl.text, subtitle: (ap.name ? ap.name + ' · ' : '') + task.title,
+            color: '#16A34A', completed: true
+          });
+        });
+      });
+      (ap._purchases || []).forEach(pur => {
+        if (pur.status === 'toPlace') return;
+        events.push({
+          date: pur.createdAt || ap.archivedAt || '2024-01-01T00:00:00Z',
+          type: 'purchase-created', icon: '\u{1F4E6}',
+          title: pur.item,
+          subtitle: (ap.name ? ap.name + ' · ' : '') + (pur.supplier || '') + ' · Archived',
+          color: ap.color || '#22C55E',
+          cost: pur.cost, status: pur.status
+        });
+      });
+    });
+
   events.sort((a, b) => new Date(b.date) - new Date(a.date));
   return events;
 }
@@ -1161,14 +1222,28 @@ function renderTimeline() {
 
   const projFilter = t => currentProject === 'all' || t.projectId === currentProject;
 
+  // Archived projects contribute their COMPLETED tasks + purchases only (never their
+  // incomplete/overdue tasks — Overdue stays active-only). Mirrors desktop.
+  const archProjs = (data.archivedProjects || []).filter(ap => currentProject === 'all' || ap.id === currentProject);
+  const archDone = [];   // completed archived tasks
+  const archPur = [];    // placed archived purchases
+  archProjs.forEach(ap => {
+    (ap._tasks || []).forEach(t => { if (t.completed) archDone.push(t); });
+    (ap._purchases || []).forEach(p => { if (p.status !== 'toPlace') archPur.push(p); });
+  });
+
   // Summary stats
-  const totalNotes = data.tasks.filter(projFilter).length;
-  const completedNotes = data.tasks.filter(t => projFilter(t) && t.completed).length;
+  const totalNotes = data.tasks.filter(projFilter).length + archDone.length;
+  const completedNotes = data.tasks.filter(t => projFilter(t) && t.completed).length + archDone.length;
   const totalEvents = data.scheduleItems.filter(projFilter).length;
-  const checklistTotal = data.tasks.filter(projFilter).reduce((s, t) => s + (t.checklist ? t.checklist.length : 0), 0);
-  const checklistDone = data.tasks.filter(projFilter).reduce((s, t) => s + (t.checklist ? t.checklist.filter(c => c.done).length : 0), 0);
+  const checklistTotal = data.tasks.filter(projFilter).reduce((s, t) => s + (t.checklist ? t.checklist.length : 0), 0)
+    + archDone.reduce((s, t) => s + (t.checklist ? t.checklist.length : 0), 0);
+  const checklistDone = data.tasks.filter(projFilter).reduce((s, t) => s + (t.checklist ? t.checklist.filter(c => c.done).length : 0), 0)
+    + archDone.reduce((s, t) => s + (t.checklist ? t.checklist.filter(c => c.done).length : 0), 0);
   const purchases = (data.purchases || []).filter(p => projFilter(p) && p.status !== 'toPlace');
-  const totalSpent = purchases.reduce((s, p) => s + ((p.cost || 0) * (p.quantity || 1)), 0);
+  const totalSpent = purchases.reduce((s, p) => s + ((p.cost || 0) * (p.quantity || 1)), 0)
+    + archPur.reduce((s, p) => s + ((p.cost || 0) * (p.quantity || 1)), 0);
+  const purchaseCount = purchases.length + archPur.length;
   const overdueNotes = data.tasks.filter(t => projFilter(t) && !t.completed && t.dueDate && new Date(t.dueDate) < new Date()).length;
 
   let html = '<div class="tl-container">';
@@ -1180,7 +1255,7 @@ function renderTimeline() {
     <div class="tl-stat"><div class="tl-stat-num">${totalNotes > 0 ? Math.round((completedNotes / totalNotes) * 100) : 0}%</div><div class="tl-stat-label">Rate</div></div>
     <div class="tl-stat"><div class="tl-stat-num">${checklistDone}/${checklistTotal}</div><div class="tl-stat-label">Checklist</div></div>
     <div class="tl-stat"><div class="tl-stat-num">${totalEvents}</div><div class="tl-stat-label">Events</div></div>
-    ${purchases.length > 0 ? `<div class="tl-stat"><div class="tl-stat-num">$${totalSpent.toFixed(0)}</div><div class="tl-stat-label">Spent</div></div>` : ''}
+    ${purchaseCount > 0 ? `<div class="tl-stat"><div class="tl-stat-num">$${totalSpent.toFixed(0)}</div><div class="tl-stat-label">Spent</div></div>` : ''}
     ${overdueNotes > 0 ? `<div class="tl-stat"><div class="tl-stat-num" style="color:#EF4444">${overdueNotes}</div><div class="tl-stat-label">Overdue</div></div>` : ''}
   </div>`;
 
@@ -1365,11 +1440,15 @@ function bindCalendarEvents() {
         return;
       }
 
-      const evCard = (item) => `<div class="event-card cal-event-card ${item.completed ? 'completed' : ''}" data-id="${item.id}">
+      const evCard = (item) => {
+        const link = launchLink(item);
+        const launches = !!link;
+        return `<div class="event-card cal-event-card ${item.completed ? 'completed' : ''}${launches ? ' launches-src' : ''}" data-id="${item.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''}>
           <div class="event-time">${item.startTime || ''}<br>${item.endTime || ''}</div>
-          <div style="flex:1"><div class="event-title">${sourceLogoSvg(item.source)}${escapeHtml(item.title)}</div></div>
+          <div style="flex:1"><div class="event-title">${srcLaunch(item)}${escapeHtml(item.title)}</div></div>
           <button class="event-edit-btn" data-id="${item.id}">&#9998;</button>
         </div>`;
+      };
       // Schedule blocks (edited on desktop) auto-complete once their time has passed.
       const wCard = (item) => {
         const col = getProjectColor(item.projectId);
@@ -1381,10 +1460,18 @@ function bindCalendarEvents() {
       };
       const nCard = (note) => {
         const projName = getProjectName(note.projectId);
-        return `<div class="event-card cal-event-card cal-note-card ${note.completed ? 'completed' : ''}" data-note-id="${note.id}">
+        // Tint the whole note like the board's sticky notes, honoring the color-mode
+        // selector — same as the desktop calendar day panel.
+        const sc = resolveBoardStickyColor(note);
+        // Synced notes carry a source link → the card opens that source and a ✎ opens
+        // the note details. Plain notes open details on tap.
+        const link = launchLink(note);
+        const launches = !!link;
+        return `<div class="event-card cal-event-card cal-note-card sticky-tint ${note.completed ? 'completed' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-left:4px solid ${sc.border}">
           <div class="event-time">${note.dueTime || ''}</div>
-          <div style="flex:1"><div class="event-title">${sourceLogoSvg(note.source)}&#128204; ${escapeHtml(note.title)}</div>
+          <div style="flex:1"><div class="event-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
           ${projName ? `<div class="cal-note-proj">${escapeHtml(projName)}</div>` : ''}</div>
+          ${launches ? `<button class="cal-note-detail-btn" data-note-id="${note.id}" title="Details">&#9998;</button>` : ''}
         </div>`;
       };
 
@@ -1403,11 +1490,37 @@ function bindCalendarEvents() {
       }
       eventsEl.innerHTML = ehtml;
 
+      // Tap a source badge → open that item's linked app (Gradescope/Variate/…),
+      // matching the desktop right bar. Stops the tap from also opening the note detail.
+      eventsEl.querySelectorAll('[data-open-url]').forEach(el => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.open(el.dataset.openUrl, '_blank', 'noopener');
+        });
+      });
+
       eventsEl.querySelectorAll('.event-edit-btn').forEach(btn => {
         btn.addEventListener('click', (e) => { e.stopPropagation(); openScheduleForm(btn.dataset.id); });
       });
+      // The ✎ on a synced note card opens its details.
+      eventsEl.querySelectorAll('.cal-note-detail-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => { e.stopPropagation(); showNoteDetail(btn.dataset.noteId); });
+      });
+      // Tap a note: synced notes open their source app; plain notes open details.
       eventsEl.querySelectorAll('.cal-note-card').forEach(card => {
-        card.addEventListener('click', () => showNoteDetail(card.dataset.noteId));
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.cal-note-detail-btn') || e.target.closest('[data-open-url]')) return;
+          const url = card.dataset.launchUrl;
+          if (url) { window.open(url, '_blank', 'noopener'); return; }
+          showNoteDetail(card.dataset.noteId);
+        });
+      });
+      // Tap an event that carries a source link → open it (its ✎ edit button is guarded).
+      eventsEl.querySelectorAll('.cal-event-card.launches-src[data-id]').forEach(card => {
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('.event-edit-btn') || e.target.closest('[data-open-url]')) return;
+          if (card.dataset.launchUrl) window.open(card.dataset.launchUrl, '_blank', 'noopener');
+        });
       });
       const calToggle = eventsEl.querySelector('.cal-completed-toggle');
       if (calToggle) calToggle.addEventListener('click', (e) => {

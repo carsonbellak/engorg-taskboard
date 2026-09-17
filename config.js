@@ -44,6 +44,16 @@ module.exports = {
   GRADESCOPE_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'gradescope_attachments'),
   EMAIL_ATTACH_DIR: path.join('C:\\Assistant\\appdata', 'email_attachments'),
 
+  // Variate link — Purdue's StudioKit assessment platform (assignments → calendar).
+  // Its API is real JSON but gated behind Purdue Career Account SSO (BoilerKey + Duo)
+  // via OAuth/PKCE, so there is NO headless password login. We authenticate by opening
+  // the web app in a BrowserWindow on a persistent session partition and letting the
+  // SPA manage the token; no password is stored (variate.json holds only name/email).
+  // Change these two URLs to point the integration at a different school's Variate.
+  VARIATE_APP_URL: 'https://purdue.variate.org',
+  VARIATE_API_URL: 'https://purdue.api.variate.org',
+  VARIATE_STATE_FILE: path.join('C:\\Assistant\\appdata', 'variate.json'),
+
   // Microsoft OAuth (modern auth) for Outlook / Microsoft 365 mail accounts.
   // Create an Azure app registration: Mobile/desktop platform, "Allow public client
   // flows" = Yes, delegated scopes IMAP.AccessAsUser.All + SMTP.Send + offline_access.

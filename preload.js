@@ -97,7 +97,8 @@ const __api = {
     maximizeToggle: () => ipcRenderer.invoke('win:maximizeToggle'),
     close: () => ipcRenderer.invoke('win:close'),
     isMaximized: () => ipcRenderer.invoke('win:isMaximized'),
-    onMaximized: (cb) => ipcRenderer.on('win:maximized', (e, v) => cb(v))
+    onMaximized: (cb) => ipcRenderer.on('win:maximized', (e, v) => cb(v)),
+    setGlassMode: (on) => ipcRenderer.invoke('win:setGlassMode', on)
   },
   menu: {
     action: (name) => ipcRenderer.invoke('appmenu:action', name)
@@ -207,6 +208,14 @@ const __api = {
     disconnect: () => ipcRenderer.invoke('gradescope:disconnect'),
     fetchAssignments: () => ipcRenderer.invoke('gradescope:fetchAssignments'),
     fetchAttachments: (courseId, assignmentId) => ipcRenderer.invoke('gradescope:fetchAttachments', courseId, assignmentId),
+  },
+  // Variate link (Purdue StudioKit) — assignment due dates → calendar. SSO login, so
+  // connect() opens a sign-in window rather than taking credentials.
+  variate: {
+    status: () => ipcRenderer.invoke('variate:status'),
+    connect: () => ipcRenderer.invoke('variate:connect'),
+    disconnect: () => ipcRenderer.invoke('variate:disconnect'),
+    fetchAssignments: () => ipcRenderer.invoke('variate:fetchAssignments'),
   },
   // Git integration
   git: {

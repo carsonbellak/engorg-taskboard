@@ -2597,6 +2597,20 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .cal-side-empty-hint { font-size: 11px; opacity: 0.7; margin-top: 6px; }
 .cal-side-note { cursor: pointer; }
 .cal-side-work { cursor: pointer; }
+/* Synced cards launch their source app on click — hint it, and reveal the ✎ on hover. */
+.cal-side .schedule-card.launches-src { cursor: pointer; }
+.cal-side-edit {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary, #334155);
+  font-size: 14px;
+  flex-shrink: 0;
+  opacity: 0.35;
+  transition: opacity 0.15s, color 0.15s;
+}
+.cal-side .schedule-card:hover .cal-side-edit { opacity: 0.85; }
+.cal-side-edit:hover { opacity: 1; color: var(--accent, #6366F1); }
 .cal-side-work .schedule-title { color: var(--text-secondary, #475569); }
 .cal-side .cal-detail-section-label { margin-bottom: 6px; }
 .cal-side-alldone {
@@ -2651,6 +2665,15 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 }
 .cal-side .note-priority-dot,
 .cal-side .schedule-close { flex-shrink: 0; white-space: nowrap; }
+/* Priority reads as a small footer dot, matching the sticky-note board (not a big label). */
+.cal-side .note-priority-dot { font-size: 10px; font-weight: 700; }
+/* Note tiles are fully tinted like sticky notes — the color comes from the color-mode
+   selector (inline background/border-color); we only supply the border widths/style. */
+.cal-side .schedule-card.sticky-tint {
+  border-style: solid;
+  border-width: 1.5px;
+  border-left-width: 4px;
+}
 
 /* Calendar day detail panel (legacy overlay styles — kept for back-compat) */
 .cal-day-detail {
@@ -3947,6 +3970,20 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   border-radius: 4px;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,0.18));
 }
+
+/* Source badge acting as a launcher (calendar cards) — click to open the linked app. */
+.src-launch {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 4px;
+  border-radius: 5px;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.src-launch:hover { transform: scale(1.18); }
+.src-launch:hover .src-logo { filter: drop-shadow(0 1px 3px rgba(0,0,0,0.35)); }
+.src-launch:focus-visible { outline: 2px solid var(--accent, #6366F1); outline-offset: 1px; }
+.src-launch .src-logo { margin-right: 0; }
 
 /* ======================================== */
 /* === FILE VIEWER === */
@@ -10584,6 +10621,68 @@ body.style-glass .progress-bar-fill {
   backdrop-filter: blur(4px);
 }
 
+/* ─── LIQUID GLASS: show-through + overlay legibility (appended last so these win) ───
+   At high Liquid Glass strength the app's own surfaces fade to nothing and the Win11
+   acrylic window (main.js backgroundMaterial:'acrylic') shows the desktop behind the app.
+   The base backdrop fades with translucency; the decorative colour blobs fade too so the
+   desktop reads cleanly at max. Menus/dropdowns/dialogs keep a minimum-opacity, strongly
+   blurred background so their text never becomes unreadable. */
+body.style-glass { background: transparent !important; }
+body.style-glass::before {
+  content: ''; position: fixed; inset: 0; z-index: -10; pointer-events: none;
+  background: var(--bg-primary);
+  opacity: var(--glass-k, 0.5);           /* 1 at strength 0 (opaque) → 0 at strength 1 */
+}
+body.style-glass .glass-blob { opacity: calc(0.9 * var(--glass-k, 0.5)) !important; }
+
+/* Clarity tracks the slider: the surfaces are already fully transparent at max, so the only
+   thing left reading as "solid" is the backdrop frost — scale the blur down as translucency
+   rises (heavy frost when frosted → clear see-through at max). Surfaces only; menus/dialogs
+   keep their fixed legibility blur above. */
+body.style-glass { --glass-blur: calc(8px + 15px * var(--glass-k, 0.5)); }
+body.style-glass #titlebar,
+body.style-glass #header,
+body.style-glass #sidebar,
+body.style-glass .sticky-note,
+body.style-glass .stats-card,
+body.style-glass .board-note-card,
+body.style-glass .settings-section {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(170%) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(170%) !important;
+}
+
+/* Overlay surfaces that must stay readable regardless of the slider. */
+body.style-glass { --glass-ov-rgb: 255,255,255; --glass-ov-a: calc(0.62 + 0.28 * var(--glass-k, 0.5)); }
+body.style-glass.theme-dark { --glass-ov-rgb: 22,26,36; --glass-ov-a: calc(0.66 + 0.26 * var(--glass-k, 0.5)); }
+body.style-glass .tb-dropdown,
+body.style-glass .tb-submenu,
+body.style-glass .sidebar-project-dropdown,
+body.style-glass .sidebar-group-dropdown,
+body.style-glass .slate-dropdown,
+body.style-glass .email-prompt-box,
+body.style-glass .email-rules-box,
+body.style-glass .modal-box {
+  background: rgba(var(--glass-ov-rgb), var(--glass-ov-a)) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(180%) !important;
+  backdrop-filter: blur(30px) saturate(180%) !important;
+}
+
+/* Email hub tracks Liquid Glass translucency like every other view. The 3-pane layout
+   painted an opaque --bg-primary across the whole tab (and the read pane did the same),
+   so nothing showed through the frosted backdrop; clear that fill and frost each pane
+   with the same translucent-surface treatment as #sidebar/#header so they fade with the
+   slider. The reading-pane iframe reads its background off the pane (email.js opaqueBg),
+   so the message body follows the panes automatically. */
+body.style-glass .email-layout { background: transparent !important; }
+body.style-glass .email-sidebar,
+body.style-glass .email-list-pane,
+body.style-glass .email-read-pane {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(170%) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(170%) !important;
+}
+body.style-glass .email-list-pane,
+body.style-glass .email-read-pane { background: var(--bg-secondary) !important; }
+
 /* ── GRADIENT / SUNSET enhanced ─────────────────────────────────────────── */
 body.style-gradient .sticky-note {
   box-shadow:
@@ -11510,6 +11609,23 @@ body.theme-light .syn-builtin { color: #059669; }
 .email-check { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted, #64748B); padding-bottom: 9px; }
 .email-help { font-size: 12px; color: var(--text-muted, #64748B); line-height: 1.5; }
 .email-help a { color: var(--accent, #3B82F6); }
+/* Recipient autocomplete (To/Cc address book) */
+.email-ac {
+  position: fixed; z-index: 9500; box-sizing: border-box;
+  max-height: 232px; overflow-y: auto; min-width: 180px; padding: 4px;
+  background: var(--bg-card, #fff);
+  border: 1px solid var(--border-color, #E2E8F0); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.22);
+}
+.email-ac.hidden { display: none; }
+.email-ac-item {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px; border-radius: 7px; cursor: pointer;
+  white-space: nowrap; overflow: hidden;
+}
+.email-ac-item.active { background: var(--accent-bg, var(--bg-hover, #EFF6FF)); }
+.email-ac-name { font-size: 13px; font-weight: 600; color: var(--text-primary, #1E293B); flex-shrink: 0; }
+.email-ac-addr { font-size: 12px; color: var(--text-muted, #64748B); overflow: hidden; text-overflow: ellipsis; }
 /* Rich-text compose editor (contenteditable) + formatting toolbar */
 .email-c-body { min-height: 200px; max-height: 42vh; overflow-y: auto; line-height: 1.5; }
 .email-c-body:empty:before { content: attr(data-placeholder); color: var(--text-faint, #94A3B8); }
@@ -12242,6 +12358,28 @@ body.theme-light .syn-builtin { color: #059669; }
 }
 .tour-next:hover { filter: brightness(1.07); }
 .tour-next:active { transform: scale(.97); }
+
+/* Weekly briefings (Monday itinerary / Friday recap) — rendered inside a tour slide */
+.brief-range { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted, #94A3B8); margin: 0 0 8px; }
+.brief-list { max-height: 46vh; overflow-y: auto; text-align: left; margin-top: 4px; padding-right: 2px; }
+.brief-day { display: flex; align-items: center; gap: 8px; margin: 12px 0 4px; }
+.brief-day:first-child { margin-top: 0; }
+.brief-day-name { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; color: var(--text-primary, #1E293B); }
+.brief-day-date { font-size: 11px; color: var(--text-muted, #94A3B8); }
+.brief-day-count { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--text-muted, #94A3B8); background: var(--bg-secondary, #F1F5F9); border-radius: 999px; padding: 1px 8px; }
+.brief-day-overdue .brief-day-name { color: #EF4444; }
+.brief-ul { list-style: none; margin: 0; padding: 0; }
+.brief-item { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border-color, #E2E8F0); font-size: 13px; }
+.brief-item:last-child { border-bottom: none; }
+.brief-time { flex: 0 0 74px; font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-muted, #64748B); }
+.brief-dot { flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; }
+.brief-title { flex: 1 1 auto; color: var(--text-primary, #1E293B); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brief-proj { flex: 0 0 auto; font-size: 11px; color: var(--text-muted, #94A3B8); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brief-tag { flex: 0 0 auto; font-size: 9px; font-weight: 800; letter-spacing: .4px; color: #fff; background: #8B5CF6; border-radius: 4px; padding: 1px 5px; }
+.brief-tag-evt { background: #3B82F6; }
+.brief-item.done .brief-title { text-decoration: line-through; color: var(--text-muted, #94A3B8); }
+.brief-item.overdue .brief-time { color: #EF4444; font-weight: 700; }
+.brief-empty { text-align: center; color: var(--text-secondary, #475569); font-size: 14px; margin: 10px 0 2px; }
 
 /* ============================================================
    Ecosystem view — the branched "engineering ecosystem" canvas

@@ -16,6 +16,18 @@ const ALPHA = 'abcdefghijklmnopqrstuvwxyz';
 let DICT = null; // Set<string> of lowercased words (comprehensive — membership/"is it misspelled")
 let FREQ = null; // Map<string, number> word → corpus frequency (for ranking suggestions)
 
+// The word list is ~370k entries (tens of MB once in a Set). It's only needed while a
+// note field is being edited, so free it after a spell of inactivity — a long-running
+// session that opened one note shouldn't hold that memory forever. Re-load is cheap
+// (a single 4MB file read) and happens transparently on the next check.
+let idleTimer = null;
+const IDLE_MS = 5 * 60 * 1000;
+function touchIdle() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { DICT = null; FREQ = null; idleTimer = null; }, IDLE_MS);
+  if (idleTimer.unref) idleTimer.unref(); // don't keep the process alive just for this
+}
+
 function loadUserWords() {
   try { const d = JSON.parse(fs.readFileSync(USER_DICT_FILE, 'utf8')); return Array.isArray(d.words) ? d.words : []; }
   catch { return []; }
@@ -26,6 +38,7 @@ function saveUserWords(words) {
 }
 
 function ensureLoaded() {
+  touchIdle(); // reset the idle-unload timer on every access (keeps it alive while editing)
   if (DICT) return;
   DICT = new Set();
   FREQ = new Map();

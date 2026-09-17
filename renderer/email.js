@@ -242,6 +242,7 @@ class EmailView {
         this.messages = messages.map(m => ({ ...m, accountId: this.selection, folder: this.folder }));
       }
       this._renderList();
+      this._harvestFromList();            // grow the recipient address book
       this._applyRules().catch(() => {}); // move rule-matched senders out of the inbox
     } catch (err) {
       listEl.innerHTML = `<div class="email-empty email-error">Could not load mail:<br>${this._esc(err.message)}</div>`;
@@ -327,6 +328,7 @@ class EmailView {
     this._renderList(); // highlight + clear unread
     try {
       const msg = await window.api.email.getMessage(accountId, folder, uid);
+      this._harvestMessage(msg);          // opened message carries the full to/cc list
       this._renderMessage(msg, accountId, folder, uid);
       const item = this.messages.find(m => m.accountId === accountId && m.uid === uid && m.folder === folder);
       if (item) item.seen = true;
@@ -745,6 +747,7 @@ class EmailView {
     document.getElementById('email-c-cancel').addEventListener('click', () => this._closeModal('email-compose-modal'));
     document.getElementById('email-c-send').addEventListener('click', () => this._send());
     document.getElementById('email-c-attach').addEventListener('click', () => this._attach());
+    this._initRecipientAutocomplete();  // type-ahead on the To/Cc fields
 
     // Rich-text toolbar. mousedown-preventDefault keeps the editor selection while the
     // button is clicked; foreColor/hiliteColor come from the two colour inputs.
@@ -1083,9 +1086,194 @@ class EmailView {
     }
   }
 
+  // ── recipient autocomplete (device-local address book) ──
+  // People you've corresponded with are harvested from message headers as you browse
+  // mail and kept in localStorage (device-local — never synced to Firestore, matching
+  // email's desktop-only, device-local nature). Typing in To/Cc suggests them, ranked
+  // by how often and how recently you've seen the address.
+  _loadContacts() {
+    if (this._contacts) return this._contacts;
+    let obj = {};
+    try { obj = JSON.parse(localStorage.getItem('email_contacts_v1')) || {}; } catch {}
+    this._contacts = obj;
+    return obj;
+  }
+  _saveContacts() {
+    let store = this._loadContacts();
+    const keys = Object.keys(store);
+    if (keys.length > 500) { // keep the store bounded: most-used, then most-recent
+      keys.sort((a, b) => (store[b].c - store[a].c) || (store[b].t - store[a].t));
+      const trimmed = {};
+      for (const k of keys.slice(0, 500)) trimmed[k] = store[k];
+      this._contacts = store = trimmed;
+    }
+    try { localStorage.setItem('email_contacts_v1', JSON.stringify(store)); } catch {}
+  }
+  _addContact(person, ts) {
+    if (!person) return false;
+    const address = (person.address || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return false;
+    const key = address.toLowerCase();
+    const store = this._loadContacts();
+    const name = (person.name || '').trim();
+    const cur = store[key] || { a: address, n: '', c: 0, t: 0 };
+    cur.a = address;                                       // canonical casing
+    if (name && name.length > cur.n.length) cur.n = name;  // prefer a fuller display name
+    cur.c = (cur.c || 0) + 1;
+    if (ts && ts > (cur.t || 0)) cur.t = ts;
+    store[key] = cur;
+    return true;
+  }
+  _harvestFromList() {
+    let changed = false;
+    for (const m of this.messages) {
+      const ts = m.date ? new Date(m.date).getTime() : 0;
+      if (this._addContact(m.from, ts)) changed = true;
+      for (const p of (m.to || [])) if (this._addContact(p, ts)) changed = true;
+      for (const p of (m.cc || [])) if (this._addContact(p, ts)) changed = true;
+    }
+    if (changed) this._saveContacts();
+  }
+  _harvestMessage(msg) {
+    if (!msg) return;
+    const ts = msg.date ? new Date(msg.date).getTime() : Date.now();
+    let changed = this._addContact(msg.from, ts);
+    for (const p of (msg.to || [])) changed = this._addContact(p, ts) || changed;
+    for (const p of (msg.cc || [])) changed = this._addContact(p, ts) || changed;
+    if (changed) this._saveContacts();
+  }
+  _ownAddresses() {
+    return new Set(this.accounts.map(a => (a.email || '').toLowerCase()).filter(Boolean));
+  }
+  _searchContacts(query, exclude) {
+    const q = query.toLowerCase();
+    const own = this._ownAddresses();
+    const store = this._loadContacts();
+    const out = [];
+    for (const k of Object.keys(store)) {
+      if (own.has(k) || (exclude && exclude.has(k))) continue;
+      const c = store[k];
+      const addr = (c.a || '').toLowerCase();
+      const name = (c.n || '').toLowerCase();
+      let score = -1;
+      if (addr.startsWith(q) || name.startsWith(q)) score = 3;        // leading match
+      else if (name.split(/\s+/).some(w => w.startsWith(q))) score = 2; // last-name match
+      else if (addr.includes(q) || name.includes(q)) score = 1;         // anywhere
+      if (score < 0) continue;
+      out.push({ addr: c.a, name: c.n, score, c: c.c || 0, t: c.t || 0 });
+    }
+    out.sort((a, b) => (b.score - a.score) || (b.c - a.c) || (b.t - a.t) || a.addr.localeCompare(b.addr));
+    return out.slice(0, 6);
+  }
+  _formatRecipient(p) {
+    const name = (p.name || '').trim();
+    if (!name) return p.addr;
+    // Quote a display name that would confuse comma-split address parsing.
+    const safe = /[",<>@]/.test(name) ? '"' + name.replace(/"/g, '') + '"' : name;
+    return `${safe} <${p.addr}>`;
+  }
+
+  _initRecipientAutocomplete() {
+    if (this._ac) return;
+    const box = document.createElement('div');
+    box.className = 'email-ac hidden';
+    document.body.appendChild(box);
+    this._ac = { box, input: null, items: [], active: -1 };
+    box.addEventListener('mousedown', (e) => e.preventDefault()); // don't blur the input
+    for (const id of ['email-c-to', 'email-c-cc']) {
+      const inp = document.getElementById(id);
+      if (!inp) continue;
+      inp.setAttribute('autocomplete', 'off');
+      inp.addEventListener('input', () => this._acUpdate(inp));
+      inp.addEventListener('focus', () => this._acUpdate(inp));
+      inp.addEventListener('keydown', (e) => this._acKeydown(e, inp));
+      inp.addEventListener('blur', () => setTimeout(() => this._acHide(), 150));
+    }
+    window.addEventListener('resize', () => this._acHide());
+  }
+  // Current comma-separated token under the caret.
+  _acToken(inp) {
+    const val = inp.value;
+    const caret = inp.selectionStart == null ? val.length : inp.selectionStart;
+    const start = val.lastIndexOf(',', caret - 1) + 1;
+    return { start, end: caret, q: val.slice(start, caret).trim() };
+  }
+  // Addresses already present in the field (so we don't suggest a duplicate).
+  _acExisting(inp) {
+    const set = new Set();
+    for (const part of inp.value.split(',')) {
+      const m = part.match(/<([^>]+)>/);
+      const a = (m ? m[1] : part).trim().toLowerCase();
+      if (a && a.includes('@')) set.add(a);
+    }
+    return set;
+  }
+  _acUpdate(inp) {
+    if (!this._ac) return;
+    const { q } = this._acToken(inp);
+    if (!q) return this._acHide();
+    const matches = this._searchContacts(q, this._acExisting(inp));
+    if (!matches.length) return this._acHide();
+    this._ac.input = inp;
+    this._ac.items = matches;
+    this._ac.active = 0;
+    this._acRender();
+    this._acPosition(inp);
+    this._ac.box.classList.remove('hidden');
+  }
+  _acRender() {
+    const { box, items, active } = this._ac;
+    box.innerHTML = items.map((m, i) =>
+      `<div class="email-ac-item ${i === active ? 'active' : ''}" data-i="${i}">
+        <span class="email-ac-name">${this._esc(m.name || m.addr)}</span>
+        ${m.name ? `<span class="email-ac-addr">${this._esc(m.addr)}</span>` : ''}
+      </div>`).join('');
+    box.querySelectorAll('.email-ac-item').forEach(el => {
+      el.addEventListener('mouseenter', () => { this._ac.active = +el.dataset.i; this._acHighlight(); });
+      el.addEventListener('click', () => this._acAccept(+el.dataset.i));
+    });
+  }
+  _acHighlight() {
+    this._ac.box.querySelectorAll('.email-ac-item').forEach((el, i) =>
+      el.classList.toggle('active', i === this._ac.active));
+  }
+  _acPosition(inp) {
+    const r = inp.getBoundingClientRect();
+    const box = this._ac.box;
+    box.style.left = r.left + 'px';
+    box.style.top = (r.bottom + 2) + 'px';
+    box.style.width = r.width + 'px';
+  }
+  _acVisible() { return this._ac && !this._ac.box.classList.contains('hidden'); }
+  _acHide() { if (this._ac) this._ac.box.classList.add('hidden'); }
+  _acKeydown(e, inp) {
+    if (!this._acVisible()) return;
+    const ac = this._ac;
+    if (e.key === 'ArrowDown') { e.preventDefault(); ac.active = (ac.active + 1) % ac.items.length; this._acHighlight(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); ac.active = (ac.active - 1 + ac.items.length) % ac.items.length; this._acHighlight(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); this._acAccept(ac.active); }
+    else if (e.key === 'Escape') { e.preventDefault(); this._acHide(); }
+  }
+  _acAccept(i) {
+    const ac = this._ac;
+    const inp = ac.input;
+    if (!inp || !ac.items[i]) return;
+    const { start, end } = this._acToken(inp);
+    const val = inp.value;
+    const before = val.slice(0, start);
+    const after = val.slice(end).replace(/^\s*,?\s*/, ''); // drop a separator we're about to re-add
+    const lead = before && !/\s$/.test(before) ? ' ' : ''; // tidy space after a prior comma
+    const newBefore = before + lead + this._formatRecipient(ac.items[i]) + ', ';
+    inp.value = newBefore + after;
+    const caret = newBefore.length;
+    inp.setSelectionRange(caret, caret);
+    this._acHide();
+    inp.focus();
+  }
+
   // ── helpers ──
   _showModal(id) { document.getElementById(id).classList.remove('hidden'); }
-  _closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+  _closeModal(id) { document.getElementById(id).classList.add('hidden'); this._acHide(); }
 
   _fmtDate(d, full) {
     if (!d) return '';

@@ -18,6 +18,7 @@ const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
 const registerGithub  = require('./ipc/github');
 const registerGradescope = require('./ipc/gradescope');
+const registerVariate = require('./ipc/variate');
 const registerSpell   = require('./ipc/spell');
 const registerKicadImporter = require('./ipc/kicad-importer');
 const registerUtilityStore  = require('./ipc/utility-store');
@@ -50,6 +51,10 @@ function createWindow() {
     // menu bar but keep the resizable window frame. The app draws its own slim,
     // theme-aware bar with the File/Edit/View/Window menus and window controls.
     titleBarStyle: 'hidden',
+    // Win11 acrylic: a transparent window base + DWM acrylic material, so when the Liquid
+    // Glass theme fades its surfaces out the desktop shows (frosted) through the app. Other
+    // themes paint an opaque body over it, so they look unchanged. No-op off Windows.
+    ...(process.platform === 'win32' ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -83,38 +88,61 @@ function createWindow() {
   // the custom titlebar reproduces the menu items visually.
   mainWindow.setMenuBarVisibility(false);
 
-  // ── Maximize that respects the taskbar ────────────────────────────────────
-  // A native maximize on a hidden-title-bar window can spill a few px under the
-  // Windows taskbar, hiding the bottom of the app. We convert every maximize into an
-  // explicit "fit the display work area" resize (work area already excludes the
-  // taskbar) and remember the pre-maximize bounds so Restore returns to them.
+  // ── Maximize that respects the taskbar (and keeps Liquid Glass acrylic alive) ──────
+  // A native maximize on a hidden-title-bar window can spill under the taskbar, and — for
+  // the Liquid Glass theme — Windows drops the acrylic desktop-see-through once a window
+  // covers the screen. So "maximize" is a manual resize to the display work area; in glass
+  // mode we leave a small inset so the window never fully covers the screen and acrylic
+  // survives. An explicit _expanded flag tracks the state (geometry-matching was fragile
+  // once an inset is involved).
+  const GLASS_INSET = 8;
   const workAreaFor = () => screen.getDisplayMatching(mainWindow.getBounds()).workArea;
-  const isWorkAreaSized = () => {
-    const wa = workAreaFor(); const b = mainWindow.getBounds();
-    return Math.abs(b.x - wa.x) <= 2 && Math.abs(b.y - wa.y) <= 2 &&
-           Math.abs(b.width - wa.width) <= 2 && Math.abs(b.height - wa.height) <= 2;
+  const expandedBounds = () => {
+    const wa = workAreaFor();
+    if (!mainWindow._glassMode) return { x: wa.x, y: wa.y, width: wa.width, height: wa.height };
+    const i = GLASS_INSET;
+    return { x: wa.x + i, y: wa.y + i, width: wa.width - 2 * i, height: wa.height - 2 * i };
   };
-  // Remember the last "normal" (non-expanded) bounds for Restore.
+  mainWindow._expanded = false;
+  let _fitting = false;
+  // Remember the last "normal" (non-expanded) bounds for Restore. Skip while we're resizing
+  // to/from the expanded state so it never captures the expanded geometry.
   const trackNormal = () => {
-    if (mainWindow && !mainWindow.isMaximized() && !isWorkAreaSized()) {
-      mainWindow._normalBounds = mainWindow.getBounds();
-    }
+    if (_fitting) return;
+    if (mainWindow && !mainWindow._expanded && !mainWindow.isMaximized()) mainWindow._normalBounds = mainWindow.getBounds();
   };
   mainWindow.on('resize', trackNormal);
   mainWindow.on('move', trackNormal);
-  mainWindow.fitToWorkArea = () => { mainWindow.setBounds(workAreaFor()); };
-  mainWindow.isWorkAreaSized = isWorkAreaSized;
 
-  let _fitting = false;
-  mainWindow.on('maximize', () => {
-    if (_fitting) return;                 // our own fit — ignore the re-entrant event
+  mainWindow.expand = () => {
+    if (!mainWindow._expanded && !mainWindow.isMaximized()) mainWindow._normalBounds = mainWindow.getBounds();
     _fitting = true;
-    mainWindow.unmaximize();              // drop the native (possibly-overflowing) maximize
-    mainWindow.setBounds(workAreaFor());  // …and fit the work area instead
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    mainWindow.setBounds(expandedBounds());
+    mainWindow._expanded = true;
     _fitting = false;
     mainWindow.webContents.send('win:maximized', true);
-  });
-  mainWindow.on('unmaximize', () => { if (!_fitting) mainWindow.webContents.send('win:maximized', false); });
+  };
+  mainWindow.restore = () => {
+    _fitting = true;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    if (mainWindow._normalBounds) mainWindow.setBounds(mainWindow._normalBounds);
+    mainWindow._expanded = false;
+    _fitting = false;
+    mainWindow.webContents.send('win:maximized', false);
+  };
+  mainWindow.toggleExpand = () => { mainWindow._expanded ? mainWindow.restore() : mainWindow.expand(); return mainWindow._expanded; };
+  mainWindow.isExpanded = () => mainWindow._expanded;
+  // Renderer reports whether Liquid Glass is active; if we're already expanded, re-fit so
+  // the inset appears/disappears the moment the theme changes.
+  mainWindow.setGlassMode = (on) => {
+    const changed = mainWindow._glassMode !== !!on;
+    mainWindow._glassMode = !!on;
+    if (changed && mainWindow._expanded) { _fitting = true; mainWindow.setBounds(expandedBounds()); _fitting = false; }
+  };
+
+  mainWindow.on('maximize', () => { if (!_fitting) mainWindow.expand(); });   // double-click / snap / Win+Up
+  mainWindow.on('unmaximize', () => { if (!_fitting) { mainWindow._expanded = false; mainWindow.webContents.send('win:maximized', false); } });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http')) shell.openExternal(url);
@@ -187,6 +215,7 @@ app.whenReady().then(() => {
   registerCalendar();
   registerGithub();
   registerGradescope();
+  registerVariate(getMainWindow);
   registerSpell();
   registerKicadImporter(getMainWindow);
   registerUtilityStore();
