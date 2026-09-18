@@ -86,9 +86,9 @@ class InkActivity : ComponentActivity() {
     private var currentPageId: String = ""
     private var pageLabel: Button? = null
 
-    private val accent = Color.rgb(0x63, 0x66, 0xF1)
-    private val light = Color.rgb(0xEE, 0xF0, 0xF4)
-    private val onSurface = Color.rgb(0x3A, 0x41, 0x4E)
+    private val accent get() = AppTheme.accent
+    private val light get() = AppTheme.elevated
+    private val onSurface get() = AppTheme.text
 
     private val palette = intArrayOf(
         Color.rgb(0x16, 0x1A, 0x22), Color.rgb(0x45, 0x4B, 0x55), Color.rgb(0x8A, 0x92, 0x9E), Color.rgb(0xEC, 0xEC, 0xEC), Color.WHITE,
@@ -99,8 +99,10 @@ class InkActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTheme.load(this)
 
         finishedView = FinishedStrokesView(this)
+        finishedView.backdrop = AppTheme.bg
         inProgressView = InProgressStrokesView(this)
         eraserOverlay = EraserOverlay(this)
 
@@ -134,7 +136,7 @@ class InkActivity : ComponentActivity() {
         predictor = MotionEventPredictor.newInstance(touch)
 
         val root = FrameLayout(this).apply {
-            setBackgroundColor(Color.rgb(0xE9, 0xEA, 0xEC))
+            setBackgroundColor(AppTheme.bg)
             addView(finishedView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(inProgressView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(eraserOverlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
@@ -424,11 +426,11 @@ class InkActivity : ComponentActivity() {
         for ((t, btn) in toolButtons) {
             val active = t == tool
             btn.background = pillBg(if (active) accent else light)
-            btn.setTextColor(if (active) Color.WHITE else onSurface)
+            btn.setTextColor(if (active) AppTheme.onAccent() else onSurface)
         }
         shapeButton?.let {
             it.background = pillBg(if (geometrizeOn) accent else light)
-            it.setTextColor(if (geometrizeOn) Color.WHITE else onSurface)
+            it.setTextColor(if (geometrizeOn) AppTheme.onAccent() else onSurface)
         }
     }
 
@@ -445,7 +447,7 @@ class InkActivity : ComponentActivity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(Color.WHITE) }
+            background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(AppTheme.surface) }
             elevation = dp(6).toFloat()
             setPadding(dp(10), dp(8), dp(10), dp(8))
             addView(pill("‹ App") { finish() })

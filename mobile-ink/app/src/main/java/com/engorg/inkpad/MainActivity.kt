@@ -93,7 +93,11 @@ class MainActivity : ComponentActivity() {
                     val last = u.lastPathSegment ?: ""
                     // The PWA's "Ink" tab navigates to /ink.html — hand that off to native ink.
                     if (last == "ink.html" || u.path?.trimEnd('/')?.endsWith("/ink") == true) {
-                        startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                        // Snapshot the PWA's live theme colors so the native ink UI matches.
+                        view.evaluateJavascript(THEME_JS) { result ->
+                            AppTheme.saveFromJson(this@MainActivity, result)
+                            startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                        }
                         return true
                     }
                     return false // let the WebView load everything else (the PWA)
@@ -145,6 +149,18 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val PWA_URL = "https://assistant-taskboard.web.app"
+
+        // Resolves the PWA's live theme CSS variables to concrete rgb() colors.
+        private const val THEME_JS = """
+(function(){
+  function resolve(v){try{var e=document.createElement('span');e.style.color='var('+v+')';e.style.display='none';(document.body||document.documentElement).appendChild(e);var c=getComputedStyle(e).color;e.remove();return c;}catch(_){return '';}}
+  return JSON.stringify({
+    accent:resolve('--accent'), bg:resolve('--bg'), surface:resolve('--bg-card'),
+    elevated:resolve('--bg-elevated'), text:resolve('--text'),
+    dark:document.body.classList.contains('theme-dark')
+  });
+})()
+"""
 
         // Shows a dismissable red banner with any JS error / unhandled rejection /
         // console.error, so a blank screen reveals its cause instead of staying white.

@@ -32,11 +32,12 @@ class LibraryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppTheme.load(this)
         store = NotebookStore(filesDir)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(0xF3, 0xF4, 0xF6))
+            setBackgroundColor(AppTheme.bg)
         }
         root.addView(buildBar())
         val scroll = ScrollView(this)
@@ -64,9 +65,9 @@ class LibraryActivity : ComponentActivity() {
     private fun buildBar(): View {
         fun btn(t: String, f: () -> Unit) = Button(this).apply {
             text = t; isAllCaps = false; textSize = 13f
-            val accent = t.startsWith("+ Notebook")
-            setTextColor(if (accent) Color.WHITE else Color.rgb(0x3A, 0x41, 0x4E))
-            background = pillBg(if (accent) Color.rgb(0x63, 0x66, 0xF1) else Color.rgb(0xEE, 0xF0, 0xF4))
+            val isAccent = t.startsWith("+ Notebook")
+            setTextColor(if (isAccent) AppTheme.onAccent() else AppTheme.text)
+            background = pillBg(if (isAccent) AppTheme.accent else AppTheme.elevated)
             stateListAnimator = null
             setPadding(dp(14), dp(4), dp(14), dp(4))
             setOnClickListener { f() }
@@ -74,11 +75,12 @@ class LibraryActivity : ComponentActivity() {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.WHITE)
+            setBackgroundColor(AppTheme.surface)
             setPadding(dp(8), dp(6), dp(8), dp(6))
             addView(btn("‹ App") { finish() })
             addView(TextView(this@LibraryActivity).apply {
                 text = "  Notebooks"; textSize = 18f; setTypeface(null, Typeface.BOLD)
+                setTextColor(AppTheme.text)
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             addView(btn("+ Folder") { createFolderDialog() })
@@ -100,13 +102,16 @@ class LibraryActivity : ComponentActivity() {
         }
     }
 
+    private fun muted() = Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
+
     private fun hint(t: String) = TextView(this).apply {
-        text = t; setTextColor(Color.rgb(0x8A, 0x92, 0x9E)); textSize = 14f
+        text = t; setTextColor(muted()); textSize = 14f
         setPadding(dp(4), dp(10), dp(4), dp(10))
     }
 
     private fun folderHeader(fo: NotebookStore.Folder) = TextView(this).apply {
         text = "📁 ${fo.name}"; textSize = 15f; setTypeface(null, Typeface.BOLD)
+        setTextColor(AppTheme.text)
         setPadding(dp(4), dp(18), dp(4), dp(6))
         setOnLongClickListener { folderMenu(fo); true }
     }
