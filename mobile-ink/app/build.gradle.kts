@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -9,7 +11,7 @@ plugins {
 val ksB64 = file("debug-keystore.b64")
 val ksFile = file("debug.keystore")
 if (ksB64.exists() && !ksFile.exists()) {
-    ksFile.writeBytes(java.util.Base64.getMimeDecoder().decode(ksB64.readText()))
+    ksFile.writeBytes(Base64.getMimeDecoder().decode(ksB64.readText()))
 }
 
 // The Firebase project's OAuth "Web client ID" (public, not a secret). Set it in
