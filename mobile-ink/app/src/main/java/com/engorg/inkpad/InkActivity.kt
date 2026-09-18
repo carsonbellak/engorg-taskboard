@@ -4,7 +4,10 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import kotlin.math.hypot
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -57,6 +60,13 @@ class InkActivity : ComponentActivity() {
     private var strokeId: InProgressStrokeId? = null
     private var currentStrokeHighlighter = false
     private var dirtyErase = false
+
+    // hold-to-geometrize: track the current stroke's points + a no-movement timer
+    private val currentPoints = ArrayList<PointF>()
+    private val holdHandler = Handler(Looper.getMainLooper())
+    private var holdRunnable: Runnable? = null
+    private val holdPoint = PointF()
+    private var geometrized = false
 
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
     private var brushSize = 6f
@@ -165,8 +175,13 @@ class InkActivity : ComponentActivity() {
                     Mode.DRAW -> {
                         host.requestUnbufferedDispatch(event)
                         currentStrokeHighlighter = tool == Tool.HIGHLIGHTER
+                        geometrized = false
+                        currentPoints.clear()
+                        currentPoints.add(PointF(event.getX(idx), event.getY(idx)))
+                        holdPoint.set(event.getX(idx), event.getY(idx))
                         val meToWorld = Matrix().apply { setTranslate(-panX, -panY) }
                         strokeId = inProgressView.startStroke(event, activePointerId, brush(), meToWorld, Matrix())
+                        scheduleHold()
                     }
                     Mode.PAN -> { lastPanX = event.getX(idx); lastPanY = event.getY(idx) }
                     Mode.ERASE -> eraseAt(event.getX(idx), event.getY(idx))
@@ -180,12 +195,18 @@ class InkActivity : ComponentActivity() {
                 if (idx < 0) return true
                 when (mode) {
                     Mode.DRAW -> {
+                        if (geometrized) return true
                         val sid = strokeId ?: return true
                         val predicted = predictor.predict()
                         try {
                             inProgressView.addToStroke(event, activePointerId, sid, predicted)
                         } finally {
                             predicted?.recycle()
+                        }
+                        val x = event.getX(idx); val y = event.getY(idx)
+                        currentPoints.add(PointF(x, y))
+                        if (hypot(x - holdPoint.x, y - holdPoint.y) > 6f) {
+                            holdPoint.set(x, y); scheduleHold()
                         }
                     }
                     Mode.PAN -> {
@@ -202,8 +223,9 @@ class InkActivity : ComponentActivity() {
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 if (mode == Mode.DRAW) {
+                    cancelHold()
                     val sid = strokeId
-                    if (sid != null) {
+                    if (sid != null && !geometrized) {
                         if (event.actionMasked == MotionEvent.ACTION_CANCEL) inProgressView.cancelStroke(sid, event)
                         else inProgressView.finishStroke(event, activePointerId, sid)
                     }
@@ -215,6 +237,40 @@ class InkActivity : ComponentActivity() {
             }
         }
         return false
+    }
+
+    // ---- hold-to-geometrize ----
+    private fun scheduleHold() {
+        cancelHold()
+        val r = Runnable { tryGeometrize() }
+        holdRunnable = r
+        holdHandler.postDelayed(r, 550)
+    }
+
+    private fun cancelHold() {
+        holdRunnable?.let { holdHandler.removeCallbacks(it) }
+        holdRunnable = null
+    }
+
+    private fun tryGeometrize() {
+        if (mode != Mode.DRAW || geometrized) return
+        val sid = strokeId ?: return
+        val worldPts = currentPoints.map { PointF(it.x - panX, it.y - panY) }
+        val shape = ShapeRecognizer.recognize(worldPts) ?: return
+        val stroke = buildStrokeFromPoints(shape, brush()) ?: return
+        inProgressView.cancelStroke(sid, null)
+        finishedView.addStroke(stroke, shape, currentStrokeHighlighter)
+        geometrized = true
+        save()
+    }
+
+    private fun buildStrokeFromPoints(pts: List<PointF>, br: Brush): Stroke? {
+        val batch = MutableStrokeInputBatch()
+        var t = 0L
+        for (p in pts) {
+            try { batch.add(InputToolType.STYLUS, p.x, p.y, t, pressure = 0.5f); t += 6 } catch (_: Exception) { }
+        }
+        return if (batch.size >= 2) runCatching { Stroke(br, batch) }.getOrNull() else null
     }
 
     // ---- persistence (per notebook page) ----
