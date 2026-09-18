@@ -2135,7 +2135,7 @@ async function refreshLinkedAccounts() {
         + '<div class="acct-inline-form"><input type="password" class="settings-input acct-input" id="cl-key" placeholder="sk-ant-…" autocomplete="off">'
         + '<a href="#" class="acct-help" data-act="cl-help">Get a key ↗</a></div>'
         + '<div class="acct-inline-form"><label class="settings-field-hint" style="margin:0 8px 0 0">Model</label>' + clModelSelect(cl.model || 'claude-opus-5') + '</div>'
-        + '<p class="settings-field-hint">Your key is encrypted on this device (OS keystore) and never leaves it. Usage is billed to your Anthropic account.</p>',
+        + '<p class="settings-field-hint">When creating the key, choose the <strong>Default workspace</strong> scope (not <strong>Organization</strong>). Your key is encrypted on this device (OS keystore) and never leaves it. Usage is billed to your Anthropic account.</p>',
       status: 'Not linked', statusClass: '',
       actions: '<button class="settings-btn settings-btn-sm" data-act="cl-connect">Connect</button>',
     });

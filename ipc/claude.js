@@ -114,6 +114,17 @@ function buildSystemPrompt() {
   ].join('\n');
 }
 
+// Per-model tuning for the extraction request. Most models use a minimal request
+// (no thinking / no output_config) so the same body is valid across the lineup —
+// notably effort 400s on Haiku 4.5, and omitting `thinking` already means "off" there.
+// Opus 4.8 is offered explicitly as a fast option: thinking disabled + medium effort.
+function modelRequestOpts(model) {
+  if (model === 'claude-opus-4-8') {
+    return { thinking: { type: 'disabled' }, output_config: { effort: 'medium' } };
+  }
+  return {};
+}
+
 // Pull the JSON object out of the model's text response (tolerating stray fences).
 function parseModelJson(text) {
   if (!text) throw new Error('Empty response from Claude.');
@@ -144,6 +155,9 @@ async function anthropicFetch(pathname, { method = 'GET', body, key } = {}) {
 
 function friendlyError(status, payload) {
   const msg = (payload && payload.error && payload.error.message) || '';
+  // Organization-scoped keys need an anthropic-workspace-id header for Messages API
+  // calls, which this app doesn't send — steer the user to a workspace-scoped key.
+  if (/workspace/i.test(msg)) return 'This looks like an Organization-scoped key. Create a key with the "Default workspace" scope instead.';
   if (status === 401) return 'Invalid API key. Check the key from console.anthropic.com.';
   if (status === 403) return 'This API key is not permitted to make this request.';
   if (status === 429) return 'Rate limited by Anthropic — wait a moment and try again.';
@@ -221,11 +235,13 @@ module.exports = function register(getMainWindow) {
       type: 'text',
       text: `Today's date is ${today}. Extract the calendar items from the syllabus above and return the JSON object described in your instructions. Remember: JSON only.`,
     };
+    const model = getModel();
     const body = {
-      model: getModel(),
+      model,
       max_tokens: 8000,
       system: buildSystemPrompt(),
       messages: [{ role: 'user', content: [...input.blocks, instruction] }],
+      ...modelRequestOpts(model),
     };
 
     let res;

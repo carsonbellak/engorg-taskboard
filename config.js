@@ -46,6 +46,7 @@ module.exports = {
   // Models offered in the Linked Accounts → Claude card. Default is Opus 5.
   CLAUDE_MODELS: [
     { id: 'claude-opus-5', label: 'Claude Opus 5 (most capable)' },
+    { id: 'claude-opus-4-8', label: 'Claude Opus 4.8 (fast, no thinking)' },
     { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 (balanced)' },
     { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (fastest / cheapest)' },
   ],
