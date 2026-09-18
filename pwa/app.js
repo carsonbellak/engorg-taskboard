@@ -18,12 +18,23 @@ const db = firebase.firestore();
 // before any Firestore call.
 try { db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { console.warn('firestore settings:', e); }
 
-// Inside the native Android shell (a WebView), Google OAuth is blocked by Google and its
-// popup falls back to a redirect that leaves Firebase stuck in "missing initial state"
-// (WebView sessionStorage is partitioned) — blanking the app on every load. Hide the
-// Google option there so only email/password is used, and never trigger that flow.
+// Google OAuth is blocked by Google inside WebViews, so the native Android shell signs in
+// through the system account picker and hands us the Google ID token here to finish the
+// Firebase sign-in. Exposed for the native side to call.
+window.__nativeGoogleCredential = async function (idToken) {
+  try {
+    const cred = firebase.auth.GoogleAuthProvider.credential(idToken);
+    await auth.signInWithCredential(cred);
+  } catch (e) {
+    showLoginError('Google sign-in failed: ' + (e && e.message ? e.message : e));
+  }
+};
+
 const IN_APP_WEBVIEW = /\bwv\b/.test(navigator.userAgent || '');
-if (IN_APP_WEBVIEW) {
+const NATIVE_AUTH = !!(window.AndroidAuth && typeof window.AndroidAuth.signInWithGoogle === 'function');
+// Only hide the web Google button in a WebView that has NO native bridge (there it can't
+// work). With the native bridge present the button is re-wired to the native flow below.
+if (IN_APP_WEBVIEW && !NATIVE_AUTH) {
   try {
     ['#btn-google-login', '.login-divider'].forEach(sel => {
       const el = document.querySelector(sel);
@@ -267,6 +278,12 @@ function maybeRunPwaTour() {
 }
 
 document.getElementById('btn-google-login').addEventListener('click', async () => {
+  // In the native shell, delegate to native Google Sign-In (the picker), which calls
+  // window.__nativeGoogleCredential with the ID token.
+  if (window.AndroidAuth && typeof window.AndroidAuth.signInWithGoogle === 'function') {
+    window.AndroidAuth.signInWithGoogle();
+    return;
+  }
   try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
   catch (err) { showLoginError(err.message); }
 });

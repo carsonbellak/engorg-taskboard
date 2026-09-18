@@ -3,6 +3,19 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Decode the committed base64 debug keystore so every build — CI and local — signs with
+// the SAME fixed SHA-1 (registered with Firebase for native Google Sign-In). Without a
+// fixed keystore, each CI build gets a random SHA-1 and Google Sign-In (error 10) breaks.
+val ksB64 = file("debug-keystore.b64")
+val ksFile = file("debug.keystore")
+if (ksB64.exists() && !ksFile.exists()) {
+    ksFile.writeBytes(java.util.Base64.getMimeDecoder().decode(ksB64.readText()))
+}
+
+// The Firebase project's OAuth "Web client ID" (public, not a secret). Set it in
+// gradle.properties as WEB_CLIENT_ID=... ; native sign-in requests an ID token for it.
+val webClientId = (findProperty("WEB_CLIENT_ID") as String?) ?: ""
+
 android {
     namespace = "com.engorg.inkpad"
     compileSdk = 35
@@ -12,15 +25,27 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1-poc"
+        versionName = "0.1"
+        buildConfigField("String", "WEB_CLIENT_ID", "\"$webClientId\"")
+    }
+
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
-        // Debug builds are auto-signed with the debug keystore, so the APK sideloads
-        // without any signing setup.
         release {
             isMinifyEnabled = false
         }
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     compileOptions {
@@ -34,7 +59,6 @@ android {
 
 dependencies {
     // Jetpack Ink — Google's low-latency stylus library (front-buffered rendering).
-    // Pinned to the stable 1.0.0 release (verified on Google's Maven repo).
     val inkVersion = "1.0.0"
     implementation("androidx.ink:ink-authoring:$inkVersion")
     implementation("androidx.ink:ink-brush:$inkVersion")
@@ -45,6 +69,9 @@ dependencies {
 
     // Motion prediction — draws a predicted lead ahead of the pen to cut perceived latency.
     implementation("androidx.input:input-motionprediction:1.0.0")
+
+    // Native Google Sign-In (bridged into the WebView's Firebase session).
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
