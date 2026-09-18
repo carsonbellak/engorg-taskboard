@@ -4,6 +4,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
 import android.os.Bundle
+import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -20,15 +21,19 @@ import androidx.ink.authoring.InProgressStrokeId
 import androidx.ink.authoring.InProgressStrokesFinishedListener
 import androidx.ink.authoring.InProgressStrokesView
 import androidx.ink.brush.Brush
+import androidx.ink.brush.InputToolType
 import androidx.ink.brush.StockBrushes
+import androidx.ink.strokes.MutableStrokeInputBatch
 import androidx.ink.strokes.Stroke
+import androidx.ink.strokes.StrokeInput
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
 
 /**
- * Native low-latency handwriting surface.
- *  • Pen writes (front-buffered androidx.ink + prediction); highlighter is a translucent brush.
- *  • Finger drags the page (pan). S Pen button, an eraser-tip pen, or the Eraser tool erases
- *    whole strokes — with a circle showing the eraser's reach.
- *  • Paper style (plain/grid/ruled/dots), page color and brush color are all adjustable.
+ * Native low-latency handwriting surface. Pen writes; highlighter is a translucent brush;
+ * finger pans; the S Pen button / eraser tool erases whole strokes (with a reach circle).
+ * Paper style, page color and brush color are adjustable, and the page auto-saves locally.
  */
 class InkActivity : ComponentActivity() {
 
@@ -45,6 +50,8 @@ class InkActivity : ComponentActivity() {
     private var tool = Tool.PEN
     private var activePointerId = -1
     private var strokeId: InProgressStrokeId? = null
+    private var currentStrokeHighlighter = false
+    private var dirtyErase = false
 
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
     private var brushSize = 6f
@@ -54,8 +61,6 @@ class InkActivity : ComponentActivity() {
     private var panY = 0f
     private var lastPanX = 0f
     private var lastPanY = 0f
-
-    private val pointsByStroke = HashMap<InProgressStrokeId, MutableList<PointF>>()
 
     private val palette = intArrayOf(
         Color.rgb(0x16, 0x1A, 0x22), Color.rgb(0x45, 0x4B, 0x55), Color.rgb(0x8A, 0x92, 0x9E), Color.rgb(0xEC, 0xEC, 0xEC), Color.WHITE,
@@ -73,11 +78,11 @@ class InkActivity : ComponentActivity() {
 
         inProgressView.addFinishedStrokesListener(object : InProgressStrokesFinishedListener {
             override fun onStrokesFinished(strokes: Map<InProgressStrokeId, Stroke>) {
-                for ((id, stroke) in strokes) {
-                    val pts = pointsByStroke.remove(id) ?: mutableListOf()
-                    finishedView.addStroke(stroke, pts)
+                for ((_, stroke) in strokes) {
+                    finishedView.addStroke(stroke, worldPointsOf(stroke), currentStrokeHighlighter)
                 }
                 inProgressView.removeFinishedStrokes(strokes.keys)
+                save()
             }
         })
 
@@ -97,24 +102,16 @@ class InkActivity : ComponentActivity() {
             })
         }
         setContentView(root)
+
+        load()
     }
 
     private fun brush(): Brush {
         val r = Color.red(brushColor); val g = Color.green(brushColor); val b = Color.blue(brushColor)
         return if (tool == Tool.HIGHLIGHTER) {
-            Brush.createWithColorIntArgb(
-                family = StockBrushes.highlighter(),
-                colorIntArgb = Color.argb(0x66, r, g, b),
-                size = brushSize * 3.2f,
-                epsilon = 0.1f,
-            )
+            Brush.createWithColorIntArgb(StockBrushes.highlighter(), Color.argb(0x66, r, g, b), brushSize * 3.2f, 0.1f)
         } else {
-            Brush.createWithColorIntArgb(
-                family = StockBrushes.pressurePen(),
-                colorIntArgb = Color.argb(0xFF, r, g, b),
-                size = brushSize,
-                epsilon = 0.1f,
-            )
+            Brush.createWithColorIntArgb(StockBrushes.pressurePen(), Color.argb(0xFF, r, g, b), brushSize, 0.1f)
         }
     }
 
@@ -131,12 +128,18 @@ class InkActivity : ComponentActivity() {
         }
     }
 
-    private fun worldPoint(event: MotionEvent, idx: Int) =
-        PointF(event.getX(idx) - panX, event.getY(idx) - panY)
-
     private fun eraseAt(sx: Float, sy: Float) {
         eraserOverlay.show(sx, sy, eraserRadius)
-        finishedView.eraseNear(sx - panX, sy - panY, eraserRadius)
+        if (finishedView.eraseNear(sx - panX, sy - panY, eraserRadius)) dirtyErase = true
+    }
+
+    /** The stroke's own inputs are in world coordinates — reuse them for eraser hit-testing. */
+    private fun worldPointsOf(stroke: Stroke): List<PointF> {
+        val batch = stroke.inputs
+        val out = ArrayList<PointF>(batch.size)
+        val si = StrokeInput()
+        for (i in 0 until batch.size) { batch.populate(i, si); out.add(PointF(si.x, si.y)) }
+        return out
     }
 
     private fun handleTouch(event: MotionEvent, host: View): Boolean {
@@ -149,10 +152,9 @@ class InkActivity : ComponentActivity() {
                 when (mode) {
                     Mode.DRAW -> {
                         host.requestUnbufferedDispatch(event)
+                        currentStrokeHighlighter = tool == Tool.HIGHLIGHTER
                         val meToWorld = Matrix().apply { setTranslate(-panX, -panY) }
-                        val id = inProgressView.startStroke(event, activePointerId, brush(), meToWorld, Matrix())
-                        strokeId = id
-                        pointsByStroke[id] = mutableListOf(worldPoint(event, idx))
+                        strokeId = inProgressView.startStroke(event, activePointerId, brush(), meToWorld, Matrix())
                     }
                     Mode.PAN -> { lastPanX = event.getX(idx); lastPanY = event.getY(idx) }
                     Mode.ERASE -> eraseAt(event.getX(idx), event.getY(idx))
@@ -173,12 +175,6 @@ class InkActivity : ComponentActivity() {
                         } finally {
                             predicted?.recycle()
                         }
-                        pointsByStroke[sid]?.let { list ->
-                            for (h in 0 until event.historySize) {
-                                list.add(PointF(event.getHistoricalX(idx, h) - panX, event.getHistoricalY(idx, h) - panY))
-                            }
-                            list.add(worldPoint(event, idx))
-                        }
                     }
                     Mode.PAN -> {
                         val x = event.getX(idx); val y = event.getY(idx)
@@ -196,20 +192,94 @@ class InkActivity : ComponentActivity() {
                 if (mode == Mode.DRAW) {
                     val sid = strokeId
                     if (sid != null) {
-                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                            inProgressView.cancelStroke(sid, event)
-                            pointsByStroke.remove(sid)
-                        } else {
-                            inProgressView.finishStroke(event, activePointerId, sid)
-                        }
+                        if (event.actionMasked == MotionEvent.ACTION_CANCEL) inProgressView.cancelStroke(sid, event)
+                        else inProgressView.finishStroke(event, activePointerId, sid)
                     }
                 }
+                if (mode == Mode.ERASE && dirtyErase) { dirtyErase = false; save() }
                 eraserOverlay.hide()
                 strokeId = null; mode = Mode.NONE; activePointerId = -1
                 return true
             }
         }
         return false
+    }
+
+    // ---- persistence (local, single page for now) ----
+    private fun pageFile() = File(filesDir, "page.json")
+
+    private fun save() {
+        try {
+            val arr = JSONArray()
+            for (rec in finishedView.snapshot()) {
+                val br = rec.stroke.brush
+                val o = JSONObject()
+                    .put("c", br.colorIntArgb)
+                    .put("s", br.size.toDouble())
+                    .put("h", rec.highlighter)
+                val ia = JSONArray()
+                val batch = rec.stroke.inputs
+                val si = StrokeInput()
+                for (i in 0 until batch.size) {
+                    batch.populate(i, si)
+                    val pr = if (si.pressure.isFinite() && si.pressure in 0f..1f) si.pressure.toDouble() else -1.0
+                    ia.put(JSONArray().put(si.x.toDouble()).put(si.y.toDouble()).put(si.elapsedTimeMillis).put(pr))
+                }
+                o.put("i", ia)
+                arr.put(o)
+            }
+            val doc = JSONObject()
+                .put("paper", finishedView.paperStyle.name)
+                .put("page", finishedView.pageColor)
+                .put("strokes", arr)
+            pageFile().writeText(doc.toString())
+        } catch (e: Exception) {
+            Log.e("Ink", "save failed", e)
+        }
+    }
+
+    private fun load() {
+        try {
+            val f = pageFile()
+            if (!f.exists()) return
+            val doc = JSONObject(f.readText())
+            finishedView.paperStyle = runCatching {
+                FinishedStrokesView.PaperStyle.valueOf(doc.optString("paper", "GRID"))
+            }.getOrDefault(FinishedStrokesView.PaperStyle.GRID)
+            finishedView.pageColor = doc.optInt("page", finishedView.pageColor)
+            val arr = doc.optJSONArray("strokes") ?: return
+            val recs = ArrayList<FinishedStrokesView.Rec>(arr.length())
+            for (k in 0 until arr.length()) {
+                val o = arr.getJSONObject(k)
+                val color = o.getInt("c")
+                val size = o.getDouble("s").toFloat()
+                val hl = o.optBoolean("h", false)
+                val fam = if (hl) StockBrushes.highlighter() else StockBrushes.pressurePen()
+                val brush = Brush.createWithColorIntArgb(fam, color, size, 0.1f)
+                val ia = o.getJSONArray("i")
+                val batch = MutableStrokeInputBatch()
+                val pts = ArrayList<PointF>(ia.length())
+                for (j in 0 until ia.length()) {
+                    val p = ia.getJSONArray(j)
+                    val x = p.getDouble(0).toFloat()
+                    val y = p.getDouble(1).toFloat()
+                    val t = p.getLong(2)
+                    val prRaw = p.getDouble(3)
+                    val pr = if (prRaw < 0) StrokeInput.NO_PRESSURE else prRaw.toFloat()
+                    try {
+                        batch.add(InputToolType.STYLUS, x, y, t, pressure = pr)
+                        pts.add(PointF(x, y))
+                    } catch (_: Exception) { /* skip an invalid point */ }
+                }
+                if (batch.size >= 1) {
+                    try { recs.add(FinishedStrokesView.Rec(Stroke(brush, batch), pts, hl)) }
+                    catch (e: Exception) { Log.e("Ink", "rebuild stroke", e) }
+                }
+            }
+            finishedView.setAll(recs)
+        } catch (e: Exception) {
+            Log.e("Ink", "load failed", e)
+        }
     }
 
     // ---- toolbar ----
@@ -241,9 +311,9 @@ class InkActivity : ComponentActivity() {
             addView(chip("−") { brushSize = (brushSize - 2f).coerceAtLeast(2f) })
             addView(chip("+") { brushSize = (brushSize + 2f).coerceAtMost(36f) })
             addView(sep())
-            addView(chip("Paper") { cyclePaper() })
-            addView(chip("Page") { showColorPicker(it) { c -> finishedView.pageColor = c } })
-            addView(chip("Clear") { finishedView.clearAll() })
+            addView(chip("Paper") { cyclePaper(); save() })
+            addView(chip("Page") { showColorPicker(it) { c -> finishedView.pageColor = c; save() } })
+            addView(chip("Clear") { finishedView.clearAll(); save() })
         }
     }
 

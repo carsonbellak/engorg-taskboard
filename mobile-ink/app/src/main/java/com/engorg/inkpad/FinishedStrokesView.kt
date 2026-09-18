@@ -11,17 +11,19 @@ import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
 import androidx.ink.strokes.Stroke
 
 /**
- * Renders the page: background color, paper ruling, then the finished strokes. Strokes are
- * stored in WORLD coordinates (pan-independent) and drawn through [worldToScreen], so the
- * whole page — paper lines included — pans together. Each stroke keeps its input points
- * (world coords) so the eraser can hit-test without the ink geometry API.
+ * Renders the page: background color, paper ruling, then finished strokes. Strokes are stored
+ * in WORLD coordinates and drawn through [worldToScreen], so the whole page pans together.
+ * Each record keeps the stroke's world points (for eraser hit-testing) and whether it's a
+ * highlighter (for save/restore).
  */
 class FinishedStrokesView(context: Context) : View(context) {
 
     enum class PaperStyle { PLAIN, GRID, RULED, DOTS }
 
+    data class Rec(val stroke: Stroke, val points: List<PointF>, val highlighter: Boolean)
+
     private val renderer = CanvasStrokeRenderer.create()
-    private val strokes = ArrayList<Pair<Stroke, List<PointF>>>()
+    private val recs = ArrayList<Rec>()
     private val worldToScreen = Matrix()
     private val paperPaint = Paint().apply { isAntiAlias = true }
 
@@ -33,11 +35,15 @@ class FinishedStrokesView(context: Context) : View(context) {
     var paperStyle = PaperStyle.GRID
         set(value) { field = value; invalidate() }
 
-    fun addStroke(stroke: Stroke, worldPoints: List<PointF>) {
-        strokes.add(stroke to worldPoints); invalidate()
+    fun addStroke(stroke: Stroke, worldPoints: List<PointF>, highlighter: Boolean) {
+        recs.add(Rec(stroke, worldPoints, highlighter)); invalidate()
     }
 
-    fun clearAll() { strokes.clear(); invalidate() }
+    fun clearAll() { recs.clear(); invalidate() }
+
+    fun snapshot(): List<Rec> = ArrayList(recs)
+
+    fun setAll(list: List<Rec>) { recs.clear(); recs.addAll(list); invalidate() }
 
     fun setPan(x: Float, y: Float) {
         panX = x; panY = y
@@ -48,11 +54,11 @@ class FinishedStrokesView(context: Context) : View(context) {
     /** Remove every stroke passing within [radius] world units of ([wx],[wy]). */
     fun eraseNear(wx: Float, wy: Float, radius: Float): Boolean {
         val r2 = radius * radius
-        val before = strokes.size
-        strokes.removeAll { (_, pts) ->
-            pts.any { val dx = it.x - wx; val dy = it.y - wy; dx * dx + dy * dy <= r2 }
+        val before = recs.size
+        recs.removeAll { rec ->
+            rec.points.any { val dx = it.x - wx; val dy = it.y - wy; dx * dx + dy * dy <= r2 }
         }
-        val changed = strokes.size != before
+        val changed = recs.size != before
         if (changed) invalidate()
         return changed
     }
@@ -61,7 +67,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         super.onDraw(canvas)
         canvas.drawColor(pageColor)
         drawPaper(canvas)
-        for ((stroke, _) in strokes) renderer.draw(canvas, stroke, worldToScreen)
+        for (rec in recs) renderer.draw(canvas, rec.stroke, worldToScreen)
     }
 
     private fun drawPaper(canvas: Canvas) {
