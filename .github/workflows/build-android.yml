@@ -21,8 +21,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # The ubuntu-latest runner already ships the Android SDK at $ANDROID_SDK_ROOT, so
+      # we skip android-actions/setup-android (its v3 tries to install the obsolete
+      # "tools" package and fails). Just accept licenses so AGP can auto-download any
+      # missing platform/build-tools during the build.
+      - name: Accept Android SDK licenses
+        run: yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
