@@ -1,13 +1,18 @@
-name: Build Ink POC APK
+name: Build Ink APK
 
-# Builds the native ink proof-of-concept and uploads a sideloadable debug APK.
+# Builds the native ink APK and, on main, attaches it to the rolling "latest" GitHub
+# Release as EngOrg-Ink.apk (a public, no-login, non-expiring download for sideloading).
 # Trigger manually (Actions tab → Run workflow) or on changes under mobile-ink/.
 on:
   workflow_dispatch:
   push:
+    branches: [main]
     paths:
       - "mobile-ink/**"
       - ".github/workflows/build-android.yml"
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -37,9 +42,26 @@ jobs:
         working-directory: mobile-ink
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Stage APK
+        shell: bash
+        run: cp "$(ls mobile-ink/app/build/outputs/apk/debug/*.apk | head -1)" EngOrg-Ink.apk
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: inkpoc-debug-apk
-          path: mobile-ink/app/build/outputs/apk/debug/*.apk
+          name: engorg-ink-apk
+          path: EngOrg-Ink.apk
           if-no-files-found: error
+
+      - name: Attach to the "latest" release
+        if: github.ref_name == 'main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="$GITHUB_REPOSITORY"
+          # The "latest" rolling release is created by the installer workflow; upload if it
+          # exists, otherwise create it so the APK still has a stable public URL.
+          gh release view latest -R "$REPO" >/dev/null 2>&1 || \
+            gh release create latest -R "$REPO" --title "EngOrg (latest build)" --notes "Rolling latest build." --latest || true
+          gh release upload latest EngOrg-Ink.apk -R "$REPO" --clobber
