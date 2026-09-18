@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
                     val last = u.lastPathSegment ?: ""
                     // The PWA's "Ink" tab navigates to /ink.html — hand that off to native ink.
                     if (last == "ink.html" || u.path?.trimEnd('/')?.endsWith("/ink") == true) {
-                        startActivity(Intent(this@MainActivity, InkActivity::class.java))
+                        startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
                         return true
                     }
                     return false // let the WebView load everything else (the PWA)

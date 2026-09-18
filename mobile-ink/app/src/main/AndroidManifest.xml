@@ -23,7 +23,14 @@
             </intent-filter>
         </activity>
 
-        <!-- Native low-latency handwriting surface (launched from the PWA's Ink tab). -->
+        <!-- Notebook browser (launched from the PWA's Ink tab). -->
+        <activity
+            android:name=".LibraryActivity"
+            android:exported="false"
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density" />
+
+        <!-- Native low-latency handwriting surface (opened from a notebook). -->
         <activity
             android:name=".InkActivity"
             android:exported="false"

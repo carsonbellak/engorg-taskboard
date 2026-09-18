@@ -43,6 +43,11 @@ class InkActivity : ComponentActivity() {
     private lateinit var predictor: MotionEventPredictor
     private lateinit var colorButton: Button
 
+    private lateinit var store: NotebookStore
+    private lateinit var notebook: NotebookStore.Notebook
+    private var currentPageId: String = ""
+    private var pageLabel: Button? = null
+
     private enum class Mode { NONE, DRAW, ERASE, PAN }
     private enum class Tool { PEN, HIGHLIGHTER, ERASER }
 
@@ -103,7 +108,14 @@ class InkActivity : ComponentActivity() {
         }
         setContentView(root)
 
+        store = NotebookStore(filesDir)
+        val nbId = intent.getStringExtra(EXTRA_NOTEBOOK_ID)
+        notebook = (nbId?.let { store.notebook(it) })
+            ?: store.notebooks.firstOrNull()
+            ?: store.createNotebook("Quick notes", null, Color.rgb(0x29, 0x47, 0xC9))
+        currentPageId = notebook.pageIds.firstOrNull() ?: store.addPage(notebook)
         load()
+        updatePageLabel()
     }
 
     private fun brush(): Brush {
@@ -205,8 +217,32 @@ class InkActivity : ComponentActivity() {
         return false
     }
 
-    // ---- persistence (local, single page for now) ----
-    private fun pageFile() = File(filesDir, "page.json")
+    // ---- persistence (per notebook page) ----
+    private fun pageFile() = store.pageFile(currentPageId)
+
+    private fun currentIndex() = notebook.pageIds.indexOf(currentPageId).coerceAtLeast(0)
+
+    private fun updatePageLabel() { pageLabel?.text = "${currentIndex() + 1}/${notebook.pageIds.size}" }
+
+    private fun switchPage(delta: Int) {
+        val target = currentIndex() + delta
+        if (target < 0 || target >= notebook.pageIds.size) return
+        save()
+        currentPageId = notebook.pageIds[target]
+        panX = 0f; panY = 0f; finishedView.setPan(0f, 0f)
+        finishedView.clearAll()
+        load()
+        updatePageLabel()
+    }
+
+    private fun addPage() {
+        save()
+        currentPageId = store.addPage(notebook)
+        panX = 0f; panY = 0f; finishedView.setPan(0f, 0f)
+        finishedView.clearAll()
+        load() // no file yet -> blank page, keeps current paper style
+        updatePageLabel()
+    }
 
     private fun save() {
         try {
@@ -314,6 +350,11 @@ class InkActivity : ComponentActivity() {
             addView(chip("Paper") { cyclePaper(); save() })
             addView(chip("Page") { showColorPicker(it) { c -> finishedView.pageColor = c; save() } })
             addView(chip("Clear") { finishedView.clearAll(); save() })
+            addView(sep())
+            addView(chip("‹") { switchPage(-1) })
+            pageLabel = chip("1/1") { }.also { addView(it) }
+            addView(chip("›") { switchPage(1) })
+            addView(chip("+Pg") { addPage() })
         }
     }
 
@@ -343,5 +384,9 @@ class InkActivity : ComponentActivity() {
             })
         }
         popup.showAsDropDown(anchor)
+    }
+
+    companion object {
+        const val EXTRA_NOTEBOOK_ID = "notebookId"
     }
 }
