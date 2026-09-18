@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
             override fun onTouchEvent(event: MotionEvent): Boolean = handleTouch(event, this)
         }
         // Prediction is bound to the view that receives the touches.
-        predictor = MotionEventPredictor.create(touchCatcher)
+        predictor = MotionEventPredictor.newInstance(touchCatcher)
 
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.rgb(0xFD, 0xFD, 0xFB)) // paper
