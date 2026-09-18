@@ -3,19 +3,23 @@ package com.engorg.inkpad
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import kotlin.math.hypot
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import androidx.activity.ComponentActivity
@@ -32,24 +36,19 @@ import androidx.ink.strokes.StrokeInput
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import kotlin.math.hypot
 
-/**
- * Native low-latency handwriting surface. Pen writes; highlighter is a translucent brush;
- * finger pans; the S Pen button / eraser tool erases whole strokes (with a reach circle).
- * Paper style, page color and brush color are adjustable, and the page auto-saves locally.
- */
+/** Native handwriting surface: fixed 8.5x11 page, zoom/pan, pen/highlighter/eraser, auto-save. */
 class InkActivity : ComponentActivity() {
 
     private lateinit var inProgressView: InProgressStrokesView
     private lateinit var finishedView: FinishedStrokesView
     private lateinit var eraserOverlay: EraserOverlay
     private lateinit var predictor: MotionEventPredictor
+    private lateinit var scaleDetector: ScaleGestureDetector
     private lateinit var colorButton: Button
-
-    private lateinit var store: NotebookStore
-    private lateinit var notebook: NotebookStore.Notebook
-    private var currentPageId: String = ""
-    private var pageLabel: Button? = null
+    private val toolButtons = HashMap<Tool, Button>()
+    private var shapeButton: Button? = null
 
     private enum class Mode { NONE, DRAW, ERASE, PAN }
     private enum class Tool { PEN, HIGHLIGHTER, ERASER }
@@ -60,22 +59,36 @@ class InkActivity : ComponentActivity() {
     private var strokeId: InProgressStrokeId? = null
     private var currentStrokeHighlighter = false
     private var dirtyErase = false
+    private var geometrizeOn = false
 
-    // hold-to-geometrize: track the current stroke's points + a no-movement timer
+    private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
+    private var brushSize = 6f
+    private val eraserRadius = 22f // world units
+
+    // view transform: screen = world*scale + (tx,ty)
+    private var scale = 1f
+    private var tx = 0f
+    private var ty = 0f
+    private var lastPanX = 0f
+    private var lastPanY = 0f
+    private var lastFocusX = 0f
+    private var lastFocusY = 0f
+
+    // hold-to-geometrize (opt-in)
     private val currentPoints = ArrayList<PointF>()
     private val holdHandler = Handler(Looper.getMainLooper())
     private var holdRunnable: Runnable? = null
     private val holdPoint = PointF()
     private var geometrized = false
 
-    private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
-    private var brushSize = 6f
-    private val eraserRadius = 28f
+    private lateinit var store: NotebookStore
+    private lateinit var notebook: NotebookStore.Notebook
+    private var currentPageId: String = ""
+    private var pageLabel: Button? = null
 
-    private var panX = 0f
-    private var panY = 0f
-    private var lastPanX = 0f
-    private var lastPanY = 0f
+    private val accent = Color.rgb(0x63, 0x66, 0xF1)
+    private val light = Color.rgb(0xEE, 0xF0, 0xF4)
+    private val onSurface = Color.rgb(0x3A, 0x41, 0x4E)
 
     private val palette = intArrayOf(
         Color.rgb(0x16, 0x1A, 0x22), Color.rgb(0x45, 0x4B, 0x55), Color.rgb(0x8A, 0x92, 0x9E), Color.rgb(0xEC, 0xEC, 0xEC), Color.WHITE,
@@ -101,6 +114,20 @@ class InkActivity : ComponentActivity() {
             }
         })
 
+        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(d: ScaleGestureDetector): Boolean { lastFocusX = d.focusX; lastFocusY = d.focusY; return true }
+            override fun onScale(d: ScaleGestureDetector): Boolean {
+                tx += d.focusX - lastFocusX; ty += d.focusY - lastFocusY
+                lastFocusX = d.focusX; lastFocusY = d.focusY
+                val ns = (scale * d.scaleFactor).coerceIn(0.15f, 8f)
+                tx = d.focusX - (d.focusX - tx) * (ns / scale)
+                ty = d.focusY - (d.focusY - ty) * (ns / scale)
+                scale = ns
+                applyTransform()
+                return true
+            }
+        })
+
         val touch = object : View(this) {
             override fun onTouchEvent(event: MotionEvent): Boolean = handleTouch(event, this)
         }
@@ -112,8 +139,8 @@ class InkActivity : ComponentActivity() {
             addView(inProgressView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(eraserOverlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(touch, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-            addView(buildToolbar(), FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
-                gravity = Gravity.TOP or Gravity.START; topMargin = 20; leftMargin = 20
+            addView(buildToolbar(), FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                gravity = Gravity.TOP; topMargin = dp(12); leftMargin = dp(12); rightMargin = dp(12)
             })
         }
         setContentView(root)
@@ -122,10 +149,43 @@ class InkActivity : ComponentActivity() {
         val nbId = intent.getStringExtra(EXTRA_NOTEBOOK_ID)
         notebook = (nbId?.let { store.notebook(it) })
             ?: store.notebooks.firstOrNull()
-            ?: store.createNotebook("Quick notes", null, Color.rgb(0x29, 0x47, 0xC9))
+            ?: store.createNotebook("Quick notes", null, accent)
         currentPageId = notebook.pageIds.firstOrNull() ?: store.addPage(notebook)
         load()
         updatePageLabel()
+        updateTools()
+
+        finishedView.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (finishedView.width > 0) {
+                    finishedView.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    fitPage()
+                }
+            }
+        })
+    }
+
+    // ---- transform ----
+    private fun applyTransform() { finishedView.setTransform(scale, tx, ty) }
+    private fun buildW2S() = Matrix().apply { setScale(scale, scale); postTranslate(tx, ty) }
+    private fun screenToWorld(sx: Float, sy: Float) = PointF((sx - tx) / scale, (sy - ty) / scale)
+
+    private fun fitPage() {
+        val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
+        if (vw <= 0f) return
+        scale = minOf(vw / FinishedStrokesView.PAGE_W, vh / FinishedStrokesView.PAGE_H) * 0.94f
+        tx = (vw - FinishedStrokesView.PAGE_W * scale) / 2f
+        ty = maxOf(dp(4).toFloat(), (vh - FinishedStrokesView.PAGE_H * scale) / 2f)
+        applyTransform()
+    }
+
+    private fun zoomBy(factor: Float) {
+        val fx = finishedView.width / 2f; val fy = finishedView.height / 2f
+        val ns = (scale * factor).coerceIn(0.15f, 8f)
+        tx = fx - (fx - tx) * (ns / scale)
+        ty = fy - (fy - ty) * (ns / scale)
+        scale = ns
+        applyTransform()
     }
 
     private fun brush(): Brush {
@@ -151,11 +211,11 @@ class InkActivity : ComponentActivity() {
     }
 
     private fun eraseAt(sx: Float, sy: Float) {
-        eraserOverlay.show(sx, sy, eraserRadius)
-        if (finishedView.eraseNear(sx - panX, sy - panY, eraserRadius)) dirtyErase = true
+        eraserOverlay.show(sx, sy, eraserRadius * scale)
+        val w = screenToWorld(sx, sy)
+        if (finishedView.eraseNear(w.x, w.y, eraserRadius)) dirtyErase = true
     }
 
-    /** The stroke's own inputs are in world coordinates — reuse them for eraser hit-testing. */
     private fun worldPointsOf(stroke: Stroke): List<PointF> {
         val batch = stroke.inputs
         val out = ArrayList<PointF>(batch.size)
@@ -166,6 +226,10 @@ class InkActivity : ComponentActivity() {
 
     private fun handleTouch(event: MotionEvent, host: View): Boolean {
         predictor.record(event)
+        // fingers drive pinch/pan; a stylus never pinches
+        val primaryType = event.getToolType(0)
+        if (primaryType == MotionEvent.TOOL_TYPE_FINGER) scaleDetector.onTouchEvent(event)
+
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val idx = event.actionIndex
@@ -179,9 +243,9 @@ class InkActivity : ComponentActivity() {
                         currentPoints.clear()
                         currentPoints.add(PointF(event.getX(idx), event.getY(idx)))
                         holdPoint.set(event.getX(idx), event.getY(idx))
-                        val meToWorld = Matrix().apply { setTranslate(-panX, -panY) }
-                        strokeId = inProgressView.startStroke(event, activePointerId, brush(), meToWorld, Matrix())
-                        scheduleHold()
+                        val s2w = Matrix(); buildW2S().invert(s2w)
+                        strokeId = inProgressView.startStroke(event, activePointerId, brush(), s2w, Matrix())
+                        if (geometrizeOn) scheduleHold()
                     }
                     Mode.PAN -> { lastPanX = event.getX(idx); lastPanY = event.getY(idx) }
                     Mode.ERASE -> eraseAt(event.getX(idx), event.getY(idx))
@@ -191,6 +255,7 @@ class InkActivity : ComponentActivity() {
             }
 
             MotionEvent.ACTION_MOVE -> {
+                if (scaleDetector.isInProgress) return true
                 val idx = event.findPointerIndex(activePointerId)
                 if (idx < 0) return true
                 when (mode) {
@@ -198,22 +263,17 @@ class InkActivity : ComponentActivity() {
                         if (geometrized) return true
                         val sid = strokeId ?: return true
                         val predicted = predictor.predict()
-                        try {
-                            inProgressView.addToStroke(event, activePointerId, sid, predicted)
-                        } finally {
-                            predicted?.recycle()
-                        }
+                        try { inProgressView.addToStroke(event, activePointerId, sid, predicted) }
+                        finally { predicted?.recycle() }
                         val x = event.getX(idx); val y = event.getY(idx)
                         currentPoints.add(PointF(x, y))
-                        if (hypot(x - holdPoint.x, y - holdPoint.y) > 6f) {
-                            holdPoint.set(x, y); scheduleHold()
-                        }
+                        if (geometrizeOn && hypot(x - holdPoint.x, y - holdPoint.y) > 6f) { holdPoint.set(x, y); scheduleHold() }
                     }
                     Mode.PAN -> {
                         val x = event.getX(idx); val y = event.getY(idx)
-                        panX += x - lastPanX; panY += y - lastPanY
+                        tx += x - lastPanX; ty += y - lastPanY
                         lastPanX = x; lastPanY = y
-                        finishedView.setPan(panX, panY)
+                        applyTransform()
                     }
                     Mode.ERASE -> eraseAt(event.getX(idx), event.getY(idx))
                     else -> {}
@@ -239,23 +299,19 @@ class InkActivity : ComponentActivity() {
         return false
     }
 
-    // ---- hold-to-geometrize ----
+    // ---- hold-to-geometrize (opt-in) ----
     private fun scheduleHold() {
         cancelHold()
         val r = Runnable { tryGeometrize() }
         holdRunnable = r
         holdHandler.postDelayed(r, 550)
     }
-
-    private fun cancelHold() {
-        holdRunnable?.let { holdHandler.removeCallbacks(it) }
-        holdRunnable = null
-    }
+    private fun cancelHold() { holdRunnable?.let { holdHandler.removeCallbacks(it) }; holdRunnable = null }
 
     private fun tryGeometrize() {
         if (mode != Mode.DRAW || geometrized) return
         val sid = strokeId ?: return
-        val worldPts = currentPoints.map { PointF(it.x - panX, it.y - panY) }
+        val worldPts = currentPoints.map { screenToWorld(it.x, it.y) }
         val shape = ShapeRecognizer.recognize(worldPts) ?: return
         val stroke = buildStrokeFromPoints(shape, brush()) ?: return
         inProgressView.cancelStroke(sid, null)
@@ -275,9 +331,7 @@ class InkActivity : ComponentActivity() {
 
     // ---- persistence (per notebook page) ----
     private fun pageFile() = store.pageFile(currentPageId)
-
     private fun currentIndex() = notebook.pageIds.indexOf(currentPageId).coerceAtLeast(0)
-
     private fun updatePageLabel() { pageLabel?.text = "${currentIndex() + 1}/${notebook.pageIds.size}" }
 
     private fun switchPage(delta: Int) {
@@ -285,18 +339,18 @@ class InkActivity : ComponentActivity() {
         if (target < 0 || target >= notebook.pageIds.size) return
         save()
         currentPageId = notebook.pageIds[target]
-        panX = 0f; panY = 0f; finishedView.setPan(0f, 0f)
         finishedView.clearAll()
         load()
+        fitPage()
         updatePageLabel()
     }
 
     private fun addPage() {
         save()
         currentPageId = store.addPage(notebook)
-        panX = 0f; panY = 0f; finishedView.setPan(0f, 0f)
         finishedView.clearAll()
-        load() // no file yet -> blank page, keeps current paper style
+        load()
+        fitPage()
         updatePageLabel()
     }
 
@@ -305,10 +359,7 @@ class InkActivity : ComponentActivity() {
             val arr = JSONArray()
             for (rec in finishedView.snapshot()) {
                 val br = rec.stroke.brush
-                val o = JSONObject()
-                    .put("c", br.colorIntArgb)
-                    .put("s", br.size.toDouble())
-                    .put("h", rec.highlighter)
+                val o = JSONObject().put("c", br.colorIntArgb).put("s", br.size.toDouble()).put("h", rec.highlighter)
                 val ia = JSONArray()
                 val batch = rec.stroke.inputs
                 val si = StrokeInput()
@@ -317,17 +368,11 @@ class InkActivity : ComponentActivity() {
                     val pr = if (si.pressure.isFinite() && si.pressure in 0f..1f) si.pressure.toDouble() else -1.0
                     ia.put(JSONArray().put(si.x.toDouble()).put(si.y.toDouble()).put(si.elapsedTimeMillis).put(pr))
                 }
-                o.put("i", ia)
-                arr.put(o)
+                o.put("i", ia); arr.put(o)
             }
-            val doc = JSONObject()
-                .put("paper", finishedView.paperStyle.name)
-                .put("page", finishedView.pageColor)
-                .put("strokes", arr)
+            val doc = JSONObject().put("paper", finishedView.paperStyle.name).put("page", finishedView.pageColor).put("strokes", arr)
             pageFile().writeText(doc.toString())
-        } catch (e: Exception) {
-            Log.e("Ink", "save failed", e)
-        }
+        } catch (e: Exception) { Log.e("Ink", "save failed", e) }
     }
 
     private fun load() {
@@ -335,17 +380,14 @@ class InkActivity : ComponentActivity() {
             val f = pageFile()
             if (!f.exists()) return
             val doc = JSONObject(f.readText())
-            finishedView.paperStyle = runCatching {
-                FinishedStrokesView.PaperStyle.valueOf(doc.optString("paper", "GRID"))
-            }.getOrDefault(FinishedStrokesView.PaperStyle.GRID)
+            finishedView.paperStyle = runCatching { FinishedStrokesView.PaperStyle.valueOf(doc.optString("paper", "GRID")) }
+                .getOrDefault(FinishedStrokesView.PaperStyle.GRID)
             finishedView.pageColor = doc.optInt("page", finishedView.pageColor)
             val arr = doc.optJSONArray("strokes") ?: return
             val recs = ArrayList<FinishedStrokesView.Rec>(arr.length())
             for (k in 0 until arr.length()) {
                 val o = arr.getJSONObject(k)
-                val color = o.getInt("c")
-                val size = o.getDouble("s").toFloat()
-                val hl = o.optBoolean("h", false)
+                val color = o.getInt("c"); val size = o.getDouble("s").toFloat(); val hl = o.optBoolean("h", false)
                 val fam = if (hl) StockBrushes.highlighter() else StockBrushes.pressurePen()
                 val brush = Brush.createWithColorIntArgb(fam, color, size, 0.1f)
                 val ia = o.getJSONArray("i")
@@ -353,64 +395,86 @@ class InkActivity : ComponentActivity() {
                 val pts = ArrayList<PointF>(ia.length())
                 for (j in 0 until ia.length()) {
                     val p = ia.getJSONArray(j)
-                    val x = p.getDouble(0).toFloat()
-                    val y = p.getDouble(1).toFloat()
-                    val t = p.getLong(2)
+                    val x = p.getDouble(0).toFloat(); val y = p.getDouble(1).toFloat(); val t = p.getLong(2)
                     val prRaw = p.getDouble(3)
                     val pr = if (prRaw < 0) StrokeInput.NO_PRESSURE else prRaw.toFloat()
-                    try {
-                        batch.add(InputToolType.STYLUS, x, y, t, pressure = pr)
-                        pts.add(PointF(x, y))
-                    } catch (_: Exception) { /* skip an invalid point */ }
+                    try { batch.add(InputToolType.STYLUS, x, y, t, pressure = pr); pts.add(PointF(x, y)) } catch (_: Exception) { }
                 }
-                if (batch.size >= 1) {
-                    try { recs.add(FinishedStrokesView.Rec(Stroke(brush, batch), pts, hl)) }
-                    catch (e: Exception) { Log.e("Ink", "rebuild stroke", e) }
-                }
+                if (batch.size >= 1) runCatching { recs.add(FinishedStrokesView.Rec(Stroke(brush, batch), pts, hl)) }
             }
             finishedView.setAll(recs)
-        } catch (e: Exception) {
-            Log.e("Ink", "load failed", e)
+        } catch (e: Exception) { Log.e("Ink", "load failed", e) }
+    }
+
+    // ---- styled toolbar ----
+    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(color) }
+
+    private fun pill(label: String, onClick: (Button) -> Unit): Button = Button(this).apply {
+        text = label; isAllCaps = false; textSize = 13f
+        setTextColor(onSurface)
+        background = pillBg(light)
+        stateListAnimator = null
+        minWidth = 0; minimumWidth = 0
+        setPadding(dp(14), dp(4), dp(14), dp(4))
+        setOnClickListener { onClick(this) }
+    }
+
+    private fun updateTools() {
+        for ((t, btn) in toolButtons) {
+            val active = t == tool
+            btn.background = pillBg(if (active) accent else light)
+            btn.setTextColor(if (active) Color.WHITE else onSurface)
+        }
+        shapeButton?.let {
+            it.background = pillBg(if (geometrizeOn) accent else light)
+            it.setTextColor(if (geometrizeOn) Color.WHITE else onSurface)
         }
     }
 
-    // ---- toolbar ----
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-
     private fun buildToolbar(): View {
-        fun chip(label: String, onClick: (Button) -> Unit) = Button(this).apply {
-            text = label; minWidth = 0; minimumWidth = 0
-            setOnClickListener { onClick(this) }
-        }
         fun sep() = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(dp(1), dp(28)).apply { setMargins(dp(6), 0, dp(6), 0) }
-            setBackgroundColor(Color.argb(0x30, 0, 0, 0))
+            layoutParams = LinearLayout.LayoutParams(dp(1), dp(26)).apply { setMargins(dp(6), 0, dp(6), 0) }
+            setBackgroundColor(Color.argb(0x22, 0, 0, 0))
         }
-        colorButton = chip("  ") { showColorPicker(it) { c -> brushColor = c; colorButton.setBackgroundColor(c) } }
-            .apply { setBackgroundColor(brushColor); minWidth = dp(44) }
+        fun toolPill(label: String, t: Tool) = pill(label) { tool = t; updateTools() }.also { toolButtons[t] = it }
 
-        return LinearLayout(this).apply {
+        colorButton = pill("  ") { showColorPicker(it) { c -> brushColor = c; colorButton.background = pillBg(c) } }
+            .apply { background = pillBg(brushColor); minWidth = dp(40) }
+
+        val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setBackgroundColor(Color.argb(0xEE, 0xFF, 0xFF, 0xFF))
-            setPadding(dp(6), dp(4), dp(6), dp(4))
-            addView(chip("‹ App") { finish() })
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(26).toFloat(); setColor(Color.WHITE) }
+            elevation = dp(6).toFloat()
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            addView(pill("‹ App") { finish() })
             addView(sep())
-            addView(chip("Pen") { tool = Tool.PEN })
-            addView(chip("HL") { tool = Tool.HIGHLIGHTER })
-            addView(chip("Erase") { tool = Tool.ERASER })
+            addView(toolPill("Pen", Tool.PEN))
+            addView(toolPill("Marker", Tool.HIGHLIGHTER))
+            addView(toolPill("Eraser", Tool.ERASER))
+            shapeButton = pill("Shape") { geometrizeOn = !geometrizeOn; updateTools() }.also { addView(it) }
             addView(sep())
             addView(colorButton)
-            addView(chip("−") { brushSize = (brushSize - 2f).coerceAtLeast(2f) })
-            addView(chip("+") { brushSize = (brushSize + 2f).coerceAtMost(36f) })
+            addView(pill("–") { brushSize = (brushSize - 2f).coerceAtLeast(2f) })
+            addView(pill("+") { brushSize = (brushSize + 2f).coerceAtMost(36f) })
             addView(sep())
-            addView(chip("Paper") { cyclePaper(); save() })
-            addView(chip("Page") { showColorPicker(it) { c -> finishedView.pageColor = c; save() } })
-            addView(chip("Clear") { finishedView.clearAll(); save() })
+            addView(pill("Paper") { cyclePaper(); save() })
+            addView(pill("Page") { showColorPicker(it) { c -> finishedView.pageColor = c; save() } })
             addView(sep())
-            addView(chip("‹") { switchPage(-1) })
-            pageLabel = chip("1/1") { }.also { addView(it) }
-            addView(chip("›") { switchPage(1) })
-            addView(chip("+Pg") { addPage() })
+            addView(pill("－") { zoomBy(0.8f) })
+            addView(pill("＋") { zoomBy(1.25f) })
+            addView(pill("Fit") { fitPage() })
+            addView(sep())
+            addView(pill("‹") { switchPage(-1) })
+            pageLabel = pill("1/1") { }.also { addView(it) }
+            addView(pill("›") { switchPage(1) })
+            addView(pill("+Pg") { addPage() })
+            addView(pill("Clear") { finishedView.clearAll(); save() })
+        }
+        return HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(bar)
         }
     }
 
@@ -424,22 +488,22 @@ class InkActivity : ComponentActivity() {
     }
 
     private fun showColorPicker(anchor: View, onPick: (Int) -> Unit) {
-        val pad = dp(8)
+        val pad = dp(10)
         val grid = GridLayout(this).apply {
             columnCount = 5
-            setBackgroundColor(Color.WHITE)
+            background = GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(Color.WHITE) }
             setPadding(pad, pad, pad, pad)
         }
-        val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true)
+        val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(8).toFloat() }
         val sz = dp(42); val m = dp(4)
         for (c in palette) {
             grid.addView(View(this).apply {
-                setBackgroundColor(c)
+                background = GradientDrawable().apply { cornerRadius = dp(8).toFloat(); setColor(c) }
                 layoutParams = GridLayout.LayoutParams().apply { width = sz; height = sz; setMargins(m, m, m, m) }
                 setOnClickListener { onPick(c); popup.dismiss() }
             })
         }
-        popup.showAsDropDown(anchor)
+        popup.showAsDropDown(anchor, 0, dp(6))
     }
 
     companion object {

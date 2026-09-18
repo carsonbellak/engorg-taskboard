@@ -57,8 +57,20 @@ class LibraryActivity : ComponentActivity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    private fun pillBg(color: Int) = android.graphics.drawable.GradientDrawable().apply {
+        cornerRadius = dp(20).toFloat(); setColor(color)
+    }
+
     private fun buildBar(): View {
-        fun btn(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
+        fun btn(t: String, f: () -> Unit) = Button(this).apply {
+            text = t; isAllCaps = false; textSize = 13f
+            val accent = t.startsWith("+ Notebook")
+            setTextColor(if (accent) Color.WHITE else Color.rgb(0x3A, 0x41, 0x4E))
+            background = pillBg(if (accent) Color.rgb(0x63, 0x66, 0xF1) else Color.rgb(0xEE, 0xF0, 0xF4))
+            stateListAnimator = null
+            setPadding(dp(14), dp(4), dp(14), dp(4))
+            setOnClickListener { f() }
+        }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
