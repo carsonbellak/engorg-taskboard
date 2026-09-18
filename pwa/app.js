@@ -12,6 +12,11 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+// Android WebViews (the native tablet shell) often can't hold Firestore's default
+// WebChannel stream, which left the app blank after login. Auto-detect long-polling
+// falls back to it only when needed, so normal browsers are unaffected. Must run
+// before any Firestore call.
+try { db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { console.warn('firestore settings:', e); }
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW:', err));
@@ -259,11 +264,16 @@ document.getElementById('btn-email-login').addEventListener('click', async () =>
   try {
     await auth.signInWithEmailAndPassword(email, password);
   } catch (err) {
-    if (err.code === 'auth/user-not-found') {
-      try { await auth.createUserWithEmailAndPassword(email, password); }
-      catch (e) { showLoginError(e.message); }
-    } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-      showLoginError('Incorrect password.');
+    // Firebase's email-enumeration protection now returns auth/invalid-credential for
+    // BOTH a wrong password and an unknown email, so we can't tell them apart up front.
+    // Try to create the account; if the email is already taken, it was a wrong password.
+    if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+      try {
+        await auth.createUserWithEmailAndPassword(email, password);
+      } catch (e) {
+        if (e.code === 'auth/email-already-in-use') showLoginError('Incorrect password.');
+        else showLoginError(e.message);
+      }
     } else { showLoginError(err.message); }
   }
 });

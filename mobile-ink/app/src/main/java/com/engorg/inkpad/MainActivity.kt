@@ -2,8 +2,11 @@ package com.engorg.inkpad
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.ViewGroup
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -28,6 +31,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Allow chrome://inspect debugging, and surface web errors on screen (below).
+        WebView.setWebContentsDebuggingEnabled(true)
+
         web = WebView(this).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.apply {
@@ -50,6 +56,19 @@ class MainActivity : ComponentActivity() {
                     }
                     return false // let the WebView load everything else (the PWA)
                 }
+
+                override fun onPageFinished(view: WebView, url: String) {
+                    // Install an on-screen catcher so any JS error / rejection is visible
+                    // (a blank screen otherwise hides the real cause).
+                    view.evaluateJavascript(ERR_JS, null)
+                }
+            }
+
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                    Log.e("EngOrgWeb", "${m.messageLevel()} ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
+                    return true
+                }
             }
         }
 
@@ -71,5 +90,21 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val PWA_URL = "https://assistant-taskboard.web.app"
+
+        // Shows a dismissable red banner with any JS error / unhandled rejection /
+        // console.error, so a blank screen reveals its cause instead of staying white.
+        private const val ERR_JS = """
+(function(){
+  if(window.__eg)return; window.__eg=1;
+  function show(t,m){try{var b=document.getElementById('__egerr');
+    if(!b){b=document.createElement('div');b.id='__egerr';
+      b.style.cssText='position:fixed;left:0;right:0;top:0;z-index:2147483647;background:rgba(176,0,32,.97);color:#fff;font:11px/1.4 monospace;padding:8px;white-space:pre-wrap;max-height:60%;overflow:auto';
+      (document.body||document.documentElement).appendChild(b);b.onclick=function(){b.remove();};}
+    b.textContent+=('['+t+'] '+m+'\n');}catch(e){}}
+  window.addEventListener('error',function(e){show('ERR',(e.message||'')+' @'+(e.filename||'')+':'+(e.lineno||''));},true);
+  window.addEventListener('unhandledrejection',function(e){var r=e.reason;show('REJECT',(r&&(r.stack||r.message))||String(r));});
+  var ce=console.error;console.error=function(){try{show('console.error',Array.prototype.map.call(arguments,function(a){return (a&&a.stack)||String(a);}).join(' '));}catch(_){}ce.apply(console,arguments);};
+}());
+"""
     }
 }
