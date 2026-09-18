@@ -18,6 +18,20 @@ const db = firebase.firestore();
 // before any Firestore call.
 try { db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) { console.warn('firestore settings:', e); }
 
+// Inside the native Android shell (a WebView), Google OAuth is blocked by Google and its
+// popup falls back to a redirect that leaves Firebase stuck in "missing initial state"
+// (WebView sessionStorage is partitioned) — blanking the app on every load. Hide the
+// Google option there so only email/password is used, and never trigger that flow.
+const IN_APP_WEBVIEW = /\bwv\b/.test(navigator.userAgent || '');
+if (IN_APP_WEBVIEW) {
+  try {
+    ['#btn-google-login', '.login-divider'].forEach(sel => {
+      const el = document.querySelector(sel);
+      if (el) el.style.display = 'none';
+    });
+  } catch (e) {}
+}
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW:', err));
 }
