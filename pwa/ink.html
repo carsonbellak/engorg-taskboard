@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0F172A">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Handwriting</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root{
+    --bg:#EEF0F3; --chrome:#FFFFFF; --chrome-2:#F1F4F8; --border:rgba(20,28,50,.12);
+    --border-2:rgba(20,28,50,.22); --text:#141A24; --muted:#5A6472; --accent:#4F46E5;
+    --good:#16A34A; --paper:#FDFDFB; --line:rgba(30,50,110,.10); --dot:rgba(30,50,110,.22);
+    --margin:rgba(220,50,80,.28); --ink:#161A22;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0B0D11; --chrome:#141821; --chrome-2:#1D232E; --border:rgba(150,168,210,.14);
+      --border-2:rgba(150,168,210,.28); --text:#E8ECF3; --muted:#93A0B4; --accent:#A5B4FC;
+      --good:#4ADE80; --paper:#14171D; --line:rgba(180,200,255,.09); --dot:rgba(180,200,255,.16);
+      --margin:rgba(255,120,140,.30); --ink:#EBEEF4;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none;}
+  body{background:var(--bg);color:var(--text);
+    font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    display:flex;flex-direction:column;
+    padding-top:env(safe-area-inset-top,0);}
+  .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;
+    background:var(--chrome);border-bottom:1px solid var(--border);
+    box-shadow:0 1px 3px rgba(10,15,30,.08);z-index:5;}
+  .back{appearance:none;border:1px solid var(--border);background:var(--chrome-2);color:var(--text);
+    font:inherit;font-size:15px;font-weight:600;border-radius:11px;min-height:42px;padding:0 14px;
+    display:flex;align-items:center;gap:6px;text-decoration:none;cursor:pointer;}
+  .title{font-weight:700;font-size:15px;margin-right:2px;}
+  .sep{width:1px;align-self:stretch;background:var(--border);margin:2px 1px;}
+  .seg{display:flex;background:var(--chrome-2);border:1px solid var(--border);border-radius:12px;padding:3px;gap:2px;}
+  .seg button{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;
+    font-weight:600;padding:0 14px;min-height:42px;border-radius:9px;cursor:pointer;display:flex;align-items:center;gap:6px;}
+  .seg button[aria-pressed="true"]{background:var(--accent);color:#fff;}
+  @media (prefers-color-scheme:dark){.seg button[aria-pressed="true"]{color:#0B0D11;}}
+  .sw{display:flex;gap:7px}
+  .swatch{width:34px;height:34px;border-radius:50%;border:2px solid var(--border-2);cursor:pointer;padding:0;}
+  .swatch[aria-pressed="true"]{box-shadow:0 0 0 3px var(--chrome),0 0 0 5px var(--accent);}
+  .width{display:flex;align-items:center;gap:8px}
+  .width span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.09em}
+  input[type=range]{width:120px;accent-color:var(--accent);height:42px}
+  select.paper,.btn{appearance:none;border:1px solid var(--border);background:var(--chrome-2);color:var(--text);
+    font:inherit;font-size:14px;font-weight:600;border-radius:11px;min-height:42px;padding:0 14px;cursor:pointer;}
+  select.paper{padding-right:30px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 15px) 19px,calc(100% - 10px) 19px;background-size:5px 5px;background-repeat:no-repeat;}
+  .btn.danger:active{color:#DC2650;border-color:#DC2650}
+  .tgl{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;padding:0 12px;min-height:42px;
+    border:1px solid var(--border);border-radius:11px;background:var(--chrome-2);cursor:pointer}
+  .tgl input{position:absolute;opacity:0;width:0;height:0}
+  .track{width:38px;height:22px;border-radius:22px;background:var(--border-2);position:relative;flex-shrink:0;transition:background .15s}
+  .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.35)}
+  .tgl input:checked+.track{background:var(--good)}
+  .tgl input:checked+.track::after{transform:translateX(16px)}
+  .meter{margin-left:auto;display:flex;gap:12px;align-items:center;font-size:11px;color:var(--muted);
+    font-variant-numeric:tabular-nums;background:var(--chrome-2);border:1px solid var(--border);border-radius:11px;padding:6px 12px}
+  .meter .s{display:flex;flex-direction:column;gap:2px;min-width:40px}
+  .meter b{color:var(--text);font-size:13px}
+  .meter .k{font-size:9px;letter-spacing:.09em;text-transform:uppercase}
+  .pbar{width:56px;height:6px;border-radius:6px;background:var(--border);overflow:hidden;margin-top:2px}
+  .pbar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--good))}
+  .stage{flex:1;min-height:0;position:relative;margin:12px;border-radius:16px;overflow:hidden;background:var(--paper);
+    border:1px solid var(--border);box-shadow:0 2px 10px rgba(10,15,30,.10);touch-action:none;}
+  .stage.ruled{background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 37px,var(--line) 37px,var(--line) 38px)}
+  .stage.ruled::before{content:"";position:absolute;top:0;bottom:0;left:64px;width:1.5px;background:var(--margin)}
+  .stage.dots{background-image:radial-gradient(var(--dot) 1.6px,transparent 1.7px);background-size:28px 28px;background-position:10px 10px}
+  #c{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+  .hint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;color:var(--muted);
+    font-size:15px;line-height:1.7;pointer-events:none;transition:opacity .3s}
+  .hint b{display:block;color:var(--text);font-size:20px;font-weight:700;margin-bottom:6px}
+</style>
+</head>
+<body>
+  <div class="bar" role="toolbar" aria-label="Ink tools">
+    <a class="back" href="/" title="Back to app">‹ App</a>
+    <span class="title">✍️ Handwriting</span>
+    <div class="sep"></div>
+    <div class="seg" id="tools" role="group" aria-label="Tool">
+      <button data-tool="pen" aria-pressed="true">Pen</button>
+      <button data-tool="marker" aria-pressed="false">Marker</button>
+      <button data-tool="eraser" aria-pressed="false">Eraser</button>
+    </div>
+    <div class="sw" id="sw" role="group" aria-label="Color">
+      <button class="swatch" data-role="ink" style="background:var(--ink)" aria-pressed="true" title="Ink"></button>
+      <button class="swatch" data-color="#2947C9" style="background:#2947C9" aria-pressed="false" title="Blue"></button>
+      <button class="swatch" data-color="#DC2650" style="background:#DC2650" aria-pressed="false" title="Red"></button>
+      <button class="swatch" data-color="#16A34A" style="background:#16A34A" aria-pressed="false" title="Green"></button>
+      <button class="swatch" data-color="#F0A93B" style="background:#F0A93B" aria-pressed="false" title="Amber"></button>
+    </div>
+    <div class="width"><span>Nib</span><input id="w" type="range" min="1" max="18" step="0.5" value="4"></div>
+    <div class="sep"></div>
+    <label class="tgl" title="Ignore finger/palm — pen only"><input type="checkbox" id="penonly" checked><span class="track"></span>Pen only</label>
+    <select class="paper" id="paper" aria-label="Paper">
+      <option value="blank">Blank</option>
+      <option value="ruled" selected>Ruled</option>
+      <option value="dots">Dots</option>
+    </select>
+    <button class="btn" id="undo">↶ Undo</button>
+    <button class="btn danger" id="clear">Clear</button>
+    <div class="meter" aria-label="Pen telemetry">
+      <div class="s"><span class="k">Pressure</span><b id="m-p">—</b><div class="pbar"><i id="m-pb"></i></div></div>
+      <div class="s"><span class="k">Rate</span><b id="m-r">—</b></div>
+      <div class="s"><span class="k">Input</span><b id="m-t">—</b></div>
+    </div>
+  </div>
+
+  <div class="stage ruled" id="stage">
+    <canvas id="c"></canvas>
+    <div class="hint" id="hint"><b>Put pen to paper</b>Write with your S Pen. Press harder for a thicker line.</div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var stage=document.getElementById('stage'), cv=document.getElementById('c');
+  // SINGLE low-latency canvas — no overlay layer, so the desynchronized (front-buffer)
+  // path can actually engage. This is the fix vs the earlier two-canvas prototype.
+  var ctx=cv.getContext('2d',{desynchronized:true, alpha:true});
+  var hint=document.getElementById('hint');
+  var S={tool:'pen',color:null,width:4,penOnly:true,drawing:false,id:null,strokes:[],cur:null,last:null,
+    dpr:Math.max(1,Math.min(3,window.devicePixelRatio||1))};
+  function inkColor(){return getComputedStyle(document.documentElement).getPropertyValue('--ink').trim()||'#161A22';}
+  S.color=inkColor(); var usingInk=true;
+
+  function fit(){
+    var r=stage.getBoundingClientRect(), d=S.dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));
+    cv.width=Math.round(r.width*d); cv.height=Math.round(r.height*d);
+    ctx.setTransform(d,0,0,d,0,0); redraw();
+  }
+  function styleFor(s){
+    ctx.lineCap='round';ctx.lineJoin='round';
+    if(s.tool==='eraser'){ctx.globalCompositeOperation='destination-out';ctx.globalAlpha=1;ctx.strokeStyle='#000';ctx.fillStyle='#000';}
+    else{ctx.globalCompositeOperation='source-over';ctx.globalAlpha=s.tool==='marker'?0.30:1;ctx.strokeStyle=s.color;ctx.fillStyle=s.color;}
+  }
+  function wAt(s,p){ if(s.tool==='eraser')return s.width*5; if(s.tool==='marker')return s.width*4.2; return s.width*(0.35+1.5*p); }
+  function seg(s,a,b){
+    ctx.beginPath(); ctx.lineWidth=wAt(s,b.p);
+    var mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+    if(a.mx==null)ctx.moveTo(a.x,a.y); else ctx.moveTo(a.mx,a.my);
+    ctx.quadraticCurveTo(a.x,a.y,mx,my); ctx.stroke();
+    b.mx=mx;b.my=my;
+  }
+  function dotAt(s,a){ ctx.beginPath(); ctx.arc(a.x,a.y,wAt(s,a.p)/2,0,7); ctx.fill(); }
+  function redraw(){
+    ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,cv.width,cv.height);ctx.restore();
+    for(var i=0;i<S.strokes.length;i++){
+      var s=S.strokes[i],pts=s.points; styleFor(s);
+      if(pts.length===1){dotAt(s,pts[0]);continue;}
+      var prev={x:pts[0].x,y:pts[0].y,p:pts[0].p,mx:null,my:null};
+      for(var j=1;j<pts.length;j++){var c={x:pts[j].x,y:pts[j].y,p:pts[j].p};seg(s,prev,c);prev=c;}
+    }
+    ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';
+  }
+  function pt(e){
+    var r=cv.getBoundingClientRect(), pr=e.pressure;
+    if(pr===0||pr==null)pr=(e.pointerType==='pen')?0:0.5;
+    return {x:e.clientX-r.left,y:e.clientY-r.top,p:pr};
+  }
+
+  var mP=document.getElementById('m-p'),mPB=document.getElementById('m-pb'),mR=document.getElementById('m-r'),mT=document.getElementById('m-t');
+  var lastT=0,rateEMA=0;
+  function meter(e,n){
+    var p=e.pressure||0; mP.textContent=p.toFixed(2); mPB.style.width=Math.round(p*100)+'%'; mT.textContent=e.pointerType||'—';
+    var now=performance.now();
+    if(lastT){var hz=n*1000/Math.max(1,now-lastT);rateEMA=rateEMA?rateEMA*0.8+hz*0.2:hz;mR.textContent=Math.round(rateEMA)+'Hz';}
+    lastT=now;
+  }
+  function reject(e){ if(S.penOnly&&e.pointerType==='touch')return true; if(S.drawing&&e.pointerType==='touch')return true; return false; }
+
+  cv.addEventListener('pointerdown',function(e){
+    if(reject(e)||S.drawing)return;
+    cv.setPointerCapture(e.pointerId); S.drawing=true; S.id=e.pointerId;
+    if(hint)hint.style.opacity='0';
+    var a=pt(e);a.mx=null;a.my=null;
+    S.cur={tool:S.tool,color:S.color,width:S.width,points:[a]}; S.last=a;
+    styleFor(S.cur); dotAt(S.cur,a); meter(e,1); e.preventDefault();
+  },{passive:false});
+  cv.addEventListener('pointermove',function(e){
+    if(!S.drawing||e.pointerId!==S.id)return;
+    var evs=(e.getCoalescedEvents&&e.getCoalescedEvents().length)?e.getCoalescedEvents():[e];
+    styleFor(S.cur);
+    for(var i=0;i<evs.length;i++){var b=pt(evs[i]);seg(S.cur,S.last,b);S.cur.points.push(b);S.last=b;}
+    meter(e,evs.length); e.preventDefault();
+  },{passive:false});
+  function end(e){
+    if(e.pointerId!==S.id)return;
+    if(S.cur&&S.cur.points.length)S.strokes.push(S.cur);
+    S.cur=null;S.drawing=false;S.id=null;
+    ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over'; save();
+  }
+  cv.addEventListener('pointerup',end); cv.addEventListener('pointercancel',end);
+
+  document.getElementById('tools').addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return; S.tool=b.dataset.tool;
+    [].forEach.call(this.querySelectorAll('button'),function(x){x.setAttribute('aria-pressed',x===b);});
+  });
+  document.getElementById('sw').addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return; usingInk=b.dataset.role==='ink';
+    S.color=usingInk?inkColor():b.dataset.color;
+    [].forEach.call(this.querySelectorAll('button'),function(x){x.setAttribute('aria-pressed',x===b);});
+  });
+  document.getElementById('w').addEventListener('input',function(){S.width=parseFloat(this.value);});
+  document.getElementById('penonly').addEventListener('change',function(){S.penOnly=this.checked;});
+  document.getElementById('paper').addEventListener('change',function(){stage.className='stage '+this.value;});
+  document.getElementById('undo').addEventListener('click',function(){S.strokes.pop();redraw();save();});
+  document.getElementById('clear').addEventListener('click',function(){S.strokes=[];redraw();save();if(hint)hint.style.opacity='';});
+  try{window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){if(usingInk)S.color=inkColor();redraw();});}catch(_){}
+
+  function save(){
+    try{
+      var n=0;for(var i=0;i<S.strokes.length;i++)n+=S.strokes[i].points.length;
+      if(n>15000)return;
+      localStorage.setItem('engorg.ink.v1',JSON.stringify(S.strokes.map(function(s){
+        return {t:s.tool,c:s.color,w:s.width,p:s.points.map(function(q){return [Math.round(q.x*10)/10,Math.round(q.y*10)/10,Math.round(q.p*100)/100];})};
+      })));
+    }catch(_){}
+  }
+  function load(){
+    try{
+      var raw=localStorage.getItem('engorg.ink.v1');if(!raw)return;
+      var a=JSON.parse(raw);if(!Array.isArray(a))return;
+      S.strokes=a.map(function(s){return {tool:s.t,color:s.c,width:s.w,points:s.p.map(function(q){return{x:q[0],y:q[1],p:q[2]};})};});
+      if(S.strokes.length&&hint)hint.style.opacity='0';
+    }catch(_){}
+  }
+  window.addEventListener('resize',fit);
+  window.addEventListener('orientationchange',function(){setTimeout(fit,120);});
+  load(); fit();
+})();
+</script>
+</body>
+</html>

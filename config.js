@@ -36,6 +36,20 @@ module.exports = {
   // Email hub — encrypted account store (app passwords encrypted via safeStorage)
   EMAIL_ACCOUNTS_FILE: path.join('C:\\Assistant\\appdata', 'email_accounts.json'),
   GITHUB_TOKEN_FILE: path.join('C:\\Assistant\\appdata', 'github.json'),
+  // Claude / Anthropic link — the user's own API key, encrypted at rest via
+  // safeStorage (DPAPI on Windows), decrypted only in main and never sent to the
+  // renderer. Foundation for the "Claude agents" features (first: syllabus import).
+  // Non-secret prefs (chosen model) live alongside the encrypted key in this file.
+  CLAUDE_CREDS_FILE: path.join('C:\\Assistant\\appdata', 'claude.json'),
+  ANTHROPIC_API_URL: 'https://api.anthropic.com',
+  ANTHROPIC_VERSION: '2023-06-01',
+  // Models offered in the Linked Accounts → Claude card. Default is Opus 5.
+  CLAUDE_MODELS: [
+    { id: 'claude-opus-5', label: 'Claude Opus 5 (most capable)' },
+    { id: 'claude-sonnet-5', label: 'Claude Sonnet 5 (balanced)' },
+    { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (fastest / cheapest)' },
+  ],
+  CLAUDE_DEFAULT_MODEL: 'claude-opus-5',
   // Gradescope link — email + password encrypted at rest via safeStorage (we must
   // keep the password, not a token, because Gradescope has no API and sessions expire
   // so we re-login on each sync).

@@ -935,6 +935,7 @@ class ViewRenderer {
         <button class="cal-view-btn ${this.calendarView==='week'?'active':''}"  data-view="week">Week</button>
         <button class="cal-view-btn ${this.calendarView==='agenda'?'active':''}" data-view="agenda">Agenda</button>
       </div>
+      <button class="cal-import-btn" id="cal-import-syllabus" title="Import a syllabus with Claude → calendar events">&#128196; Import syllabus</button>
     </div>`;
   }
 
@@ -951,6 +952,9 @@ class ViewRenderer {
         this._renderCalendarView();
       });
     });
+
+    const importBtn = container.querySelector('#cal-import-syllabus');
+    if (importBtn) importBtn.addEventListener('click', () => { if (window.openSyllabusImport) window.openSyllabusImport(); });
 
     container.querySelector('#cal-today').addEventListener('click', () => {
       this.calendarYear  = today.getFullYear();

@@ -201,6 +201,16 @@ const __api = {
     disconnect: () => ipcRenderer.invoke('github:disconnect'),
     fetchActivity: (days) => ipcRenderer.invoke('github:fetchActivity', days),
   },
+  // Claude / Anthropic link — the user's own API key powers AI features.
+  // First feature: the Syllabus Importer (syllabus → calendar events).
+  claude: {
+    status: () => ipcRenderer.invoke('claude:status'),
+    connect: (apiKey, model) => ipcRenderer.invoke('claude:connect', apiKey, model),
+    setModel: (model) => ipcRenderer.invoke('claude:setModel', model),
+    disconnect: () => ipcRenderer.invoke('claude:disconnect'),
+    selectSyllabus: () => ipcRenderer.invoke('claude:selectSyllabus'),
+    extractSyllabus: (opts) => ipcRenderer.invoke('claude:extractSyllabus', opts),
+  },
   // Gradescope link — assignment due dates → calendar
   gradescope: {
     status: () => ipcRenderer.invoke('gradescope:status'),

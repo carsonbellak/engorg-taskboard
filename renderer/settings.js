@@ -1987,6 +1987,9 @@ async function refreshLinkedAccounts() {
   try { if (window.api && window.api.variate) vt = await window.api.variate.status(); } catch {}
   const vtReg = reg.variate || null;
 
+  let cl = { connected: false };
+  try { if (window.api && window.api.claude) cl = await window.api.claude.status(); } catch {}
+
   let emailAccts = [];
   try { if (window.api && window.api.email) emailAccts = await window.api.email.listAccounts() || []; } catch {}
   // Mirror local email accounts into the synced registry (metadata only).
@@ -2107,6 +2110,37 @@ async function refreshLinkedAccounts() {
     });
   }
 
+  // --- Claude (Anthropic) card — the user's own API key powers AI features ---
+  const clModelSelect = (sel) => {
+    const models = (cl.models && cl.models.length) ? cl.models : [{ id: sel || 'claude-opus-5', label: 'Claude Opus 5' }];
+    return '<select class="settings-input acct-input" id="cl-model">'
+      + models.map(m => `<option value="${escapeHtmlS(m.id)}"${m.id === sel ? ' selected' : ''}>${escapeHtmlS(m.label)}</option>`).join('')
+      + '</select>';
+  };
+  let claudeCard;
+  if (cl.connected) {
+    claudeCard = accountCard({
+      icon: '<span class="acct-emoji">✳️</span>',
+      name: 'Claude (Anthropic)',
+      sub: '<span class="acct-sub-line">Powers the syllabus importer (Calendar → “Import syllabus”) and future AI features.</span>'
+        + '<div class="acct-inline-form"><label class="settings-field-hint" style="margin:0 8px 0 0">Model</label>' + clModelSelect(cl.model) + '</div>',
+      status: 'Connected', statusClass: 'ok',
+      actions: '<button class="settings-btn settings-btn-sm settings-btn-danger" data-act="cl-out">Disconnect</button>',
+    });
+  } else {
+    claudeCard = accountCard({
+      icon: '<span class="acct-emoji">✳️</span>',
+      name: 'Claude (Anthropic)',
+      sub: '<span class="acct-sub-line">Add your Anthropic API key to import syllabi into your calendar and unlock AI features.</span>'
+        + '<div class="acct-inline-form"><input type="password" class="settings-input acct-input" id="cl-key" placeholder="sk-ant-…" autocomplete="off">'
+        + '<a href="#" class="acct-help" data-act="cl-help">Get a key ↗</a></div>'
+        + '<div class="acct-inline-form"><label class="settings-field-hint" style="margin:0 8px 0 0">Model</label>' + clModelSelect(cl.model || 'claude-opus-5') + '</div>'
+        + '<p class="settings-field-hint">Your key is encrypted on this device (OS keystore) and never leaves it. Usage is billed to your Anthropic account.</p>',
+      status: 'Not linked', statusClass: '',
+      actions: '<button class="settings-btn settings-btn-sm" data-act="cl-connect">Connect</button>',
+    });
+  }
+
   // --- Email cards ---
   const provIcon = (p) => ({ gmail: '📧', outlook: '📨', office365: '📨', yahoo: '📬', icloud: '✉️' }[(p || '').toLowerCase()] || '✉️');
   const localEmails = new Set(emailAccts.map(a => (a.email || a.user || '').toLowerCase()));
@@ -2133,6 +2167,8 @@ async function refreshLinkedAccounts() {
     ${cloudCard}
     <div class="acct-group-label">Developer</div>
     ${githubCard}
+    <div class="acct-group-label">AI</div>
+    ${claudeCard}
     <div class="acct-group-label">School</div>
     ${gradescopeCard}
     ${variateCard}
@@ -2228,6 +2264,23 @@ function bindLinkedAccounts(body) {
       refreshLinkedAccounts();
     }
     else if (act === 'gs-forget') { await setLinkedRegistry({ gradescope: null }); refreshLinkedAccounts(); }
+    else if (act === 'cl-help') { window.api.openExternal('https://console.anthropic.com/settings/keys'); }
+    else if (act === 'cl-connect') {
+      const key = (document.getElementById('cl-key') || {}).value;
+      const model = (document.getElementById('cl-model') || {}).value;
+      if (!key || !key.trim()) { st('Enter your Anthropic API key.'); return; }
+      st('Verifying key…');
+      try {
+        const res = await window.api.claude.connect(key.trim(), model);
+        if (res.error) { st('Failed: ' + res.error); return; }
+        st('Connected. You can now import a syllabus from the Calendar.');
+        refreshLinkedAccounts();
+      } catch (e) { st('Failed: ' + (e.message || e)); }
+    }
+    else if (act === 'cl-out') {
+      try { await window.api.claude.disconnect(); } catch {}
+      refreshLinkedAccounts();
+    }
     else if (act === 'vt-connect') {
       st('Opening Purdue sign-in…');
       try {
@@ -2262,6 +2315,11 @@ function bindLinkedAccounts(body) {
     }
   };
   body.querySelectorAll('[data-act]').forEach(el => el.addEventListener('click', (e) => { e.preventDefault(); onClick(el.dataset.act, el); }));
+  // Claude model picker — persist immediately when already connected.
+  const clModel = body.querySelector('#cl-model');
+  if (clModel) clModel.addEventListener('change', async () => {
+    try { await window.api.claude.setModel(clModel.value); st('Model set to ' + clModel.options[clModel.selectedIndex].text + '.'); } catch (e) { st('Failed: ' + (e.message || e)); }
+  });
 }
 
 // ── Version (synced with the repo's package.json on GitHub) ─────────────────

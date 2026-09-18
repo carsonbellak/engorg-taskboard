@@ -18,6 +18,7 @@ const registerEmail   = require('./ipc/email');
 const registerCalendar = require('./ipc/calendar');
 const registerGithub  = require('./ipc/github');
 const registerGradescope = require('./ipc/gradescope');
+const registerClaude  = require('./ipc/claude');
 const registerVariate = require('./ipc/variate');
 const registerSpell   = require('./ipc/spell');
 const registerKicadImporter = require('./ipc/kicad-importer');
@@ -215,6 +216,7 @@ app.whenReady().then(() => {
   registerCalendar();
   registerGithub();
   registerGradescope();
+  registerClaude(getMainWindow);
   registerVariate(getMainWindow);
   registerSpell();
   registerKicadImporter(getMainWindow);

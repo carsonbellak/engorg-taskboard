@@ -385,6 +385,9 @@ async function saveCollection(name, obj) {
 // ===================== NAVIGATION =====================
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
+    // A nav item with data-href navigates to a standalone page (e.g. the fullscreen
+    // handwriting canvas) instead of switching in-app views.
+    if (btn.dataset.href) { location.href = btn.dataset.href; return; }
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     currentView = btn.dataset.view;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v16';
+const CACHE_NAME = 'engorg-v17';
 // VAPID public key — must match the value set in Firebase secrets and app.js
 const VAPID_PUBLIC_KEY = 'BDmHi7C-yoOita_aL7JFADc18CiVCcn0Jw43XPIQZ_4Bu4J279M1PgRnktePqsJh_-UGkhikhwnnUOdUsBEeQhM';
 const ASSETS = [
@@ -6,7 +6,8 @@ const ASSETS = [
   '/index.html',
   '/app.js',
   '/styles.css',
-  '/manifest.json'
+  '/manifest.json',
+  '/ink.html'
 ];
 
 // Install: cache app shell
