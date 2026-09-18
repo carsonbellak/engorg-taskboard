@@ -1,0 +1,45 @@
+name: Build Ink POC APK
+
+# Builds the native ink proof-of-concept and uploads a sideloadable debug APK.
+# Trigger manually (Actions tab → Run workflow) or on changes under mobile-ink/.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "mobile-ink/**"
+      - ".github/workflows/build-android.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # The ubuntu-latest runner already ships the Android SDK at $ANDROID_SDK_ROOT, so
+      # we skip android-actions/setup-android (its v3 tries to install the obsolete
+      # "tools" package and fails). Just accept licenses so AGP can auto-download any
+      # missing platform/build-tools during the build.
+      - name: Accept Android SDK licenses
+        run: yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        working-directory: mobile-ink
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkpoc-debug-apk
+          path: mobile-ink/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
