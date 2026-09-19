@@ -16,39 +16,81 @@ Pure desktop-only concerns (Electron main process, IPC, OS/file/printer/slicer i
 
 ---
 
-## 🚀 Submitting changes (push / contribute) — use the script, not raw git
+## 🚀 Shipping changes — one command, fully automated
 
-This install directory is **not a git checkout**, so don't try to `git commit`/`push`
-from here. When the user asks to "push", "submit", or "contribute" changes, use the
-self-contained CLI:
-
-```bash
-node submit-changes.js --list          # safe: shows the real change set, commits nothing
-node submit-changes.js -m "<message>"  # commit + push to main (owner/collaborator)
-node submit-changes.js -m "..." --pr   # push to a branch and print a PR-compare link
-```
-
-The script keeps a cached clone at `~/.engorg-submit/<repo>`, mirrors your changed
-source files into it (git normalizes CRLF↔LF so only real edits show), commits, and
-pushes. It is **update-only** — it never deletes repo files the install doesn't ship.
-Always run `--list` first to confirm the change set. Full details: `CONTRIBUTING.md`.
-
-### Cutting a versioned release — one command
+**"push" / "ship" / "submit changes" (from the maintainer) ⇒ cut a versioned release
+with `release.js`.** This is the single automated pipeline that gets a change to users,
+and it is the default for *every* change. This install directory is **not a git
+checkout**, so never `git commit`/`push` from here, and never hand-push the cached clone.
 
 ```bash
-node release.js               # patch bump (1.1.2 → 1.1.3)
-node release.js minor -m "…"  # 1.1.2 → 1.2.0 with notes
-node release.js 1.4.0         # explicit version
+node release.js               # patch bump (1.3.21 → 1.3.22) — the default
+node release.js minor -m "…"  # 1.3.21 → 1.4.0 with release notes
+node release.js major -m "…"  # 1.3.21 → 2.0.0
+node release.js 1.5.0         # explicit version
 ```
 
-`release.js` bumps `package.json` + `package-lock.json`, pushes the bump to main
-(via `submit-changes.js`), then pushes a `vX.Y.Z` tag. CI
-(`.github/workflows/release-installer.yml`) then **builds `EngOrg-Setup.exe` and
-attaches it to that GitHub Release automatically** — no manual download/upload, no
-polling. A plain `submit-changes.js` push only updates the rolling `latest` build;
-a numbered release requires the tag, which is exactly what `release.js` automates.
-The in-app equivalent (for non-maintainers) is Settings → Contribute → "Submit Changes…"
-(`ipc/contribute.js`), which forks + opens a PR via GitHub sign-in.
+### Ship runbook — do this automatically when the user says push / ship / release
+
+1. **Sync desktop ↔ PWA first** (see the parity rule at the top of this file). Never ship
+   a user-facing change to one without the equivalent change in the other — the release
+   publishes both, so an unmirrored change ships a divergence.
+2. **Preview the real change set:** `node submit-changes.js --list` (safe — commits and
+   pushes nothing; normalizes CRLF↔LF so only genuine edits show). Confirm it's what you
+   expect, then move on.
+3. **Ship it:** `node release.js patch -m "<one-line summary>"` (use `minor`/`major` when
+   the change warrants it). This bumps `package.json` + `package-lock.json`, pushes the
+   bump to `main` via `submit-changes.js`, then pushes a `vX.Y.Z` tag.
+4. **Let CI finish on its own — do NOT poll it.** The tag triggers
+   `.github/workflows/release-installer.yml`, which automatically, in parallel:
+   - **builds `EngOrg-Setup.exe`** (Inno Setup) and attaches it to the `vX.Y.Z` GitHub
+     Release, then prunes older version releases so the Releases page stays tidy;
+   - **builds the Android ink APK** (`mobile-ink/`, `build-android.yml` logic mirrored in
+     the `android` job) and attaches it to the release; and
+   - **deploys the companion PWA to Firebase Hosting** — *only if* the repo has a
+     `FIREBASE_SERVICE_ACCOUNT` Actions secret (otherwise that job warns and skips).
+5. **Deploy the PWA yourself if CI can't** (secret not configured) or when you changed only
+   `pwa/` and want it live immediately — see "Deploying the PWA" below.
+
+> **Never bypass the release for a normal change.** No `git commit`/`push` against the
+> `~/.engorg-submit/…` clone, no bare `submit-changes.js -m`, no manual tag/release surgery
+> — this holds even for `mobile-ink/` or `.github/workflows/` edits, and even when a
+> release would sweep up unrelated in-progress edits (that is acceptable; don't hand-push
+> just your own files to "protect" WIP). A plain `submit-changes.js` push only refreshes
+> the rolling `latest` installer and builds **no** versioned release — which is not what
+> "push" means here. The **only** exception is when the user *explicitly* asks for a
+> non-release push; then:
+> ```bash
+> node submit-changes.js -m "<message>"  # push source to main (updates rolling `latest` only, no version tag)
+> node submit-changes.js -m "..." --pr   # push a branch and print a PR-compare link
+> ```
+> `submit-changes.js` is **update-only** (it never deletes repo files the install doesn't
+> ship) and keeps its cached clone at `~/.engorg-submit/<repo>`. Full details: `CONTRIBUTING.md`.
+
+### Deploying the PWA (Firebase Hosting, project `assistant-taskboard`)
+
+A release tag auto-deploys the PWA **iff** the repo has a `FIREBASE_SERVICE_ACCOUNT`
+Actions secret (the `pwa` job in `release-installer.yml`). When that secret isn't set — or
+to push a PWA-only change live *without* a full release — deploy manually from a directory
+that has `firebase.json` + `.firebaserc`. After a release the cached clone has both the
+config and the just-pushed source:
+
+```bash
+cd ~/.engorg-submit/engorg-taskboard && npx firebase deploy --only hosting
+```
+
+`firebase-tools` is a devDependency (run it via `npx firebase`; it isn't on PATH globally).
+**Auth is a one-time manual step for the user, not Claude:** `npx firebase login` opens a
+browser OAuth flow (a credential action). Once logged in (persists in
+`%APPDATA%\configstore\firebase-tools.json`), a non-interactive
+`firebase deploy --only hosting` works. Use `--only hosting` so the deploy never touches
+Functions / Firestore rules the install doesn't ship.
+
+### Contributors without push access
+
+The in-app path — Settings → Contribute → "Submit Changes…" (`ipc/contribute.js`) — forks
+the repo and opens a PR via GitHub sign-in (no PAT, no git, no terminal). Full details:
+`CONTRIBUTING.md`.
 
 ---
 

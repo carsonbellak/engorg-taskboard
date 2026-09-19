@@ -1,6 +1,6 @@
 {
   "name": "engineering-task-board",
-  "version": "1.3.22",
+  "version": "1.3.23",
   "description": "Engineering Design Organization Task Board",
   "main": "main.js",
   "scripts": {

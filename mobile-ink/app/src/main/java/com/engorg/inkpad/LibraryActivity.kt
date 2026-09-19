@@ -3,6 +3,7 @@ package com.engorg.inkpad
 import android.app.Dialog
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -25,9 +26,13 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 
 /** Notebook browser: tap a folder to open it, tap a notebook to write. Icon-only chrome. */
 class LibraryActivity : ComponentActivity() {
@@ -37,6 +42,7 @@ class LibraryActivity : ComponentActivity() {
     private lateinit var titleView: TextView
     private lateinit var backButton: ImageButton
     private var currentFolder: String? = null
+    private lateinit var importPicker: ActivityResultLauncher<Array<String>>
 
     private val covers = intArrayOf(
         Color.rgb(0x29, 0x47, 0xC9), Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0x89, 0x7B),
@@ -54,6 +60,7 @@ class LibraryActivity : ComponentActivity() {
         AppTheme.load(this)
         SystemBars.setup(this, lightBackground = !AppTheme.dark)
         store = NotebookStore(filesDir)
+        importPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) runImport(uri) }
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg); clipChildren = false }
         val bar = buildBar()
@@ -142,6 +149,7 @@ class LibraryActivity : ComponentActivity() {
             setBackgroundColor(AppTheme.surface); setPadding(dp(10), dp(8), dp(10), dp(8))
             elevation = dp(4).toFloat()  // hairline separation from the scrolling grid
             addView(backButton); addView(titleView)
+            addView(iconBtn(Icons.DOWNLOAD) { importPicker.launch(arrayOf("*/*")) }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.FOLDER_ADD) { createFolderDialog() }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.ADD, accent = true) { createNotebookDialog(currentFolder) })
         }
@@ -251,6 +259,40 @@ class LibraryActivity : ComponentActivity() {
 
     private fun openNotebook(nb: NotebookStore.Notebook) {
         startActivity(Intent(this, InkActivity::class.java).putExtra(InkActivity.EXTRA_NOTEBOOK_ID, nb.id))
+    }
+
+    // ---- Noteshelf import ----
+    private fun runImport(uri: Uri) {
+        val pad = dp(24)
+        val status = TextView(this).apply {
+            text = "Reading export…"; setTextColor(AppTheme.text); textSize = 14f
+            gravity = Gravity.CENTER; setPadding(0, dp(16), 0, 0)
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
+            setPadding(pad, pad, pad, pad)
+            addView(ProgressBar(this@LibraryActivity))
+            addView(status)
+        }
+        val dialog = Dialog(this).apply {
+            setContentView(box, ViewGroup.LayoutParams(dp(300), WRAP_CONTENT))
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setCancelable(false)
+        }
+        dialog.show()
+        NoteshelfImport.import(
+            this, uri, store,
+            onProgress = { s -> status.text = s },
+            onDone = { count, err ->
+                if (isFinishing || isDestroyed) return@import
+                dialog.dismiss()
+                rebuild()
+                val msg = err?.let { "Import failed: $it" }
+                    ?: "Imported $count notebook${if (count == 1) "" else "s"}."
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            },
+        )
     }
 
     // ---- reusable dialog shell ----

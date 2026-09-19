@@ -30,6 +30,8 @@ class NotebookStore(private val dir: File) {
     private fun libFile() = File(dir, "library.json")
     private fun pagesDir() = File(dir, "pages").apply { mkdirs() }
     fun pageFile(pageId: String) = File(pagesDir(), "page_$pageId.json")
+    /** Optional baked background image for a page (e.g. an imported Noteshelf page). */
+    fun pageBgFile(pageId: String) = File(pagesDir(), "page_$pageId.bg.png")
 
     init { load() }
 
@@ -111,7 +113,7 @@ class NotebookStore(private val dir: File) {
     fun addPage(nb: Notebook): String = id().also { nb.pageIds.add(it); save() }
 
     fun deleteNotebook(nb: Notebook) {
-        nb.pageIds.forEach { pageFile(it).delete() }
+        nb.pageIds.forEach { pageFile(it).delete(); pageBgFile(it).delete() }
         notebooks.remove(nb); save()
     }
 
