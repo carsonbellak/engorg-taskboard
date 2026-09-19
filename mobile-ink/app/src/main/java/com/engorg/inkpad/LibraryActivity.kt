@@ -285,12 +285,13 @@ class LibraryActivity : ComponentActivity() {
             this, uri, store,
             onProgress = { s -> status.text = s },
             onDone = { count, err ->
-                if (isFinishing || isDestroyed) return@import
-                dialog.dismiss()
-                rebuild()
-                val msg = err?.let { "Import failed: $it" }
-                    ?: "Imported $count notebook${if (count == 1) "" else "s"}."
-                Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                if (!isFinishing && !isDestroyed) {
+                    dialog.dismiss()
+                    rebuild()
+                    val msg = err?.let { "Import failed: $it" }
+                        ?: "Imported $count notebook${if (count == 1) "" else "s"}."
+                    Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+                }
             },
         )
     }

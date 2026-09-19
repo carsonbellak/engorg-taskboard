@@ -17,6 +17,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import kotlin.math.min
 
@@ -66,7 +67,10 @@ object NoteshelfImport {
                 } ?: throw IllegalStateException("Can't open the file.")
 
                 ZipFile(localZip).use { outer ->
-                    val nsaEntries = outer.entries().toList().filter { !it.isDirectory && it.name.endsWith(".nsa") }
+                    val allEntries = ArrayList<ZipEntry>()
+                    val en = outer.entries()
+                    while (en.hasMoreElements()) allEntries.add(en.nextElement())
+                    val nsaEntries = allEntries.filter { !it.isDirectory && it.name.endsWith(".nsa") }
                     if (nsaEntries.isEmpty()) throw IllegalStateException("No Noteshelf notebooks (.nsa) found in that zip.")
                     val folderIds = HashMap<String, String>() // folder name -> id
                     var i = 0
@@ -110,7 +114,10 @@ object NoteshelfImport {
     /** @return true if at least one page was imported. */
     private fun importNotebook(nsa: File, work: File, store: NotebookStore, title: String, folderId: String?): Boolean {
         ZipFile(nsa).use { inner ->
-            val docEntry = inner.entries().toList().firstOrNull { it.name.endsWith("/Document.plist") || it.name == "Document.plist" }
+            val innerEntries = ArrayList<ZipEntry>()
+            val en = inner.entries()
+            while (en.hasMoreElements()) innerEntries.add(en.nextElement())
+            val docEntry = innerEntries.firstOrNull { it.name.endsWith("/Document.plist") || it.name == "Document.plist" }
                 ?: return false
             val bundle = docEntry.name.removeSuffix("Document.plist").trimEnd('/') // "<title>.ns3_a"
             val doc = inner.getInputStream(docEntry).use { PlistLite.parseDict(it) }
