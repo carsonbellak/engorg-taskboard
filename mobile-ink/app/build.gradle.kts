@@ -26,8 +26,11 @@ android {
         applicationId = "com.engorg.inkpad"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1"
+        // Auto-increment per CI build so every published APK is a proper update — a hardcoded
+        // versionCode makes Android's installer treat new APKs as "not an update" and silently
+        // keep the old app (which stranded users on stale import code). Local builds get 101.
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 100
+        versionName = "1.3.27"
         buildConfigField("String", "WEB_CLIENT_ID", "\"$webClientId\"")
     }
 
