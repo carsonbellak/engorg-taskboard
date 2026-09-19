@@ -26,6 +26,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -251,7 +252,7 @@ class InkActivity : ComponentActivity() {
 
     private fun buildShapeRec(spec: ShapeSpec, color: Int, width: Float, hl: Boolean): FinishedStrokesView.Rec {
         val polys = spec.polylines()
-        val paths = polys.map { FinishedStrokesView.buildPath(it) }
+        val paths = polys.map { FinishedStrokesView.buildStraightPath(it) }
         val pts = ArrayList<PointF>(); polys.forEach { pts.addAll(it) }
         return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec)
     }
@@ -797,7 +798,7 @@ class InkActivity : ComponentActivity() {
             addView(pill("Shapes ▾") { showShapeMenu(it) })
             addView(sep())
             addView(colorButton)
-            addView(pill("–") { brushSize = (brushSize - 2f).coerceAtLeast(2f) }); addView(pill("+") { brushSize = (brushSize + 2f).coerceAtMost(40f) })
+            addView(pill("Size ▾") { showSizePopup(it) })
             addView(sep())
             addView(pill("－") { zoomBy(0.8f) }); addView(pill("＋") { zoomBy(1.25f) }); addView(pill("Fit") { fitVertical = !fitVertical; fitPage() })
             addView(sep())
@@ -837,6 +838,38 @@ class InkActivity : ComponentActivity() {
             setOnClickListener { popup.dismiss(); insertShape(type) }
         })
         popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    private fun showSizePopup(anchor: View) {
+        val pad = dp(16)
+        val label = TextView(this).apply { text = "Size: ${brushSize.toInt()}"; textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD); setTextColor(onSurface) }
+        val preview = object : View(this) {
+            private val pv = android.graphics.Paint().apply { isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.ROUND }
+            override fun onDraw(c: android.graphics.Canvas) {
+                pv.color = Color.argb(0xFF, Color.red(brushColor), Color.green(brushColor), Color.blue(brushColor))
+                pv.strokeWidth = brushSize
+                c.drawLine(dp(14).toFloat(), height / 2f, (width - dp(14)).toFloat(), height / 2f, pv)
+            }
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(220), dp(58)).apply { topMargin = dp(10) } }
+        val seek = SeekBar(this).apply {
+            max = 39; progress = (brushSize.toInt() - 1).coerceIn(0, 39)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { brushSize = (p + 1).toFloat(); label.text = "Size: ${brushSize.toInt()}"; preview.invalidate() }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            setPadding(pad, pad, pad, pad)
+            addView(label); addView(preview)
+            addView(seek, LinearLayout.LayoutParams(dp(230), WRAP_CONTENT).apply { topMargin = dp(8) })
+        }
+        PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }.showAsDropDown(anchor, 0, dp(6))
     }
 
     private fun showColorPicker(anchor: View, onPick: (Int) -> Unit) {

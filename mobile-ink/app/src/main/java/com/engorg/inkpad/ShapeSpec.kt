@@ -45,7 +45,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>) {
                 ShapeType.LINE, ShapeType.ARROW -> arrayListOf(PointF(cx - s, cy + s * 0.4f), PointF(cx + s, cy - s * 0.4f))
                 ShapeType.RECT, ShapeType.ELLIPSE -> arrayListOf(PointF(cx - s, cy - s * 0.72f), PointF(cx + s, cy + s * 0.72f))
                 ShapeType.TRIANGLE -> arrayListOf(PointF(cx, cy - s), PointF(cx + s, cy + s), PointF(cx - s, cy + s))
-                ShapeType.AXES2D -> arrayListOf(PointF(cx - s * 0.35f, cy + s * 0.7f), PointF(cx + s, cy - s))
+                ShapeType.AXES2D -> arrayListOf(PointF(cx, cy), PointF(cx + s, cy - s))
                 ShapeType.AXES3D -> arrayListOf(PointF(cx, cy + s * 0.55f), PointF(cx + s * 0.75f, cy - s * 0.75f))
             }
             return ShapeSpec(type, v)
@@ -77,23 +77,26 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>) {
             return out
         }
 
-        /** Origin o, extent handle e. +x to the right, +y upward. */
-        private fun axes2d(o: PointF, e: PointF): List<List<PointF>> {
-            val lenX = abs(e.x - o.x).coerceAtLeast(30f)
-            val lenY = abs(o.y - e.y).coerceAtLeast(30f)
-            val xEnd = PointF(o.x + lenX, o.y)
-            val yEnd = PointF(o.x, o.y - lenY)
+        /** Center c, extent handle e. Full 4-quadrant cross: x and y both directions, arrows on all ends. */
+        private fun axes2d(c: PointF, e: PointF): List<List<PointF>> {
+            val lenX = abs(e.x - c.x).coerceAtLeast(30f)
+            val lenY = abs(c.y - e.y).coerceAtLeast(30f)
             val out = ArrayList<List<PointF>>()
-            out.add(arrow(PointF(o.x - lenX * 0.12f, o.y), xEnd))
-            out.add(arrow(PointF(o.x, o.y + lenY * 0.12f), yEnd))
-            // tick marks
+            // four half-axes from the center, each with an arrowhead at its far end
+            out.add(arrow(c, PointF(c.x + lenX, c.y)))
+            out.add(arrow(c, PointF(c.x - lenX, c.y)))
+            out.add(arrow(c, PointF(c.x, c.y - lenY)))
+            out.add(arrow(c, PointF(c.x, c.y + lenY)))
+            // tick marks on both sides of each axis
             val tk = 6f
             var i = 1
             while (i <= 4) {
-                val gx = o.x + lenX * i / 5f
-                out.add(listOf(PointF(gx, o.y - tk), PointF(gx, o.y + tk)))
-                val gy = o.y - lenY * i / 5f
-                out.add(listOf(PointF(o.x - tk, gy), PointF(o.x + tk, gy)))
+                val dx = lenX * i / 5f
+                out.add(listOf(PointF(c.x + dx, c.y - tk), PointF(c.x + dx, c.y + tk)))
+                out.add(listOf(PointF(c.x - dx, c.y - tk), PointF(c.x - dx, c.y + tk)))
+                val dy = lenY * i / 5f
+                out.add(listOf(PointF(c.x - tk, c.y - dy), PointF(c.x + tk, c.y - dy)))
+                out.add(listOf(PointF(c.x - tk, c.y + dy), PointF(c.x + tk, c.y + dy)))
                 i++
             }
             return out

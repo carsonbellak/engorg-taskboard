@@ -39,19 +39,31 @@ class FinishedStrokesView(context: Context) : View(context) {
         const val GAP = 56f       // space between stacked pages (world units)
         const val ADD_TILE_H = 150f
 
-        /** Quadratic-smoothed path through page-local points. */
+        /** Catmull-Rom smoothed path through page-local points (for handwriting). */
         fun buildPath(pts: List<PointF>): Path {
             val p = Path()
             if (pts.isEmpty()) return p
             if (pts.size == 1) { p.addCircle(pts[0].x, pts[0].y, 0.6f, Path.Direction.CW); return p }
+            if (pts.size == 2) { p.moveTo(pts[0].x, pts[0].y); p.lineTo(pts[1].x, pts[1].y); return p }
             p.moveTo(pts[0].x, pts[0].y)
-            for (i in 1 until pts.size - 1) {
-                val mx = (pts[i].x + pts[i + 1].x) / 2f
-                val my = (pts[i].y + pts[i + 1].y) / 2f
-                p.quadTo(pts[i].x, pts[i].y, mx, my)
+            for (i in 0 until pts.size - 1) {
+                val p0 = pts[if (i == 0) 0 else i - 1]
+                val p1 = pts[i]
+                val p2 = pts[i + 1]
+                val p3 = pts[if (i + 2 < pts.size) i + 2 else pts.size - 1]
+                val c1x = p1.x + (p2.x - p0.x) / 6f; val c1y = p1.y + (p2.y - p0.y) / 6f
+                val c2x = p2.x - (p3.x - p1.x) / 6f; val c2y = p2.y - (p3.y - p1.y) / 6f
+                p.cubicTo(c1x, c1y, c2x, c2y, p2.x, p2.y)
             }
-            val last = pts[pts.size - 1]
-            p.lineTo(last.x, last.y)
+            return p
+        }
+
+        /** Straight-segment path (for shapes, so corners stay sharp). */
+        fun buildStraightPath(pts: List<PointF>): Path {
+            val p = Path()
+            if (pts.isEmpty()) return p
+            p.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size) p.lineTo(pts[i].x, pts[i].y)
             return p
         }
     }
@@ -79,7 +91,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var vertexHandles: List<PointF>? = null
     private var lasso: List<PointF>? = null
 
-    private val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val strokePaint = Paint().apply { isAntiAlias = true; isDither = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val paperPaint = Paint().apply { isAntiAlias = true }
     private val pagePaint = Paint().apply { isAntiAlias = true }
     private val shadowPaint = Paint().apply { isAntiAlias = true; color = Color.argb(50, 0, 0, 0) }

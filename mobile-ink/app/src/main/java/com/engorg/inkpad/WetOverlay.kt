@@ -18,7 +18,7 @@ class WetOverlay(context: Context) : View(context) {
 
     private var path: Path? = null
     private val paint = Paint().apply {
-        isAntiAlias = true; style = Paint.Style.STROKE
+        isAntiAlias = true; isDither = true; style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
 
@@ -27,21 +27,8 @@ class WetOverlay(context: Context) : View(context) {
         paint.color = if (highlighter)
             Color.argb(0x66, Color.red(color), Color.green(color), Color.blue(color))
         else Color.argb(0xFF, Color.red(color), Color.green(color), Color.blue(color))
-        if (points.size < 2) {
-            if (points.size == 1) { val p = Path(); p.addCircle(points[0].x, points[0].y, widthPx / 2f, Path.Direction.CW); path = p }
-            else path = null
-            invalidate(); return
-        }
-        val p = Path()
-        p.moveTo(points[0].x, points[0].y)
-        for (i in 1 until points.size - 1) {
-            val mx = (points[i].x + points[i + 1].x) / 2f
-            val my = (points[i].y + points[i + 1].y) / 2f
-            p.quadTo(points[i].x, points[i].y, mx, my)
-        }
-        val last = points[points.size - 1]
-        p.lineTo(last.x, last.y)
-        path = p
+        // Same Catmull-Rom smoothing the committed stroke uses, so wet == final.
+        path = if (points.isEmpty()) null else FinishedStrokesView.buildPath(points)
         invalidate()
     }
 
