@@ -281,7 +281,7 @@ class LibraryActivity : ComponentActivity() {
             setCancelable(false)
         }
         dialog.show()
-        NoteshelfImport.import(
+        NoteshelfImport.importZip(
             this, uri, store,
             onProgress = { s -> status.text = s },
             onDone = { count, err ->

@@ -1,7 +1,6 @@
 package com.engorg.inkpad
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -32,9 +31,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         val shape: ShapeSpec?,
     )
 
-    /** A page. [bgPath], when set, is a baked full-page background image (e.g. an imported
-     *  Noteshelf page: paper lines/worksheet + page color) drawn behind the ink. */
-    class Page(val recs: ArrayList<Rec> = ArrayList()) { var bgPath: String? = null }
+    class Page(val recs: ArrayList<Rec> = ArrayList())
 
     companion object {
         const val PAGE_W = 816f   // 8.5in * 96
@@ -72,28 +69,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     }
 
     var pages: List<Page> = listOf(Page())
-        set(value) { field = value; clearBgCache(); invalidate() }
-
-    // Small bounded cache of decoded page-background bitmaps (access-ordered; eldest is dropped past
-    // the cap). We DON'T recycle — a drawBitmap recorded this frame reads the bitmap after onDraw, so
-    // recycling here could crash the HW canvas; dropped bitmaps are reclaimed by GC once unreferenced.
-    private val bgCache = object : LinkedHashMap<Int, Bitmap>(12, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Bitmap>): Boolean = size > 8
-    }
-    private fun clearBgCache() { bgCache.clear() }
-    private fun bgFor(i: Int): Bitmap? {
-        val path = pages.getOrNull(i)?.bgPath ?: return null
-        bgCache[i]?.let { if (!it.isRecycled) return it }
-        return try {
-            // Decode downsampled (~816px wide) — sharp enough at page-fit zoom, bounded memory.
-            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            android.graphics.BitmapFactory.decodeFile(path, opts)
-            var sample = 1
-            while (opts.outWidth / (sample * 2) >= PAGE_W.toInt()) sample *= 2
-            val decodeOpts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            android.graphics.BitmapFactory.decodeFile(path, decodeOpts)?.also { bgCache[i] = it }
-        } catch (_: Exception) { null }
-    }
+        set(value) { field = value; invalidate() }
 
     var paperStyle = PaperStyle.GRID
         set(v) { field = v; invalidate() }
@@ -177,9 +153,7 @@ class FinishedStrokesView(context: Context) : View(context) {
             canvas.drawRect(l, t, r, b, pagePaint)
             val save = canvas.save()
             canvas.clipRect(l, t, r, b)
-            val bg = bgFor(i)
-            if (bg != null) canvas.drawBitmap(bg, null, RectF(l, t, r, b), pagePaint)
-            else drawPaper(canvas, l, t, scale)
+            drawPaper(canvas, l, t, scale)
             canvas.concat(pageMatrix(i))
             drawRecs(canvas, pages[i])
             canvas.restoreToCount(save)
@@ -195,9 +169,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, PAGE_W * s, PAGE_H * s, pagePaint)
         val save = canvas.save()
         canvas.clipRect(0f, 0f, PAGE_W * s, PAGE_H * s)
-        val bg = bgFor(i)
-        if (bg != null) canvas.drawBitmap(bg, null, RectF(0f, 0f, PAGE_W * s, PAGE_H * s), pagePaint)
-        else drawPaper(canvas, 0f, 0f, s)
+        drawPaper(canvas, 0f, 0f, s)
         canvas.concat(Matrix().apply { setScale(s, s) })
         drawRecs(canvas, pages[i])
         canvas.restoreToCount(save)

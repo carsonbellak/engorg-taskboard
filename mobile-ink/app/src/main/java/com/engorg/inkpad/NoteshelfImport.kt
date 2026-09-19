@@ -2,19 +2,13 @@ package com.engorg.inkpad
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.zip.ZipEntry
@@ -31,7 +25,8 @@ import kotlin.math.min
  *
  * Ink: one row per stroke in the `annotation` table; `stroke_segments_v3` is packed 16-byte records
  * (float32 x, float32 y, …). Points are uniformly contain-fit into NoteOrg's 8.5x11 page so nothing
- * is squished. Backgrounds are rendered best-effort — a failure there never fails the ink import.
+ * is squished. This version imports editable ink + structure + page color only; rendering the page
+ * line/worksheet backgrounds from the Templates PDFs is a planned follow-up.
  *
  * Runs on a background thread; [onProgress]/[onDone] are delivered on the main thread.
  */
@@ -39,7 +34,6 @@ object NoteshelfImport {
 
     private val PAGE_W = FinishedStrokesView.PAGE_W
     private val PAGE_H = FinishedStrokesView.PAGE_H
-    private const val BG_SCALE = 2 // background render supersampling
 
     private val covers = intArrayOf(
         Color.rgb(0x29, 0x47, 0xC9), Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0x89, 0x7B),
@@ -47,7 +41,7 @@ object NoteshelfImport {
         Color.rgb(0x8E, 0x24, 0xAA), Color.rgb(0x5E, 0x35, 0xB1), Color.rgb(0x45, 0x4B, 0x55),
     )
 
-    fun import(
+    fun importZip(
         context: Context,
         zipUri: Uri,
         store: NotebookStore,
@@ -154,21 +148,6 @@ object NoteshelfImport {
                 try {
                     store.pageFile(pageId).writeText(JSONObject().put("strokes", strokes).toString())
                 } catch (_: Exception) {}
-
-                // Best-effort background: render the page's associated PDF behind the ink.
-                try {
-                    val pdfName = pg["associatedPDFFileName"] as? String
-                    val pdfIdx = ((pg["associatedPDFKitPageIndex"] as? Long)?.toInt() ?: 1) - 1
-                    if (!pdfName.isNullOrBlank()) {
-                        val pdfEntry = inner.getEntry("$bundle/Templates/$pdfName")
-                        if (pdfEntry != null) {
-                            val pdfTmp = File(work, "bg.pdf")
-                            inner.getInputStream(pdfEntry).use { ins -> pdfTmp.outputStream().use { ins.copyTo(it) } }
-                            renderBackground(pdfTmp, pdfIdx.coerceAtLeast(0), nsW, nsH, s, ox, oy, bgColor, store.pageBgFile(pageId))
-                            pdfTmp.delete()
-                        }
-                    }
-                } catch (_: Exception) { store.pageBgFile(pageId).delete() }
             }
 
             if (nb.pageIds.isEmpty()) { store.deleteNotebook(nb); return false }
@@ -207,7 +186,7 @@ object NoteshelfImport {
                     if (pts.length() == 0) continue
                     arr.put(
                         JSONObject()
-                            .put("c", 0xFF000000.toInt() or rgb)
+                            .put("c", (0xFF shl 24) or rgb)
                             .put("w", width.toDouble())
                             .put("h", false)
                             .put("k", "f")
@@ -217,34 +196,6 @@ object NoteshelfImport {
             }
         } finally { con.close() }
         return arr
-    }
-
-    private fun renderBackground(
-        pdf: File, pageIndex: Int, nsW: Float, nsH: Float, s: Float, ox: Float, oy: Float, bgColor: Int, out: File,
-    ) {
-        val pfd = ParcelFileDescriptor.open(pdf, ParcelFileDescriptor.MODE_READ_ONLY)
-        val renderer = PdfRenderer(pfd)
-        try {
-            val idx = pageIndex.coerceIn(0, renderer.pageCount - 1)
-            val page = renderer.openPage(idx)
-            try {
-                val bw = (PAGE_W * BG_SCALE).toInt()
-                val bh = (PAGE_H * BG_SCALE).toInt()
-                val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bmp)
-                canvas.drawColor(bgColor)
-                // Map the PDF page onto the same contain-fit rect the strokes use, then supersample.
-                val destW = nsW * s * BG_SCALE
-                val destH = nsH * s * BG_SCALE
-                val mtx = Matrix().apply {
-                    setScale(destW / page.width, destH / page.height)
-                    postTranslate(ox * BG_SCALE, oy * BG_SCALE)
-                }
-                page.render(bmp, null, mtx, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                FileOutputStream(out).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                bmp.recycle()
-            } finally { page.close() }
-        } finally { renderer.close(); pfd.close() }
     }
 
     /** "{{0.0, 0.0}}, {1440.0, 2304.0}}" -> width,height (falls back to letter aspect). */

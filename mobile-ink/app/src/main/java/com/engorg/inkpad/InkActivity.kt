@@ -613,7 +613,6 @@ class InkActivity : ComponentActivity() {
 
     private fun loadPage(pageId: String): FinishedStrokesView.Page {
         val page = FinishedStrokesView.Page()
-        store.pageBgFile(pageId).let { if (it.exists()) page.bgPath = it.absolutePath }
         try {
             val f = store.pageFile(pageId)
             if (!f.exists()) return page
