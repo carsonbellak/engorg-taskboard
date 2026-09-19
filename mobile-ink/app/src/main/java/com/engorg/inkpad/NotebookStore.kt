@@ -97,8 +97,14 @@ class NotebookStore(private val dir: File) {
 
     fun createFolder(name: String): Folder = Folder(id(), name).also { folders.add(it); save() }
 
-    fun createNotebook(title: String, folderId: String?, cover: Int): Notebook =
-        Notebook(id(), title, folderId, cover, System.currentTimeMillis(), arrayListOf(id())).also {
+    fun createNotebook(
+        title: String,
+        folderId: String?,
+        cover: Int,
+        paper: String = "GRID",
+        pageColor: Int = Color.WHITE,
+    ): Notebook =
+        Notebook(id(), title, folderId, cover, System.currentTimeMillis(), arrayListOf(id()), paper, pageColor).also {
             notebooks.add(it); save()
         }
 

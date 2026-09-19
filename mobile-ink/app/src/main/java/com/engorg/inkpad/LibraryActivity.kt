@@ -17,6 +17,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -245,12 +246,102 @@ class LibraryActivity : ComponentActivity() {
     }
 
     // ---- dialogs ----
+    private val pageColors = intArrayOf(
+        Color.WHITE, Color.rgb(0xFB, 0xF7, 0xEC), Color.rgb(0xF3, 0xF4, 0xF6),
+        Color.rgb(0xEA, 0xF3, 0xEC), Color.rgb(0x22, 0x27, 0x31), Color.rgb(0x0F, 0x11, 0x16),
+    )
+    private val paperOptions = listOf("Plain" to "PLAIN", "Grid" to "GRID", "Ruled" to "RULED", "Dots" to "DOTS")
+
     private fun createNotebookDialog(folderId: String?) {
-        themedPrompt("New notebook", "", "Notebook title", "Create") { raw ->
-            val title = raw.ifBlank { "Untitled" }
-            val nb = store.createNotebook(title, folderId, covers.random())
-            rebuild(); openNotebook(nb)
+        var cover = covers.random()
+        var paper = "GRID"
+        var pageColor = Color.WHITE
+        val pad = dp(22)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
+            setPadding(pad, pad, pad, dp(16))
         }
+        box.addView(TextView(this).apply { text = "New notebook"; textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(AppTheme.text) })
+        val input = EditText(this).apply {
+            hint = "Notebook title"; setHintTextColor(muted()); setTextColor(AppTheme.text); textSize = 16f
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat(); setColor(AppTheme.elevated)
+                setStroke(dp(1), Color.argb(0x33, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
+            }
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        box.addView(input, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
+        box.addView(fieldLabel("Cover"))
+        box.addView(colorChipRow(covers, cover) { cover = it })
+        box.addView(fieldLabel("Paper"))
+        box.addView(paperChipRow(paper) { paper = it })
+        box.addView(fieldLabel("Page color"))
+        box.addView(colorChipRow(pageColors, pageColor) { pageColor = it })
+
+        val dialog = Dialog(this).apply {
+            setContentView(ScrollView(this@LibraryActivity).apply { addView(box) }, ViewGroup.LayoutParams(dp(340), WRAP_CONTENT))
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        }
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) }
+            addView(btn("Cancel", false) { dialog.dismiss() })
+            addView(View(this@LibraryActivity), LinearLayout.LayoutParams(dp(8), 1))
+            addView(btn("Create", true) {
+                val title = input.text.toString().ifBlank { "Untitled" }
+                dialog.dismiss()
+                val nb = store.createNotebook(title, folderId, cover, paper, pageColor)
+                rebuild(); openNotebook(nb)
+            })
+        })
+        dialog.show()
+    }
+
+    private fun fieldLabel(t: String) = TextView(this).apply {
+        text = t; textSize = 13f; setTypeface(null, Typeface.BOLD); setTextColor(muted())
+        setPadding(dp(2), dp(16), dp(2), dp(8))
+    }
+
+    private fun colorChipRow(colors: IntArray, initial: Int, onSelect: (Int) -> Unit): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val views = ArrayList<Pair<View, Int>>()
+        fun swatch(c: Int, sel: Boolean) = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL; setColor(c)
+            setStroke(dp(if (sel) 3 else 1), if (sel) AppTheme.accent else Color.argb(0x40, 0x80, 0x80, 0x80))
+        }
+        fun refresh(sel: Int) { for ((v, c) in views) v.background = swatch(c, c == sel) }
+        for (c in colors) {
+            val v = View(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(8) }
+                setOnClickListener { onSelect(c); refresh(c) }
+            }
+            views.add(v to c); row.addView(v)
+        }
+        refresh(initial)
+        return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row) }
+    }
+
+    private fun paperChipRow(initial: String, onSelect: (String) -> Unit): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val views = ArrayList<Pair<TextView, String>>()
+        fun refresh(sel: String) {
+            for ((v, value) in views) {
+                val on = value == sel
+                v.background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(if (on) AppTheme.accent else AppTheme.elevated) }
+                v.setTextColor(if (on) AppTheme.onAccent() else AppTheme.text)
+            }
+        }
+        for ((label, value) in paperOptions) {
+            val v = TextView(this).apply {
+                text = label; textSize = 14f; setPadding(dp(16), dp(8), dp(16), dp(8))
+                layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(8) }
+                setOnClickListener { onSelect(value); refresh(value) }
+            }
+            views.add(v to value); row.addView(v)
+        }
+        refresh(initial)
+        return row
     }
 
     private fun createFolderDialog() {

@@ -93,10 +93,14 @@ class MainActivity : ComponentActivity() {
                     val last = u.lastPathSegment ?: ""
                     // The PWA's "Ink" tab navigates to /ink.html — hand that off to native ink.
                     if (last == "ink.html" || u.path?.trimEnd('/')?.endsWith("/ink") == true) {
-                        // Snapshot the PWA's live theme colors so the native ink UI matches.
-                        view.evaluateJavascript(THEME_JS) { result ->
-                            AppTheme.saveFromJson(this@MainActivity, result)
-                            startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                        // Snapshot the PWA's live theme colors + connected email accounts so the
+                        // native ink UI matches and can "email me" the notebook PDF.
+                        view.evaluateJavascript(THEME_JS) { theme ->
+                            AppTheme.saveFromJson(this@MainActivity, theme)
+                            view.evaluateJavascript(ACCOUNTS_JS) { accounts ->
+                                EmailPrefs.saveAccounts(this@MainActivity, accounts)
+                                startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                            }
                         }
                         return true
                     }
@@ -159,6 +163,18 @@ class MainActivity : ComponentActivity() {
     elevated:resolve('--bg-elevated'), text:resolve('--text'),
     dark:document.body.classList.contains('theme-dark')
   });
+})()
+"""
+
+        // Reads the signed-in account(s) from the PWA's Firebase session so the ink app can offer
+        // "email this notebook to me" with the right address + profile picture.
+        private const val ACCOUNTS_JS = """
+(function(){
+  try{
+    var u = firebase.auth().currentUser;
+    if(u && u.email) return JSON.stringify([{email:u.email, name:(u.displayName||''), photo:(u.photoURL||'')}]);
+  }catch(_){}
+  return "[]";
 })()
 """
 

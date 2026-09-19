@@ -36,5 +36,16 @@
             android:exported="false"
             android:screenOrientation="fullUser"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density" />
+
+        <!-- Shares the exported notebook PDF with the user's email app. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.engorg.inkpad.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

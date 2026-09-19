@@ -39,6 +39,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         const val PAGE_W = 816f   // 8.5in * 96
         const val PAGE_H = 1056f  // 11in  * 96
         const val GAP = 56f       // space between stacked pages (world units)
+        const val ADD_TILE_H = 150f // "+ Add page" tile below the last page (world units)
     }
 
     private val renderer = CanvasStrokeRenderer.create()
@@ -52,6 +53,10 @@ class FinishedStrokesView(context: Context) : View(context) {
         set(v) { field = v; invalidate() }
     var backdrop = Color.rgb(0xE9, 0xEA, 0xEC)
     var accent = Color.rgb(0x81, 0x8C, 0xF8)
+    var textColor = Color.rgb(0x3A, 0x41, 0x4E)
+    var showAddPage = true
+    private var addRectScreen: RectF? = null
+    fun addPageRectScreen(): RectF? = addRectScreen
 
     var scale = 1f; private set
     var tx = 0f; private set
@@ -79,11 +84,17 @@ class FinishedStrokesView(context: Context) : View(context) {
     }
     private val delPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(0xE5, 0x3E, 0x3E) }
     private val delX = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.WHITE }
+    private val addTilePaint = Paint().apply {
+        isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f
+        pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f)
+    }
+    private val addTileText = Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
     fun setTransform(s: Float, x: Float, y: Float) { scale = s; tx = x; ty = y; invalidate() }
 
     fun pageTop(i: Int) = i * (PAGE_H + GAP)
     fun docHeight(): Float = if (pages.isEmpty()) PAGE_H else pages.size * (PAGE_H + GAP) - GAP
+    fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
     fun setSelection(page: Int, box: RectF?, handles: List<PointF>?) {
         selPage = page; selBox = box; vertexHandles = handles; invalidate()
@@ -122,38 +133,66 @@ class FinishedStrokesView(context: Context) : View(context) {
             canvas.drawRect(l, t, r, b, pagePaint)
             val save = canvas.save()
             canvas.clipRect(l, t, r, b)
-            drawPaper(canvas, l, t)
+            drawPaper(canvas, l, t, scale)
             val m = pageMatrix(i)
             for (rec in pages[i].recs) for (s in rec.strokes) renderer.draw(canvas, s, m)
             canvas.restoreToCount(save)
             canvas.drawRect(l, t, r, b, borderPaint)
         }
+        drawAddTile(canvas, vh)
         drawOverlay(canvas)
     }
 
-    private fun drawPaper(canvas: Canvas, l: Float, t: Float) {
+    /** Renders one page (background + paper + strokes) at [s] scale, origin (0,0) — used for PDF export. */
+    fun renderPageInto(canvas: Canvas, i: Int, s: Float) {
+        pagePaint.color = pageColor
+        canvas.drawRect(0f, 0f, PAGE_W * s, PAGE_H * s, pagePaint)
+        val save = canvas.save()
+        canvas.clipRect(0f, 0f, PAGE_W * s, PAGE_H * s)
+        drawPaper(canvas, 0f, 0f, s)
+        val m = Matrix().apply { setScale(s, s) }
+        for (rec in pages[i].recs) for (st in rec.strokes) renderer.draw(canvas, st, m)
+        canvas.restoreToCount(save)
+    }
+
+    private fun drawAddTile(canvas: Canvas, vh: Float) {
+        if (!showAddPage || pages.isEmpty()) { addRectScreen = null; return }
+        val l = tx
+        val t = ty + scale * (docHeight() + GAP)
+        val r = tx + PAGE_W * scale
+        val b = t + ADD_TILE_H * scale
+        addRectScreen = RectF(l, t, r, b)
+        if (b < -4f || t > vh + 4f) return
+        addTilePaint.color = Color.argb(0x66, Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+        addTileText.color = Color.argb(0xCC, Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+        canvas.drawRoundRect(l, t, r, b, 18f, 18f, addTilePaint)
+        addTileText.textSize = (20f * scale).coerceIn(16f, 30f)
+        canvas.drawText("+  Add page", (l + r) / 2f, (t + b) / 2f + addTileText.textSize / 3f, addTileText)
+    }
+
+    private fun drawPaper(canvas: Canvas, l: Float, t: Float, s: Float) {
         if (paperStyle == PaperStyle.PLAIN) return
         val sp = 32f
         val lum = 0.299 * Color.red(pageColor) + 0.587 * Color.green(pageColor) + 0.114 * Color.blue(pageColor)
         paperPaint.color = if (lum < 128) Color.argb(46, 255, 255, 255) else Color.argb(30, 30, 50, 90)
-        val bottom = t + PAGE_H * scale
-        val right = l + PAGE_W * scale
+        val bottom = t + PAGE_H * s
+        val right = l + PAGE_W * s
         when (paperStyle) {
             PaperStyle.GRID -> {
                 paperPaint.style = Paint.Style.STROKE; paperPaint.strokeWidth = 1f
-                var xw = sp; while (xw < PAGE_W) { val xs = l + xw * scale; canvas.drawLine(xs, t, xs, bottom, paperPaint); xw += sp }
-                var yw = sp; while (yw < PAGE_H) { val ys = t + yw * scale; canvas.drawLine(l, ys, right, ys, paperPaint); yw += sp }
+                var xw = sp; while (xw < PAGE_W) { val xs = l + xw * s; canvas.drawLine(xs, t, xs, bottom, paperPaint); xw += sp }
+                var yw = sp; while (yw < PAGE_H) { val ys = t + yw * s; canvas.drawLine(l, ys, right, ys, paperPaint); yw += sp }
             }
             PaperStyle.RULED -> {
                 paperPaint.style = Paint.Style.STROKE; paperPaint.strokeWidth = 1f
-                var yw = sp; while (yw < PAGE_H) { val ys = t + yw * scale; canvas.drawLine(l, ys, right, ys, paperPaint); yw += sp }
+                var yw = sp; while (yw < PAGE_H) { val ys = t + yw * s; canvas.drawLine(l, ys, right, ys, paperPaint); yw += sp }
             }
             PaperStyle.DOTS -> {
                 paperPaint.style = Paint.Style.FILL
                 var yw = sp
                 while (yw < PAGE_H) {
                     var xw = sp
-                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * scale, t + yw * scale, 1.6f, paperPaint); xw += sp }
+                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * s, t + yw * s, 1.6f, paperPaint); xw += sp }
                     yw += sp
                 }
             }
