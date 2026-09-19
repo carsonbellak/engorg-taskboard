@@ -10,14 +10,12 @@ import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
 import android.view.View
-import androidx.ink.rendering.android.canvas.CanvasStrokeRenderer
-import androidx.ink.strokes.Stroke
 
 /**
  * Continuous multi-page document (8.5x11 pages stacked vertically with a gap) drawn on a backdrop.
  * Everything renders through one scale+translate transform (zoom + pan). Strokes are stored in
- * PAGE-LOCAL coordinates per page, so they always live ON their page and move with it. Also draws
- * the selection box / vertex handles / lasso overlay for the editing tools.
+ * PAGE-LOCAL coordinates per page and drawn with plain Canvas paths (no native ink renderer), so
+ * what you see while drawing is exactly what persists, glued to its page under pan/zoom.
  */
 class FinishedStrokesView(context: Context) : View(context) {
 
@@ -25,12 +23,12 @@ class FinishedStrokesView(context: Context) : View(context) {
 
     /** One drawable object on a page: freehand ink (shape == null) or a parametric shape. */
     class Rec(
-        val strokes: List<Stroke>,
+        val paths: List<Path>,      // page-local smoothed paths (one for freehand, several for shapes)
         var points: List<PointF>,   // page-local, for erase / selection / bounds
+        val color: Int,
+        val widthPx: Float,         // page units
         val highlighter: Boolean,
         val shape: ShapeSpec?,
-        val colorArgb: Int,
-        val sizePx: Float,
     )
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
@@ -39,10 +37,24 @@ class FinishedStrokesView(context: Context) : View(context) {
         const val PAGE_W = 816f   // 8.5in * 96
         const val PAGE_H = 1056f  // 11in  * 96
         const val GAP = 56f       // space between stacked pages (world units)
-        const val ADD_TILE_H = 150f // "+ Add page" tile below the last page (world units)
-    }
+        const val ADD_TILE_H = 150f
 
-    private val renderer = CanvasStrokeRenderer.create()
+        /** Quadratic-smoothed path through page-local points. */
+        fun buildPath(pts: List<PointF>): Path {
+            val p = Path()
+            if (pts.isEmpty()) return p
+            if (pts.size == 1) { p.addCircle(pts[0].x, pts[0].y, 0.6f, Path.Direction.CW); return p }
+            p.moveTo(pts[0].x, pts[0].y)
+            for (i in 1 until pts.size - 1) {
+                val mx = (pts[i].x + pts[i + 1].x) / 2f
+                val my = (pts[i].y + pts[i + 1].y) / 2f
+                p.quadTo(pts[i].x, pts[i].y, mx, my)
+            }
+            val last = pts[pts.size - 1]
+            p.lineTo(last.x, last.y)
+            return p
+        }
+    }
 
     var pages: List<Page> = listOf(Page())
         set(value) { field = value; invalidate() }
@@ -62,32 +74,23 @@ class FinishedStrokesView(context: Context) : View(context) {
     var tx = 0f; private set
     var ty = 0f; private set
 
-    // selection / overlay (page-local coords on selPage)
     private var selPage = -1
     private var selBox: RectF? = null
     private var vertexHandles: List<PointF>? = null
-    private var lasso: List<PointF>? = null   // screen coords
+    private var lasso: List<PointF>? = null
 
+    private val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val paperPaint = Paint().apply { isAntiAlias = true }
     private val pagePaint = Paint().apply { isAntiAlias = true }
     private val shadowPaint = Paint().apply { isAntiAlias = true; color = Color.argb(50, 0, 0, 0) }
     private val borderPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.argb(40, 0, 0, 0) }
-    private val selPaint = Paint().apply {
-        isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f
-        pathEffect = DashPathEffect(floatArrayOf(10f, 8f), 0f)
-    }
+    private val selPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(10f, 8f), 0f) }
     private val handleFill = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.WHITE }
     private val handleStroke = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f }
-    private val lassoPaint = Paint().apply {
-        isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f
-        pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f)
-    }
+    private val lassoPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f) }
     private val delPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(0xE5, 0x3E, 0x3E) }
     private val delX = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.WHITE }
-    private val addTilePaint = Paint().apply {
-        isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f
-        pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f)
-    }
+    private val addTilePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f) }
     private val addTileText = Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
     fun setTransform(s: Float, x: Float, y: Float) { scale = s; tx = x; ty = y; invalidate() }
@@ -96,13 +99,10 @@ class FinishedStrokesView(context: Context) : View(context) {
     fun docHeight(): Float = if (pages.isEmpty()) PAGE_H else pages.size * (PAGE_H + GAP) - GAP
     fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
-    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?) {
-        selPage = page; selBox = box; vertexHandles = handles; invalidate()
-    }
+    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?) { selPage = page; selBox = box; vertexHandles = handles; invalidate() }
     fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
 
-    /** Remove any rec on [page] with a point within [radius] of (x,y). Returns true if changed. */
     fun eraseNear(page: Int, x: Float, y: Float, radius: Float): Boolean {
         if (page < 0 || page >= pages.size) return false
         val r2 = radius * radius
@@ -114,8 +114,16 @@ class FinishedStrokesView(context: Context) : View(context) {
         return changed
     }
 
-    private fun pageMatrix(i: Int): Matrix = Matrix().apply {
-        setScale(scale, scale); postTranslate(tx, ty); preTranslate(0f, pageTop(i))
+    private fun pageMatrix(i: Int): Matrix = Matrix().apply { setScale(scale, scale); postTranslate(tx, ty); preTranslate(0f, pageTop(i)) }
+
+    private fun drawRecs(canvas: Canvas, page: Page) {
+        for (rec in page.recs) {
+            strokePaint.color = if (rec.highlighter)
+                Color.argb(0x66, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+            else Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+            strokePaint.strokeWidth = rec.widthPx
+            for (p in rec.paths) canvas.drawPath(p, strokePaint)
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -127,15 +135,15 @@ class FinishedStrokesView(context: Context) : View(context) {
             val t = ty + scale * pageTop(i)
             val r = tx + PAGE_W * scale
             val b = t + PAGE_H * scale
-            if (b < -4f || t > vh + 4f) continue // cull off-screen pages
+            if (b < -4f || t > vh + 4f) continue
             canvas.drawRect(l + 5, t + 7, r + 5, b + 7, shadowPaint)
             pagePaint.color = pageColor
             canvas.drawRect(l, t, r, b, pagePaint)
             val save = canvas.save()
             canvas.clipRect(l, t, r, b)
             drawPaper(canvas, l, t, scale)
-            val m = pageMatrix(i)
-            for (rec in pages[i].recs) for (s in rec.strokes) renderer.draw(canvas, s, m)
+            canvas.concat(pageMatrix(i))
+            drawRecs(canvas, pages[i])
             canvas.restoreToCount(save)
             canvas.drawRect(l, t, r, b, borderPaint)
         }
@@ -150,8 +158,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         val save = canvas.save()
         canvas.clipRect(0f, 0f, PAGE_W * s, PAGE_H * s)
         drawPaper(canvas, 0f, 0f, s)
-        val m = Matrix().apply { setScale(s, s) }
-        for (rec in pages[i].recs) for (st in rec.strokes) renderer.draw(canvas, st, m)
+        canvas.concat(Matrix().apply { setScale(s, s) })
+        drawRecs(canvas, pages[i])
         canvas.restoreToCount(save)
     }
 
@@ -217,23 +225,18 @@ class FinishedStrokesView(context: Context) : View(context) {
         val l = sx(selPage, box.left); val t = sy(selPage, box.top)
         val r = sx(selPage, box.right); val b = sy(selPage, box.bottom)
         canvas.drawRect(l, t, r, b, selPaint)
-        // corner resize handles
         val hr = 11f
         for (c in listOf(floatArrayOf(l, t), floatArrayOf(r, t), floatArrayOf(r, b), floatArrayOf(l, b))) {
-            canvas.drawCircle(c[0], c[1], hr, handleFill)
-            canvas.drawCircle(c[0], c[1], hr, handleStroke)
+            canvas.drawCircle(c[0], c[1], hr, handleFill); canvas.drawCircle(c[0], c[1], hr, handleStroke)
         }
-        // delete button (top-right, offset out)
         val dcx = r + 20f; val dcy = t - 20f
         canvas.drawCircle(dcx, dcy, 15f, delPaint)
         canvas.drawLine(dcx - 6, dcy - 6, dcx + 6, dcy + 6, delX)
         canvas.drawLine(dcx - 6, dcy + 6, dcx + 6, dcy - 6, delX)
-        // vertex handles (only for a single selected shape)
         vertexHandles?.let { hs ->
             for (h in hs) {
                 val hx = sx(selPage, h.x); val hy = sy(selPage, h.y)
-                canvas.drawCircle(hx, hy, 12f, handleFill)
-                canvas.drawCircle(hx, hy, 12f, handleStroke)
+                canvas.drawCircle(hx, hy, 12f, handleFill); canvas.drawCircle(hx, hy, 12f, handleStroke)
             }
         }
     }
