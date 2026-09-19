@@ -23,6 +23,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -59,7 +60,7 @@ class InkActivity : ComponentActivity() {
     private lateinit var scaleDetector: ScaleGestureDetector
     private lateinit var colorButton: Button
     private var pageLabel: TextView? = null
-    private val toolButtons = HashMap<Tool, Button>()
+    private val toolButtons = HashMap<Tool, ImageButton>()
 
     private enum class Mode { NONE, DRAW, ERASE, PAN, SELECT }
     private enum class Tool { PEN, HIGHLIGHTER, ERASER, SELECT }
@@ -664,15 +665,17 @@ class InkActivity : ComponentActivity() {
             background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
             setPadding(pad, pad, pad, dp(14))
         }
-        col.addView(TextView(this).apply { text = "Email notebook to"; textSize = 18f; setTypeface(null, android.graphics.Typeface.BOLD); setTextColor(AppTheme.text) })
+        col.addView(ImageView(this).apply { setImageBitmap(Icons.bitmap(Icons.EMAIL, dp(26))); setColorFilter(AppTheme.text); layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)) })
         val dialog = Dialog(this).apply {
             setContentView(col, ViewGroup.LayoutParams(dp(330), WRAP_CONTENT))
             window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
         val saved = EmailPrefs.savedEmail(this)
         for (acc in accounts) col.addView(accountTile(acc, acc.email == saved) { EmailPrefs.setSavedEmail(this, acc.email); dialog.dismiss(); onPick(acc.email) })
-        col.addView(TextView(this).apply {
-            text = "＋  Use another email…"; textSize = 15f; setTextColor(AppTheme.accent); setPadding(dp(10), dp(14), dp(10), dp(10))
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(14), dp(6), dp(6))
+            addView(ImageView(this@InkActivity).apply { setImageBitmap(Icons.bitmap(Icons.ADD, dp(22))); setColorFilter(AppTheme.accent); layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)) })
             setOnClickListener { dialog.dismiss(); promptEmail { e -> EmailPrefs.setSavedEmail(this@InkActivity, e); onPick(e) } }
         })
         dialog.show()
@@ -729,10 +732,9 @@ class InkActivity : ComponentActivity() {
             background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
             setPadding(pad, pad, pad, dp(16))
         }
-        box.addView(TextView(this).apply { text = "Email address"; textSize = 18f; setTypeface(null, android.graphics.Typeface.BOLD); setTextColor(AppTheme.text) })
+        box.addView(ImageView(this).apply { setImageBitmap(Icons.bitmap(Icons.EMAIL, dp(26))); setColorFilter(AppTheme.text); layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)) })
         val input = android.widget.EditText(this).apply {
-            hint = "you@example.com"; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-            setHintTextColor(Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             setTextColor(AppTheme.text)
             background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(AppTheme.elevated) }
             setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -745,10 +747,9 @@ class InkActivity : ComponentActivity() {
         box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(18) }
-            addView(pill("Cancel") { dialog.dismiss() })
+            addView(iconBtn(Icons.CLOSE) { dialog.dismiss() })
             addView(View(this@InkActivity), LinearLayout.LayoutParams(dp(8), 1))
-            addView(pill("Send") { val v = input.text.toString().trim(); if (v.contains("@")) { dialog.dismiss(); onOk(v) } else input.error = "Enter a valid email" }
-                .apply { background = pillBg(AppTheme.accent); setTextColor(AppTheme.onAccent()) })
+            addView(iconBtn(Icons.CHECK, active = true) { val v = input.text.toString().trim(); if (v.contains("@")) { dialog.dismiss(); onOk(v) } })
         })
         dialog.show()
     }
@@ -757,19 +758,34 @@ class InkActivity : ComponentActivity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(color) }
 
-    private fun pill(label: String, onClick: (Button) -> Unit): Button = Button(this).apply {
-        text = label; isAllCaps = false; textSize = 13f
-        setTextColor(onSurface); background = pillBg(light); stateListAnimator = null
-        minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
-        setPadding(dp(12), dp(3), dp(12), dp(3))
+    private fun iconBtn(pathData: String, active: Boolean = false, onClick: (ImageButton) -> Unit): ImageButton = ImageButton(this).apply {
+        setImageBitmap(Icons.bitmap(pathData, dp(22)))
+        scaleType = ImageView.ScaleType.FIT_CENTER
+        background = pillBg(if (active) accent else light)
+        setColorFilter(if (active) AppTheme.onAccent() else onSurface)
+        stateListAnimator = null; minimumWidth = 0
+        val pd = dp(7); setPadding(pd, pd, pd, pd)
+        layoutParams = LinearLayout.LayoutParams(dp(42), dp(34))
         setOnClickListener { onClick(this) }
+    }
+
+    private fun shapePreview(type: ShapeType, px: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val spec = ShapeSpec.make(type, px / 2f, px / 2f, px * 0.30f)
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; color = Color.WHITE
+            strokeWidth = px * 0.055f; strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+        }
+        for (poly in spec.polylines()) c.drawPath(FinishedStrokesView.buildStraightPath(poly), paint)
+        return bmp
     }
 
     private fun updateTools() {
         for ((t, btn) in toolButtons) {
             val active = t == tool
             btn.background = pillBg(if (active) accent else light)
-            btn.setTextColor(if (active) AppTheme.onAccent() else onSurface)
+            btn.setColorFilter(if (active) AppTheme.onAccent() else onSurface)
         }
     }
 
@@ -778,9 +794,14 @@ class InkActivity : ComponentActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(1), dp(22)).apply { setMargins(dp(5), 0, dp(5), 0) }
             setBackgroundColor(Color.argb(0x22, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
         }
-        fun toolPill(label: String, t: Tool) = pill(label) { tool = t; if (t != Tool.SELECT) clearSelection(); updateTools() }.also { toolButtons[t] = it }
+        fun iconTool(path: String, t: Tool) = iconBtn(path) { tool = t; if (t != Tool.SELECT) clearSelection(); updateTools() }.also { toolButtons[t] = it }
 
-        colorButton = pill("  ") { showColorPicker(it) { c -> brushColor = c; colorButton.background = pillBg(c) } }.apply { background = pillBg(brushColor); minWidth = dp(38) }
+        colorButton = Button(this).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(brushColor); setStroke(dp(1), Color.argb(0x40, 0x80, 0x80, 0x80)) }
+            stateListAnimator = null; minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
+            layoutParams = LinearLayout.LayoutParams(dp(34), dp(30))
+            setOnClickListener { showColorPicker(it) { c -> brushColor = c; (background as GradientDrawable).setColor(c) } }
+        }
 
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -788,26 +809,26 @@ class InkActivity : ComponentActivity() {
                 cornerRadius = dp(24).toFloat(); setColor(AppTheme.surface)
                 setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             }
-            elevation = dp(7).toFloat(); setPadding(dp(9), dp(6), dp(9), dp(6))
-            addView(pill("‹ App") { finish() })
+            elevation = dp(7).toFloat(); setPadding(dp(8), dp(5), dp(8), dp(5))
+            addView(iconBtn(Icons.BACK) { finish() })
             addView(sep())
-            addView(pill("↶") { undo() }); addView(pill("↷") { redo() })
+            addView(iconBtn(Icons.UNDO) { undo() }); addView(iconBtn(Icons.REDO) { redo() })
             addView(sep())
-            addView(toolPill("Pen", Tool.PEN)); addView(toolPill("Marker", Tool.HIGHLIGHTER))
-            addView(toolPill("Eraser", Tool.ERASER)); addView(toolPill("Lasso", Tool.SELECT))
-            addView(pill("Shapes ▾") { showShapeMenu(it) })
+            addView(iconTool(Icons.PEN, Tool.PEN)); addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
+            addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
+            addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) })
             addView(sep())
             addView(colorButton)
-            addView(pill("Size ▾") { showSizePopup(it) })
+            addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
             addView(sep())
-            addView(pill("－") { zoomBy(0.8f) }); addView(pill("＋") { zoomBy(1.25f) }); addView(pill("Fit") { fitVertical = !fitVertical; fitPage() })
+            addView(iconBtn(Icons.ZOOM_OUT) { zoomBy(0.8f) }); addView(iconBtn(Icons.ZOOM_IN) { zoomBy(1.25f) }); addView(iconBtn(Icons.FIT) { fitVertical = !fitVertical; fitPage() })
             addView(sep())
-            addView(pill("‹") { scrollPage(-1) })
+            addView(iconBtn(Icons.PREV) { scrollPage(-1) })
             pageLabel = TextView(this@InkActivity).apply { text = "1 / 1"; textSize = 13f; setTextColor(onSurface); setPadding(dp(6), 0, dp(6), 0) }.also { addView(it) }
-            addView(pill("›") { scrollPage(1) })
-            addView(pill("＋ Page") { addPage() })
+            addView(iconBtn(Icons.NEXT) { scrollPage(1) })
+            addView(iconBtn(Icons.ADD) { addPage() })
             addView(sep())
-            addView(pill("✉ Email") { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
+            addView(iconBtn(Icons.EMAIL) { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
         }
         return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
     }
@@ -819,22 +840,21 @@ class InkActivity : ComponentActivity() {
     }
 
     private fun showShapeMenu(anchor: View) {
-        val items = listOf(
-            "Line" to ShapeType.LINE, "Arrow" to ShapeType.ARROW, "Rectangle" to ShapeType.RECT,
-            "Circle / Ellipse" to ShapeType.ELLIPSE, "Triangle" to ShapeType.TRIANGLE,
-            "2D axes (x–y)" to ShapeType.AXES2D, "3D axes (x–y–z)" to ShapeType.AXES3D,
-        )
-        val col = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val types = listOf(ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE, ShapeType.AXES2D, ShapeType.AXES3D)
+        val grid = GridLayout(this).apply {
+            columnCount = 4
             background = GradientDrawable().apply {
                 cornerRadius = dp(14).toFloat(); setColor(AppTheme.surface)
                 setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             }
-            setPadding(dp(6), dp(6), dp(6), dp(6))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
         }
-        val popup = PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
-        for ((label, type) in items) col.addView(TextView(this).apply {
-            text = label; textSize = 15f; setTextColor(onSurface); setPadding(dp(16), dp(11), dp(28), dp(11))
+        val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
+        for (type in types) grid.addView(ImageButton(this).apply {
+            setImageBitmap(shapePreview(type, dp(30))); setColorFilter(onSurface); scaleType = ImageView.ScaleType.FIT_CENTER
+            background = pillBg(light); stateListAnimator = null
+            val pd = dp(8); setPadding(pd, pd, pd, pd)
+            layoutParams = GridLayout.LayoutParams().apply { width = dp(54); height = dp(50); setMargins(dp(4), dp(4), dp(4), dp(4)) }
             setOnClickListener { popup.dismiss(); insertShape(type) }
         })
         popup.showAsDropDown(anchor, 0, dp(6))
@@ -842,7 +862,6 @@ class InkActivity : ComponentActivity() {
 
     private fun showSizePopup(anchor: View) {
         val pad = dp(16)
-        val label = TextView(this).apply { text = "Size: ${brushSize.toInt()}"; textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD); setTextColor(onSurface) }
         val preview = object : View(this) {
             private val pv = android.graphics.Paint().apply { isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.ROUND }
             override fun onDraw(c: android.graphics.Canvas) {
@@ -850,11 +869,11 @@ class InkActivity : ComponentActivity() {
                 pv.strokeWidth = brushSize
                 c.drawLine(dp(14).toFloat(), height / 2f, (width - dp(14)).toFloat(), height / 2f, pv)
             }
-        }.apply { layoutParams = LinearLayout.LayoutParams(dp(220), dp(58)).apply { topMargin = dp(10) } }
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(220), dp(52)) }
         val seek = SeekBar(this).apply {
             max = 39; progress = (brushSize.toInt() - 1).coerceIn(0, 39)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { brushSize = (p + 1).toFloat(); label.text = "Size: ${brushSize.toInt()}"; preview.invalidate() }
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { brushSize = (p + 1).toFloat(); preview.invalidate() }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
             })
@@ -866,8 +885,8 @@ class InkActivity : ComponentActivity() {
                 setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             }
             setPadding(pad, pad, pad, pad)
-            addView(label); addView(preview)
-            addView(seek, LinearLayout.LayoutParams(dp(230), WRAP_CONTENT).apply { topMargin = dp(8) })
+            addView(preview)
+            addView(seek, LinearLayout.LayoutParams(dp(230), WRAP_CONTENT).apply { topMargin = dp(6) })
         }
         PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }.showAsDropDown(anchor, 0, dp(6))
     }
