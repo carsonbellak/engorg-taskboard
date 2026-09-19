@@ -17,6 +17,24 @@
   };
   const NEW_PROJECT = '__new__';
 
+  // Coarse import buckets. The two the user actually toggles are Exams (things you sit
+  // for) and Assignments (deliverables that the linked-account imports —
+  // Gradescope / Variate / Brightspace — already create as notes, so they duplicate the
+  // most). "Other" holds one-off class dates no platform ever produces. Assignments are
+  // OFF by default so a syllabus never doubles up the platform imports; if the user turns
+  // them on, dedupeAgainstExisting() still drops any that match an existing item.
+  const BUCKET_OF = {
+    exam: 'exams', quiz: 'exams',
+    assignment: 'assignments', project: 'assignments', lab: 'assignments',
+    lecture: 'other', holiday: 'other', other: 'other',
+  };
+  const BUCKETS = [
+    { key: 'exams', label: 'Exams & quizzes', defaultOn: true, hint: 'Exams, midterms, finals, quizzes' },
+    { key: 'assignments', label: 'Assignments', defaultOn: false, hint: 'Homework, projects, labs — usually already imported from Gradescope / Variate / Brightspace' },
+    { key: 'other', label: 'Other dates', defaultOn: true, hint: 'No-class days, add/drop deadlines, etc.' },
+  ];
+  const bucketOf = (t) => BUCKET_OF[t] || 'other';
+
   const esc = (s) => (window.escapeHtml ? window.escapeHtml(s) : String(s == null ? '' : s));
   const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
   const norm = (s) => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -24,6 +42,50 @@
   function fmtDate(dateStr) {
     const d = new Date(dateStr + 'T00:00:00');
     return isNaN(d) ? dateStr : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // ── de-dup against what the platform imports already created ──────────────────
+  // Assignment-type syllabus rows can collide with the notes Gradescope/Variate/
+  // Brightspace make (their dueDate IS their calendar entry) or with other calendar
+  // sources. We match on a fuzzy title (HW3 ≡ "Homework 3", but "Lab 1" ≠ "Lab 10")
+  // within a few days of the same date, scoped to the same project when both have one.
+  const numsOf = (s) => (String(s).match(/\d+/g) || []).map(Number).join(',');
+  const stemOf = (s) => norm(s).replace(/[0-9]/g, '')
+    .replace(/HOMEWORKS?|ASSIGNMENTS?|ASSIGN|PROBLEMSETS?|PSETS?|PROBLEMS?/g, 'HW');
+  function titlesMatch(t1, t2) {
+    const n1 = numsOf(t1), n2 = numsOf(t2);
+    if (n1 && n2 && n1 !== n2) return false;            // different numbers → different item
+    const s1 = stemOf(t1), s2 = stemOf(t2);
+    if (!s1 || !s2) return norm(t1) === norm(t2);
+    return s1 === s2 || s1.includes(s2) || s2.includes(s1);
+  }
+  function daysApart(a, b) {
+    const d1 = new Date(a + 'T00:00:00'), d2 = new Date(b + 'T00:00:00');
+    if (isNaN(d1) || isNaN(d2)) return Infinity;
+    return Math.abs(d1 - d2) / 86400000;
+  }
+  // Everything already on the calendar that a syllabus assignment could duplicate:
+  // platform assignment notes (their dueDate renders on the calendar) + non-syllabus
+  // schedule items. Our own syllabus items are excluded — they self-dedupe by extId.
+  function existingCalendarIndex() {
+    const out = [];
+    for (const t of (dataManager.tasks || [])) {
+      if (!t || !t.dueDate) continue;
+      if (t.category === 'assignment' || ['gradescope', 'variate', 'brightspace', 'syllabus'].includes(t.source)) {
+        out.push({ title: t.title || '', date: t.dueDate, projectId: t.projectId || null });
+      }
+    }
+    for (const s of (dataManager.scheduleItems || [])) {
+      if (!s || !s.date || s.source === 'syllabus') continue;
+      out.push({ title: s.title || '', date: s.date, projectId: s.projectId || null });
+    }
+    return out;
+  }
+  function isDuplicate(ev, projectId, index) {
+    return index.some(e =>
+      (!e.projectId || !projectId || e.projectId === projectId) &&
+      daysApart(ev.date, e.date) <= 3 &&
+      titlesMatch(ev.title, e.title));
   }
 
   let overlay = null;
@@ -171,7 +233,7 @@
     const icon = TYPE_ICON[ev.type] || TYPE_ICON.other;
     const time = ev.allDay ? '' : (ev.startTime || '');
     return `
-      <div class="syl-row" data-i="${i}">
+      <div class="syl-row" data-i="${i}" data-bucket="${bucketOf(ev.type)}">
         <label class="syl-check"><input type="checkbox" checked data-role="on"></label>
         <span class="syl-type" title="${esc(ev.type || 'other')}">${icon}</span>
         <input class="syl-title" data-role="title" value="${esc(ev.title)}">
@@ -180,13 +242,39 @@
       </div>`;
   }
 
+  // Toggle chips for the buckets actually present in this syllabus.
+  function filterBar(events) {
+    const present = new Set(events.map(ev => bucketOf(ev.type)));
+    overlay._buckets = {};
+    const chips = [];
+    for (const b of BUCKETS) {
+      if (!present.has(b.key)) continue;
+      overlay._buckets[b.key] = b.defaultOn;
+      chips.push(`<button type="button" class="syl-filter${b.defaultOn ? ' is-on' : ''}" data-bucket="${b.key}" aria-pressed="${b.defaultOn}" title="${esc(b.hint)}"><span class="syl-filter-dot"></span>${esc(b.label)}</button>`);
+    }
+    if (chips.length < 2) {            // nothing to choose between → skip the bar, show it all
+      Object.keys(overlay._buckets).forEach(k => { overlay._buckets[k] = true; });
+      return '';
+    }
+    return `<div class="syllabus-filters" role="group" aria-label="Which items to import"><span class="syllabus-filters-label">Import:</span>${chips.join('')}</div>`;
+  }
+
+  function applyBuckets() {
+    overlay.querySelectorAll('.syl-row').forEach(row => {
+      const on = overlay._buckets[row.dataset.bucket] !== false;
+      row.classList.toggle('syl-hidden', !on);
+    });
+    updateAddCount();
+  }
+
   function renderPreview(events) {
     const courseLine = course && (course.name || course.code)
       ? `<div class="syllabus-course">📚 ${esc(course.name || course.code)}${course.term ? ' · ' + esc(course.term) : ''}</div>`
       : '';
+    const bar = filterBar(events);
     shell(`
       <div class="syllabus-head">
-        <div><h2>📄 Review events</h2><p class="syllabus-sub">Uncheck anything you don't want, fix any dates, then add them.</p></div>
+        <div><h2>📄 Review events</h2><p class="syllabus-sub">Pick what to import, fix any dates, then add them.</p></div>
         <button class="syllabus-x" data-act="close" title="Close">&times;</button>
       </div>
       ${courseLine}
@@ -194,6 +282,7 @@
         <label class="field-label">Add to project</label>
         <select id="syl-project" class="syllabus-select">${projectOptions()}</select>
       </div>
+      ${bar}
       <div class="syllabus-list" id="syl-list">${events.map(eventRow).join('')}</div>
       <div class="syllabus-status" id="syl-status"></div>
       <div class="modal-actions">
@@ -204,19 +293,29 @@
 
     overlay._events = events;
     overlay.querySelector('[data-act="back"]').addEventListener('click', () => open());
+    overlay.querySelectorAll('.syl-filter').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const k = chip.dataset.bucket;
+        const on = !overlay._buckets[k];
+        overlay._buckets[k] = on;
+        chip.classList.toggle('is-on', on);
+        chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+        applyBuckets();
+      });
+    });
     overlay.querySelector('#syl-selall').addEventListener('click', () => {
-      const boxes = overlay.querySelectorAll('.syl-row [data-role="on"]');
-      const anyOff = [...boxes].some(b => !b.checked);
+      const boxes = [...overlay.querySelectorAll('.syl-row:not(.syl-hidden) [data-role="on"]')];
+      const anyOff = boxes.some(b => !b.checked);
       boxes.forEach(b => { b.checked = anyOff; });
       updateAddCount();
     });
     overlay.querySelector('#syl-list').addEventListener('change', updateAddCount);
     overlay.querySelector('#syl-add').addEventListener('click', commit);
-    updateAddCount();
+    applyBuckets();
   }
 
   function updateAddCount() {
-    const n = overlay.querySelectorAll('.syl-row [data-role="on"]:checked').length;
+    const n = [...overlay.querySelectorAll('.syl-row:not(.syl-hidden) [data-role="on"]')].filter(b => b.checked).length;
     const btn = overlay.querySelector('#syl-add');
     if (btn) { btn.textContent = `Add ${n} event${n === 1 ? '' : 's'}`; btn.disabled = n === 0; }
   }
@@ -225,6 +324,7 @@
     const rows = [...overlay.querySelectorAll('.syl-row')];
     const chosen = [];
     for (const row of rows) {
+      if (row.classList.contains('syl-hidden')) continue;   // bucket toggled off
       if (!row.querySelector('[data-role="on"]').checked) continue;
       const title = row.querySelector('[data-role="title"]').value.trim();
       const date = row.querySelector('[data-role="date"]').value;
@@ -258,24 +358,40 @@
     }
 
     const courseKey = slug((course && (course.code || course.name)) || pickedFile && pickedFile.name || 'syllabus');
-    const items = chosen.map(ev => ({
-      title: ev.title,
-      date: ev.date,
-      day: weekday(ev.date),
-      startTime: ev.startTime || '',
-      endTime: ev.endTime || '',
-      location: ev.location || '',
-      description: ev.notes || (ev.type ? ev.type[0].toUpperCase() + ev.type.slice(1) : ''),
-      projectId: projectId || null,
-      source: 'syllabus',
-      extId: `syllabus:${courseKey}:${ev.date}:${slug(ev.title)}`,
-    }));
+    // Assignment-type rows can double up the notes Gradescope/Variate/Brightspace already
+    // make, so drop any that match an existing calendar item. Exams/other never collide
+    // with the platform imports, so they pass straight through.
+    const index = existingCalendarIndex();
+    let skipped = 0;
+    const items = [];
+    for (const ev of chosen) {
+      if (bucketOf(ev.type) === 'assignments' && isDuplicate(ev, projectId, index)) { skipped++; continue; }
+      items.push({
+        title: ev.title,
+        date: ev.date,
+        day: weekday(ev.date),
+        startTime: ev.startTime || '',
+        endTime: ev.endTime || '',
+        location: ev.location || '',
+        description: ev.notes || (ev.type ? ev.type[0].toUpperCase() + ev.type.slice(1) : ''),
+        projectId: projectId || null,
+        source: 'syllabus',
+        extId: `syllabus:${courseKey}:${ev.date}:${slug(ev.title)}`,
+      });
+    }
+
+    if (!items.length) {
+      setStatus(skipped ? `Those ${skipped} item${skipped === 1 ? '' : 's'} are already on your calendar from another source.` : 'Nothing selected.', true);
+      if (btn) btn.disabled = false;
+      return;
+    }
 
     try {
       await dataManager.importExternalEvents(items, { source: 'syllabus', prune: false });
       window.dispatchEvent(new CustomEvent('schedule-changed'));
       close();
-      if (window._toast) window._toast(`Added ${items.length} event${items.length === 1 ? '' : 's'} from your syllabus.`);
+      const extra = skipped ? ` (skipped ${skipped} already imported elsewhere)` : '';
+      if (window._toast) window._toast(`Added ${items.length} event${items.length === 1 ? '' : 's'} from your syllabus${extra}.`);
     } catch (e) {
       setStatus('Could not save: ' + (e.message || e), true);
       if (btn) btn.disabled = false;

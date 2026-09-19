@@ -20,6 +20,8 @@ class NotebookStore(private val dir: File) {
         var coverColor: Int,
         val created: Long,
         val pageIds: MutableList<String>,
+        var paper: String = "GRID",
+        var pageColor: Int = Color.WHITE,
     )
 
     val folders = ArrayList<Folder>()
@@ -59,6 +61,8 @@ class NotebookStore(private val dir: File) {
                             o.optInt("cover", Color.rgb(0x29, 0x47, 0xC9)),
                             o.optLong("created", 0L),
                             pages,
+                            o.optString("paper", "GRID"),
+                            o.optInt("pageColor", Color.WHITE),
                         )
                     )
                 }
@@ -81,6 +85,8 @@ class NotebookStore(private val dir: File) {
                         .put("cover", nb.coverColor)
                         .put("created", nb.created)
                         .put("pages", pa)
+                        .put("paper", nb.paper)
+                        .put("pageColor", nb.pageColor)
                 )
             }
             libFile().writeText(JSONObject().put("folders", fa).put("notebooks", na).toString())

@@ -1,14 +1,18 @@
 package com.engorg.inkpad
 
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -18,11 +22,14 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 
-/** Notebook browser: folders + cover tiles. Entry point from the PWA's Ink tab. */
+/** Notebook browser: tap a folder to open it, tap a notebook to write. Entry point from the PWA's Ink tab. */
 class LibraryActivity : ComponentActivity() {
 
     private lateinit var store: NotebookStore
     private lateinit var content: LinearLayout
+    private lateinit var titleView: TextView
+    private lateinit var backButton: Button
+    private var currentFolder: String? = null
 
     private val covers = intArrayOf(
         Color.rgb(0x29, 0x47, 0xC9), Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0x89, 0x7B),
@@ -46,91 +53,136 @@ class LibraryActivity : ComponentActivity() {
             setPadding(dp(16), dp(12), dp(16), dp(48))
         }
         scroll.addView(content)
-        root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(root)
+
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (currentFolder != null) { currentFolder = null; rebuild() }
+                else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+            }
+        })
     }
 
     override fun onResume() {
         super.onResume()
         store.reload()
+        if (currentFolder != null && store.folders.none { it.id == currentFolder }) currentFolder = null
         rebuild()
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun muted() = Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
+    private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(color) }
 
-    private fun pillBg(color: Int) = android.graphics.drawable.GradientDrawable().apply {
-        cornerRadius = dp(20).toFloat(); setColor(color)
+    private fun btn(t: String, accent: Boolean, f: () -> Unit) = Button(this).apply {
+        text = t; isAllCaps = false; textSize = 13f
+        setTextColor(if (accent) AppTheme.onAccent() else AppTheme.text)
+        background = pillBg(if (accent) AppTheme.accent else AppTheme.elevated)
+        stateListAnimator = null
+        setPadding(dp(14), dp(4), dp(14), dp(4))
+        setOnClickListener { f() }
     }
 
     private fun buildBar(): View {
-        fun btn(t: String, f: () -> Unit) = Button(this).apply {
-            text = t; isAllCaps = false; textSize = 13f
-            val isAccent = t.startsWith("+ Notebook")
-            setTextColor(if (isAccent) AppTheme.onAccent() else AppTheme.text)
-            background = pillBg(if (isAccent) AppTheme.accent else AppTheme.elevated)
-            stateListAnimator = null
-            setPadding(dp(14), dp(4), dp(14), dp(4))
-            setOnClickListener { f() }
+        backButton = btn("‹ App", false) {
+            if (currentFolder != null) { currentFolder = null; rebuild() } else finish()
+        }
+        titleView = TextView(this).apply {
+            text = "  Notebooks"; textSize = 18f; setTypeface(null, Typeface.BOLD)
+            setTextColor(AppTheme.text)
+            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             setBackgroundColor(AppTheme.surface)
             setPadding(dp(8), dp(6), dp(8), dp(6))
-            addView(btn("‹ App") { finish() })
-            addView(TextView(this@LibraryActivity).apply {
-                text = "  Notebooks"; textSize = 18f; setTypeface(null, Typeface.BOLD)
-                setTextColor(AppTheme.text)
-                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            })
-            addView(btn("+ Folder") { createFolderDialog() })
-            addView(btn("+ Notebook") { createNotebookDialog(null) })
+            addView(backButton)
+            addView(titleView)
+            addView(btn("+ Folder", false) { createFolderDialog() })
+            addView(btn("+ Notebook", true) { createNotebookDialog(currentFolder) })
         }
     }
 
     private fun rebuild() {
         content.removeAllViews()
-        val top = store.notebooksIn(null)
-        if (top.isNotEmpty()) content.addView(gridOf(top))
-        for (fo in store.folders) {
-            content.addView(folderHeader(fo))
-            val nbs = store.notebooksIn(fo.id)
-            if (nbs.isEmpty()) content.addView(hint("  (empty)")) else content.addView(gridOf(nbs))
-        }
-        if (store.notebooks.isEmpty() && store.folders.isEmpty()) {
-            content.addView(hint("No notebooks yet — tap “+ Notebook” to start."))
+        val inFolder = currentFolder
+        if (inFolder == null) {
+            backButton.text = "‹ App"
+            titleView.text = "  Notebooks"
+            if (store.folders.isNotEmpty()) content.addView(sectionLabel("Folders"))
+            if (store.folders.isNotEmpty()) content.addView(folderGrid(store.folders))
+            val top = store.notebooksIn(null)
+            if (top.isNotEmpty()) {
+                content.addView(sectionLabel("Notebooks"))
+                content.addView(notebookGrid(top))
+            }
+            if (store.folders.isEmpty() && top.isEmpty())
+                content.addView(hint("No notebooks yet — tap “+ Notebook” to start."))
+        } else {
+            val fo = store.folders.first { it.id == inFolder }
+            backButton.text = "‹ Back"
+            titleView.text = "  📁 ${fo.name}"
+            val nbs = store.notebooksIn(inFolder)
+            if (nbs.isEmpty()) content.addView(hint("Empty folder — tap “+ Notebook” to add one."))
+            else content.addView(notebookGrid(nbs))
         }
     }
 
-    private fun muted() = Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
+    private fun sectionLabel(t: String) = TextView(this).apply {
+        text = t; textSize = 13f; setTypeface(null, Typeface.BOLD)
+        setTextColor(muted()); setPadding(dp(4), dp(14), dp(4), dp(6))
+    }
 
     private fun hint(t: String) = TextView(this).apply {
-        text = t; setTextColor(muted()); textSize = 14f
-        setPadding(dp(4), dp(10), dp(4), dp(10))
+        text = t; setTextColor(muted()); textSize = 14f; setPadding(dp(4), dp(18), dp(4), dp(10))
     }
 
-    private fun folderHeader(fo: NotebookStore.Folder) = TextView(this).apply {
-        text = "📁 ${fo.name}"; textSize = 15f; setTypeface(null, Typeface.BOLD)
-        setTextColor(AppTheme.text)
-        setPadding(dp(4), dp(18), dp(4), dp(6))
-        setOnLongClickListener { folderMenu(fo); true }
+    private fun folderGrid(folders: List<NotebookStore.Folder>): View = GridLayout(this).apply {
+        columnCount = 3
+        for (fo in folders) addView(folderTile(fo))
     }
 
-    private fun gridOf(nbs: List<NotebookStore.Notebook>): View {
-        val cols = 3
-        return GridLayout(this).apply {
-            columnCount = cols
-            for (nb in nbs) addView(tile(nb))
-        }
+    private fun notebookGrid(nbs: List<NotebookStore.Notebook>): View = GridLayout(this).apply {
+        columnCount = 3
+        for (nb in nbs) addView(notebookTile(nb))
     }
 
-    private fun tile(nb: NotebookStore.Notebook): View {
-        val w = dp(150); val h = dp(186); val m = dp(6)
+    private fun folderTile(fo: NotebookStore.Folder): View {
+        val w = dp(150); val h = dp(120); val m = dp(6)
+        val count = store.notebooksIn(fo.id).size
         val card = FrameLayout(this).apply {
             layoutParams = GridLayout.LayoutParams().apply { width = w; height = h; setMargins(m, m, m, m) }
             background = GradientDrawable().apply {
-                cornerRadius = dp(12).toFloat(); setColor(nb.coverColor)
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.elevated)
+                setStroke(dp(1), Color.argb(0x33, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
             }
+            setOnClickListener { currentFolder = fo.id; rebuild() }
+            setOnLongClickListener { folderMenu(fo); true }
+        }
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            addView(TextView(this@LibraryActivity).apply { text = "📁"; textSize = 30f })
+            addView(TextView(this@LibraryActivity).apply {
+                text = fo.name; setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, Typeface.BOLD)
+                setPadding(0, dp(6), 0, 0); maxLines = 1
+            })
+            addView(TextView(this@LibraryActivity).apply {
+                text = "$count notebook${if (count == 1) "" else "s"}"; setTextColor(muted()); textSize = 11f
+            })
+        })
+        return card
+    }
+
+    private fun notebookTile(nb: NotebookStore.Notebook): View {
+        val w = dp(150); val h = dp(186); val m = dp(6)
+        val card = FrameLayout(this).apply {
+            layoutParams = GridLayout.LayoutParams().apply { width = w; height = h; setMargins(m, m, m, m) }
+            background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(nb.coverColor) }
             setOnClickListener { openNotebook(nb) }
             setOnLongClickListener { notebookMenu(nb); true }
         }
@@ -138,17 +190,13 @@ class LibraryActivity : ComponentActivity() {
             text = nb.title
             setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, Typeface.BOLD)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.BOTTOM }
+            layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { gravity = Gravity.BOTTOM }
         })
         card.addView(TextView(this).apply {
             text = "${nb.pageIds.size} pg"
             setTextColor(Color.argb(0xCC, 255, 255, 255)); textSize = 11f
             setPadding(dp(12), dp(10), dp(12), dp(10))
-            layoutParams = FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.TOP or Gravity.END }
+            layoutParams = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.END }
         })
         return card
     }
@@ -157,32 +205,58 @@ class LibraryActivity : ComponentActivity() {
         startActivity(Intent(this, InkActivity::class.java).putExtra(InkActivity.EXTRA_NOTEBOOK_ID, nb.id))
     }
 
+    // ---- themed text prompt (replaces the ugly stock input box) ----
+    private fun themedPrompt(title: String, initial: String, hintText: String, positive: String, onOk: (String) -> Unit) {
+        val pad = dp(22)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
+            setPadding(pad, pad, pad, dp(16))
+        }
+        box.addView(TextView(this).apply {
+            text = title; textSize = 18f; setTypeface(null, Typeface.BOLD); setTextColor(AppTheme.text)
+        })
+        val input = EditText(this).apply {
+            setText(initial); setSelection(text.length)
+            hint = hintText; setHintTextColor(muted()); setTextColor(AppTheme.text); textSize = 16f
+            background = GradientDrawable().apply {
+                cornerRadius = dp(12).toFloat(); setColor(AppTheme.elevated)
+                setStroke(dp(1), Color.argb(0x33, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
+            }
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        box.addView(input, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
+
+        val dialog = Dialog(this).apply {
+            setContentView(box, ViewGroup.LayoutParams(dp(320), WRAP_CONTENT))
+            window?.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        }
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(18) }
+            addView(btn("Cancel", false) { dialog.dismiss() })
+            addView(View(this@LibraryActivity), LinearLayout.LayoutParams(dp(8), 1))
+            addView(btn(positive, true) {
+                val v = input.text.toString()
+                dialog.dismiss(); onOk(v)
+            })
+        })
+        dialog.show()
+    }
+
     // ---- dialogs ----
     private fun createNotebookDialog(folderId: String?) {
-        val input = EditText(this).apply { hint = "Notebook title" }
-        AlertDialog.Builder(this)
-            .setTitle("New notebook")
-            .setView(input)
-            .setPositiveButton("Create") { _, _ ->
-                val title = input.text.toString().ifBlank { "Untitled" }
-                val nb = store.createNotebook(title, folderId, covers.random())
-                rebuild()
-                openNotebook(nb)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        themedPrompt("New notebook", "", "Notebook title", "Create") { raw ->
+            val title = raw.ifBlank { "Untitled" }
+            val nb = store.createNotebook(title, folderId, covers.random())
+            rebuild(); openNotebook(nb)
+        }
     }
 
     private fun createFolderDialog() {
-        val input = EditText(this).apply { hint = "Folder name" }
-        AlertDialog.Builder(this)
-            .setTitle("New folder")
-            .setView(input)
-            .setPositiveButton("Create") { _, _ ->
-                store.createFolder(input.text.toString().ifBlank { "Folder" }); rebuild()
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        themedPrompt("New folder", "", "Folder name", "Create") { raw ->
+            store.createFolder(raw.ifBlank { "Folder" }); rebuild()
+        }
     }
 
     private fun notebookMenu(nb: NotebookStore.Notebook) {
@@ -190,7 +264,7 @@ class LibraryActivity : ComponentActivity() {
             .setTitle(nb.title)
             .setItems(arrayOf("Rename", "Cover color", "Move to folder", "Delete")) { _, which ->
                 when (which) {
-                    0 -> renameNotebook(nb)
+                    0 -> themedPrompt("Rename", nb.title, "Notebook title", "Save") { nb.title = it.ifBlank { nb.title }; store.save(); rebuild() }
                     1 -> coverColorDialog(nb)
                     2 -> moveDialog(nb)
                     3 -> confirmDelete(nb.title) { store.deleteNotebook(nb); rebuild() }
@@ -201,31 +275,19 @@ class LibraryActivity : ComponentActivity() {
     private fun folderMenu(fo: NotebookStore.Folder) {
         AlertDialog.Builder(this)
             .setTitle(fo.name)
-            .setItems(arrayOf("Add notebook here", "Rename", "Delete folder")) { _, which ->
+            .setItems(arrayOf("Open", "Add notebook here", "Rename", "Delete folder")) { _, which ->
                 when (which) {
-                    0 -> createNotebookDialog(fo.id)
-                    1 -> {
-                        val input = EditText(this).apply { setText(fo.name) }
-                        AlertDialog.Builder(this).setTitle("Rename folder").setView(input)
-                            .setPositiveButton("Save") { _, _ -> fo.name = input.text.toString().ifBlank { fo.name }; store.save(); rebuild() }
-                            .setNegativeButton("Cancel", null).show()
-                    }
-                    2 -> confirmDelete(fo.name) { store.deleteFolder(fo); rebuild() }
+                    0 -> { currentFolder = fo.id; rebuild() }
+                    1 -> createNotebookDialog(fo.id)
+                    2 -> themedPrompt("Rename folder", fo.name, "Folder name", "Save") { fo.name = it.ifBlank { fo.name }; store.save(); rebuild() }
+                    3 -> confirmDelete(fo.name) { if (currentFolder == fo.id) currentFolder = null; store.deleteFolder(fo); rebuild() }
                 }
             }.show()
     }
 
-    private fun renameNotebook(nb: NotebookStore.Notebook) {
-        val input = EditText(this).apply { setText(nb.title) }
-        AlertDialog.Builder(this).setTitle("Rename").setView(input)
-            .setPositiveButton("Save") { _, _ -> nb.title = input.text.toString().ifBlank { nb.title }; store.save(); rebuild() }
-            .setNegativeButton("Cancel", null).show()
-    }
-
     private fun coverColorDialog(nb: NotebookStore.Notebook) {
-        val names = covers.map { "●" }.toTypedArray()
         AlertDialog.Builder(this).setTitle("Cover color")
-            .setItems(names) { _, i -> nb.coverColor = covers[i]; store.save(); rebuild() }
+            .setItems(covers.map { "●" }.toTypedArray()) { _, i -> nb.coverColor = covers[i]; store.save(); rebuild() }
             .show()
     }
 

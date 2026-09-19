@@ -2489,6 +2489,28 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .syllabus-selall { margin-right: auto; background: transparent; border: none; cursor: pointer;
   font-size: 12px; font-weight: 700; color: var(--accent-text, #2563EB); padding: 6px 4px; }
 
+/* Import-type toggle chips (Exams / Assignments / Other) above the review list */
+.syllabus-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.syllabus-filters-label { font-size: 12px; font-weight: 700; color: var(--text-secondary, #475569); margin-right: 2px; }
+.syl-filter {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--border-color, #E2E8F0); background: var(--bg-secondary, #F8FAFC);
+  color: var(--text-muted, #64748B); border-radius: 999px; padding: 5px 11px;
+  font-size: 12px; font-weight: 600; font-family: inherit; line-height: 1;
+  transition: background .12s, color .12s, border-color .12s;
+}
+.syl-filter:hover { border-color: var(--accent, #3B82F6); }
+.syl-filter .syl-filter-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--border-color, #CBD5E1);
+  flex-shrink: 0; transition: background .12s;
+}
+.syl-filter.is-on {
+  color: var(--accent-text, #2563EB); border-color: var(--accent, #3B82F6);
+  background: var(--accent-soft, rgba(59, 130, 246, .12));
+}
+.syl-filter.is-on .syl-filter-dot { background: var(--accent, #3B82F6); }
+.syl-row.syl-hidden { display: none; }
+
 .syllabus-empty { text-align: center; padding: 8px 4px; }
 .syllabus-empty-icon { font-size: 34px; }
 .syllabus-empty p { font-size: 13.5px; color: var(--text-secondary, #475569); line-height: 1.5; margin: 8px 0; }
