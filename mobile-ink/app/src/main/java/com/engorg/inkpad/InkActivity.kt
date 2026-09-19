@@ -1,13 +1,16 @@
 package com.engorg.inkpad
 
 import android.app.Dialog
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.PointF
 import android.graphics.RectF
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.graphics.pdf.PdfDocument
 import android.os.Bundle
 import android.util.Log
@@ -121,6 +124,7 @@ class InkActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppTheme.load(this)
+        SystemBars.setup(this, lightBackground = !AppTheme.dark)
 
         finishedView = FinishedStrokesView(this).apply {
             backdrop = AppTheme.bg; accent = AppTheme.accent; textColor = AppTheme.text
@@ -156,17 +160,20 @@ class InkActivity : ComponentActivity() {
             }
         }
 
+        val toolbar = buildToolbar()
         val root = FrameLayout(this).apply {
             setBackgroundColor(AppTheme.bg)
             addView(finishedView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(wetOverlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(eraserOverlay, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
             addView(touch, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-            addView(buildToolbar(), FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+            addView(toolbar, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
                 gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = dp(10)
             })
         }
         setContentView(root)
+        // Keep the floating toolbar clear of the status bar (clock / battery / notifications).
+        SystemBars.marginTopBelowStatusBar(toolbar, dp(10))
 
         store = NotebookStore(filesDir)
         val nbId = intent.getStringExtra(EXTRA_NOTEBOOK_ID)
@@ -758,10 +765,17 @@ class InkActivity : ComponentActivity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(color) }
 
+    /** A rounded pill with a Material touch ripple (clipped to the pill), for tappable chrome. */
+    private fun pill(color: Int): Drawable {
+        val ripple = Color.argb(0x3A, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val mask = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.WHITE) }
+        return RippleDrawable(ColorStateList.valueOf(ripple), pillBg(color), mask)
+    }
+
     private fun iconBtn(pathData: String, active: Boolean = false, onClick: (ImageButton) -> Unit): ImageButton = ImageButton(this).apply {
         setImageBitmap(Icons.bitmap(pathData, dp(22)))
         scaleType = ImageView.ScaleType.FIT_CENTER
-        background = pillBg(if (active) accent else light)
+        background = pill(if (active) accent else light)
         setColorFilter(if (active) AppTheme.onAccent() else onSurface)
         stateListAnimator = null; minimumWidth = 0
         val pd = dp(7); setPadding(pd, pd, pd, pd)
@@ -784,7 +798,7 @@ class InkActivity : ComponentActivity() {
     private fun updateTools() {
         for ((t, btn) in toolButtons) {
             val active = t == tool
-            btn.background = pillBg(if (active) accent else light)
+            btn.background = pill(if (active) accent else light)
             btn.setColorFilter(if (active) AppTheme.onAccent() else onSurface)
         }
     }
@@ -806,10 +820,10 @@ class InkActivity : ComponentActivity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
-                cornerRadius = dp(24).toFloat(); setColor(AppTheme.surface)
-                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+                cornerRadius = dp(27).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x2A, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             }
-            elevation = dp(7).toFloat(); setPadding(dp(8), dp(5), dp(8), dp(5))
+            elevation = dp(12).toFloat(); setPadding(dp(9), dp(6), dp(9), dp(6))
             addView(iconBtn(Icons.BACK) { finish() })
             addView(sep())
             addView(iconBtn(Icons.UNDO) { undo() }); addView(iconBtn(Icons.REDO) { redo() })
@@ -830,7 +844,12 @@ class InkActivity : ComponentActivity() {
             addView(sep())
             addView(iconBtn(Icons.EMAIL) { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
         }
-        return HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(bar) }
+        return HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipChildren = false; clipToPadding = false
+            setPadding(dp(14), dp(6), dp(14), dp(14))  // room so the toolbar's drop shadow isn't clipped
+            addView(bar)
+        }
     }
 
     private fun scrollPage(delta: Int) {
@@ -852,7 +871,7 @@ class InkActivity : ComponentActivity() {
         val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
         for (type in types) grid.addView(ImageButton(this).apply {
             setImageBitmap(shapePreview(type, dp(30))); setColorFilter(onSurface); scaleType = ImageView.ScaleType.FIT_CENTER
-            background = pillBg(light); stateListAnimator = null
+            background = pill(light); stateListAnimator = null
             val pd = dp(8); setPadding(pd, pd, pd, pd)
             layoutParams = GridLayout.LayoutParams().apply { width = dp(54); height = dp(50); setMargins(dp(4), dp(4), dp(4), dp(4)) }
             setOnClickListener { popup.dismiss(); insertShape(type) }

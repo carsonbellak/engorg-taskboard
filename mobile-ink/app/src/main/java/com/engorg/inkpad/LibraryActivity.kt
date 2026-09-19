@@ -2,13 +2,16 @@ package com.engorg.inkpad
 
 import android.app.Dialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -49,15 +52,24 @@ class LibraryActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         AppTheme.load(this)
+        SystemBars.setup(this, lightBackground = !AppTheme.dark)
         store = NotebookStore(filesDir)
 
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg) }
-        root.addView(buildBar())
-        val scroll = ScrollView(this)
-        content = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(48)) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg); clipChildren = false }
+        val bar = buildBar()
+        root.addView(bar)
+        val scroll = ScrollView(this).apply { clipToPadding = false; isVerticalScrollBarEnabled = false }
+        content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; clipChildren = false; clipToPadding = false
+            setPadding(dp(16), dp(12), dp(16), dp(48))
+        }
         scroll.addView(content)
         root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         setContentView(root)
+        // Edge-to-edge on Android 15: keep the top bar below the status bar and the last row of
+        // cards above the nav bar.
+        SystemBars.padTopForStatusBar(bar)
+        SystemBars.padBottomForNavBar(content)
 
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -77,10 +89,35 @@ class LibraryActivity : ComponentActivity() {
     private fun muted() = Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
     private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(color) }
 
+    /** A rounded pill with a Material touch ripple, for tappable chrome. */
+    private fun pill(color: Int): Drawable {
+        val ripple = Color.argb(0x3A, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
+        val mask = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.WHITE) }
+        return RippleDrawable(ColorStateList.valueOf(ripple), pillBg(color), mask)
+    }
+
+    /** Touch-ripple foreground (leaves the view's own background intact), clipped to a rounded rect. */
+    private fun rippleFg(radiusDp: Int, tint: Int): Drawable {
+        val mask = GradientDrawable().apply { cornerRadius = dp(radiusDp).toFloat(); setColor(Color.WHITE) }
+        return RippleDrawable(ColorStateList.valueOf(tint), null, mask)
+    }
+
+    /** Shift a color toward white (f>0) or black (f<0) by fraction |f|, for cover depth. */
+    private fun shade(c: Int, f: Float): Int = if (f >= 0)
+        Color.rgb(
+            (Color.red(c) + (255 - Color.red(c)) * f).toInt(),
+            (Color.green(c) + (255 - Color.green(c)) * f).toInt(),
+            (Color.blue(c) + (255 - Color.blue(c)) * f).toInt(),
+        ) else Color.rgb(
+            (Color.red(c) * (1 + f)).toInt(),
+            (Color.green(c) * (1 + f)).toInt(),
+            (Color.blue(c) * (1 + f)).toInt(),
+        )
+
     private fun iconBtn(pathData: String, accent: Boolean = false, sizeDp: Int = 42, onClick: () -> Unit) = ImageButton(this).apply {
         setImageBitmap(Icons.bitmap(pathData, dp(22)))
         scaleType = ImageView.ScaleType.FIT_CENTER
-        background = pillBg(if (accent) AppTheme.accent else AppTheme.elevated)
+        background = pill(if (accent) AppTheme.accent else AppTheme.elevated)
         setColorFilter(if (accent) AppTheme.onAccent() else AppTheme.text)
         stateListAnimator = null; minimumWidth = 0
         val pd = dp(8); setPadding(pd, pd, pd, pd)
@@ -102,7 +139,8 @@ class LibraryActivity : ComponentActivity() {
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(AppTheme.surface); setPadding(dp(8), dp(6), dp(8), dp(6))
+            setBackgroundColor(AppTheme.surface); setPadding(dp(10), dp(8), dp(10), dp(8))
+            elevation = dp(4).toFloat()  // hairline separation from the scrolling grid
             addView(backButton); addView(titleView)
             addView(iconBtn(Icons.FOLDER_ADD) { createFolderDialog() }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.ADD, accent = true) { createNotebookDialog(currentFolder) })
@@ -113,7 +151,7 @@ class LibraryActivity : ComponentActivity() {
         content.removeAllViews()
         val inFolder = currentFolder
         if (inFolder == null) {
-            titleView.text = ""
+            titleView.text = "Notebooks"
             if (store.folders.isNotEmpty()) content.addView(folderGrid(store.folders))
             val top = store.notebooksIn(null)
             if (top.isNotEmpty()) content.addView(notebookGrid(top))
@@ -132,12 +170,12 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun folderGrid(folders: List<NotebookStore.Folder>): View = GridLayout(this).apply {
-        columnCount = 3
+        columnCount = 3; clipChildren = false; clipToPadding = false
         for (fo in folders) addView(folderTile(fo))
     }
 
     private fun notebookGrid(nbs: List<NotebookStore.Notebook>): View = GridLayout(this).apply {
-        columnCount = 3
+        columnCount = 3; clipChildren = false; clipToPadding = false
         for (nb in nbs) addView(notebookTile(nb))
     }
 
@@ -150,6 +188,9 @@ class LibraryActivity : ComponentActivity() {
                 cornerRadius = dp(14).toFloat(); setColor(AppTheme.elevated)
                 setStroke(dp(1), Color.argb(0x33, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
             }
+            clipToOutline = true
+            elevation = dp(3).toFloat()
+            foreground = rippleFg(14, Color.argb(0x28, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
             setOnClickListener { currentFolder = fo.id; rebuild() }
             setOnLongClickListener { folderMenu(fo); true }
         }
@@ -169,16 +210,33 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun notebookTile(nb: NotebookStore.Notebook): View {
-        val w = dp(150); val h = dp(186); val m = dp(6)
+        val w = dp(150); val h = dp(186); val m = dp(6); val radius = dp(14)
         val card = FrameLayout(this).apply {
             layoutParams = GridLayout.LayoutParams().apply { width = w; height = h; setMargins(m, m, m, m) }
-            background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(nb.coverColor) }
+            // A book-like cover: subtle top-to-bottom shading for depth instead of a flat fill.
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(shade(nb.coverColor, 0.14f), nb.coverColor, shade(nb.coverColor, -0.12f)),
+            ).apply { cornerRadius = radius.toFloat() }
+            clipToOutline = true
+            elevation = dp(5).toFloat()
+            foreground = rippleFg(14, Color.argb(0x40, 255, 255, 255))
             setOnClickListener { openNotebook(nb) }
             setOnLongClickListener { notebookMenu(nb); true }
         }
+        // Darker "spine" down the left edge (its square right side is clipped to the rounded card).
+        card.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor(shade(nb.coverColor, -0.26f)) }
+            layoutParams = FrameLayout.LayoutParams(dp(7), MATCH_PARENT)
+        })
+        card.addView(View(this).apply {
+            background = GradientDrawable().apply { setColor(Color.argb(0x22, 255, 255, 255)) }
+            layoutParams = FrameLayout.LayoutParams(dp(1), MATCH_PARENT).apply { leftMargin = dp(7) }
+        })
         card.addView(TextView(this).apply {
             text = nb.title; setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, Typeface.BOLD)
-            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), Color.argb(0x70, 0, 0, 0))
+            setPadding(dp(14), dp(12), dp(12), dp(14))
             layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { gravity = Gravity.BOTTOM }
         })
         card.addView(LinearLayout(this).apply {
@@ -337,7 +395,7 @@ class LibraryActivity : ComponentActivity() {
     private fun paperChipRow(initial: String, onSelect: (String) -> Unit): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val views = ArrayList<Pair<ImageButton, String>>()
-        fun refresh(sel: String) { for ((v, value) in views) { val on = value == sel; v.background = pillBg(if (on) AppTheme.accent else AppTheme.elevated); v.setColorFilter(if (on) AppTheme.onAccent() else AppTheme.text) } }
+        fun refresh(sel: String) { for ((v, value) in views) { val on = value == sel; v.background = pill(if (on) AppTheme.accent else AppTheme.elevated); v.setColorFilter(if (on) AppTheme.onAccent() else AppTheme.text) } }
         for (value in paperOptions) {
             val v = ImageButton(this).apply {
                 setImageBitmap(paperPreview(value, dp(26))); scaleType = ImageView.ScaleType.FIT_CENTER; stateListAnimator = null
@@ -361,7 +419,7 @@ class LibraryActivity : ComponentActivity() {
         when (kind) {
             "GRID" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * g, px * 0.1f, px * g, px * 0.9f, ln); c.drawLine(px * 0.1f, px * g, px * 0.9f, px * g, ln); g += 0.2f } }
             "RULED" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * 0.15f, px * g, px * 0.85f, px * g, ln); g += 0.2f } }
-            "DOTS" -> { var y = 0.3f; while (y < 0.9f) { var x = 0.3f; while (x < 0.9f) { c.drawCircle(px * x, px * y, px * 0.03f, fill); x += 0.2f }; y += 0.2f } }
+            "DOTS" -> { var y = 0.3f; while (y < 0.9f) { var x = 0.3f; while (x < 0.9f) { c.drawCircle(px * x, px * y, px * 0.055f, fill); x += 0.2f }; y += 0.2f } }
         }
         return bmp
     }

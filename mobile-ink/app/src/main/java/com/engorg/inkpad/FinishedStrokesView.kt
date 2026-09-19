@@ -209,10 +209,14 @@ class FinishedStrokesView(context: Context) : View(context) {
             }
             PaperStyle.DOTS -> {
                 paperPaint.style = Paint.Style.FILL
+                // A single small dot needs far more weight than a continuous grid line to be
+                // visible at the same spacing — bump the alpha and scale the radius with zoom.
+                paperPaint.color = if (lum < 128) Color.argb(96, 255, 255, 255) else Color.argb(74, 30, 50, 90)
+                val r = (2.1f * s).coerceIn(1.9f, 3.6f)
                 var yw = sp
                 while (yw < PAGE_H) {
                     var xw = sp
-                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * s, t + yw * s, 1.6f, paperPaint); xw += sp }
+                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * s, t + yw * s, r, paperPaint); xw += sp }
                     yw += sp
                 }
             }
