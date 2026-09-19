@@ -20,7 +20,7 @@ import kotlin.math.min
  *
  * Structure: `<export>/<name>.shelf/<class>.group/<notebook>.nsa`. Each `.nsa` is itself a zip
  * wrapping a `<title>.ns3_a/` bundle: `Document.plist` (ordered pages), `Annotations/<page-uuid>`
- * (a SQLite DB of strokes), and `Templates/*.ns_pdf` (page backgrounds). See the `noteshelf-format`
+ * (a SQLite DB of strokes), and Templates ns_pdf files (page backgrounds). See the `noteshelf-format`
  * memory for the decoded byte layout.
  *
  * Ink: one row per stroke in the `annotation` table; `stroke_segments_v3` is packed 16-byte records
