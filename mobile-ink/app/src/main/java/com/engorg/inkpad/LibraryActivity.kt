@@ -351,14 +351,14 @@ class LibraryActivity : ComponentActivity() {
         return row
     }
 
-    private fun paperPreview(style: String, px: Int): Bitmap {
+    private fun paperPreview(kind: String, px: Int): Bitmap {
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val border = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = px * 0.06f; color = Color.WHITE }
         c.drawRect(px * 0.1f, px * 0.1f, px * 0.9f, px * 0.9f, border)
         val ln = Paint().apply { isAntiAlias = true; strokeWidth = px * 0.045f; color = Color.WHITE }
         val fill = Paint().apply { isAntiAlias = true; color = Color.WHITE }
-        when (style) {
+        when (kind) {
             "GRID" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * g, px * 0.1f, px * g, px * 0.9f, ln); c.drawLine(px * 0.1f, px * g, px * 0.9f, px * g, ln); g += 0.2f } }
             "RULED" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * 0.15f, px * g, px * 0.85f, px * g, ln); g += 0.2f } }
             "DOTS" -> { var y = 0.3f; while (y < 0.9f) { var x = 0.3f; while (x < 0.9f) { c.drawCircle(px * x, px * y, px * 0.03f, fill); x += 0.2f }; y += 0.2f } }
