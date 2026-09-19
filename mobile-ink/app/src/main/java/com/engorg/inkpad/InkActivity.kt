@@ -43,8 +43,11 @@ import java.net.URL
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /**
  * Native handwriting surface. Fixed 8.5x11 pages stacked vertically (scroll through them),
@@ -77,11 +80,30 @@ class InkActivity : ComponentActivity() {
     private var addArmed = false
 
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
-    private var brushSize = 6f
+    private var brushSize = 5f
     private val eraserRadius = 13f
+
+    // Brush width in page units. The size slider maps GEOMETRICALLY across [minBrush, maxBrush],
+    // so equal slider travel is an equal *ratio* change — the thin end (where handwriting lives)
+    // gets fine, granular steps while the thick end stays reachable. minBrush is a clean hairline
+    // rather than a ragged 1px line.
+    private val minBrush = 1.5f
+    private val maxBrush = 40f
+    private val brushSteps = 100
+    private fun brushForProgress(p: Int): Float = minBrush * (maxBrush / minBrush).pow(p / brushSteps.toFloat())
+    private fun progressForBrush(w: Float): Int =
+        (brushSteps * (ln(w / minBrush) / ln(maxBrush / minBrush))).roundToInt().coerceIn(0, brushSteps)
 
     private class Sample(val x: Float, val y: Float)
     private val samples = ArrayList<Sample>()
+
+    // Light low-pass (EMA) smoothing of raw touch points. Glass digitizers pick up hand jitter;
+    // an exponential moving average shaves the high-frequency wobble while staying under the pen.
+    // Weight is toward the new point (1.0 = raw/no smoothing), so 0.6 is "just a little".
+    private val strokeSmoothing = 0.6f
+    private var smX = 0f
+    private var smY = 0f
+    private var smInit = false
 
     private var scale = 1f
     private var tx = 0f
@@ -297,8 +319,15 @@ class InkActivity : ComponentActivity() {
 
     private fun captureSamples(event: MotionEvent, idx: Int) {
         val hist = event.historySize
-        for (h in 0 until hist) samples.add(Sample(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h)))
-        samples.add(Sample(event.getX(idx), event.getY(idx)))
+        for (h in 0 until hist) addSmoothed(event.getHistoricalX(idx, h), event.getHistoricalY(idx, h))
+        addSmoothed(event.getX(idx), event.getY(idx))
+    }
+
+    /** Feed one raw touch point through the EMA filter and store the smoothed result. */
+    private fun addSmoothed(rx: Float, ry: Float) {
+        if (!smInit) { smX = rx; smY = ry; smInit = true }
+        else { smX += strokeSmoothing * (rx - smX); smY += strokeSmoothing * (ry - smY) }
+        samples.add(Sample(smX, smY))
     }
     private fun updateWet() {
         wetOverlay.setStroke(samples.map { PointF(it.x, it.y) }, brushColor, pageUnitSize(currentHighlighter) * scale, currentHighlighter)
@@ -367,7 +396,7 @@ class InkActivity : ComponentActivity() {
         clearSelection()
         pushUndo()
         currentHighlighter = tool == Tool.HIGHLIGHTER
-        samples.clear(); captureSamples(event, idx); updateWet()
+        samples.clear(); smInit = false; captureSamples(event, idx); updateWet()
     }
 
     private fun eraseAt(sx: Float, sy: Float) {
@@ -889,10 +918,17 @@ class InkActivity : ComponentActivity() {
                 c.drawLine(dp(14).toFloat(), height / 2f, (width - dp(14)).toFloat(), height / 2f, pv)
             }
         }.apply { layoutParams = LinearLayout.LayoutParams(dp(220), dp(52)) }
+        val sizeLabel = TextView(this).apply {
+            text = "%.1f".format(brushSize); textSize = 12f
+            setTextColor(Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            gravity = Gravity.CENTER
+        }
         val seek = SeekBar(this).apply {
-            max = 39; progress = (brushSize.toInt() - 1).coerceIn(0, 39)
+            max = brushSteps; progress = progressForBrush(brushSize)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) { brushSize = (p + 1).toFloat(); preview.invalidate() }
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    brushSize = brushForProgress(p); sizeLabel.text = "%.1f".format(brushSize); preview.invalidate()
+                }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
             })
@@ -906,6 +942,7 @@ class InkActivity : ComponentActivity() {
             setPadding(pad, pad, pad, pad)
             addView(preview)
             addView(seek, LinearLayout.LayoutParams(dp(230), WRAP_CONTENT).apply { topMargin = dp(6) })
+            addView(sizeLabel, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
         }
         PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }.showAsDropDown(anchor, 0, dp(6))
     }

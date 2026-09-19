@@ -125,6 +125,9 @@ class MainActivity : ComponentActivity() {
         setContentView(web)
         web.loadUrl(PWA_URL)
 
+        // Check for a newer sideloaded build (throttled) once startup has settled.
+        web.postDelayed({ InkUpdater.checkInBackground(this) }, 3000)
+
         // Back navigates the PWA's own history before leaving the app.
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
