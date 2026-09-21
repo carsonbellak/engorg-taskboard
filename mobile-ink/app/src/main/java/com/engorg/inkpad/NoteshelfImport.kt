@@ -23,10 +23,13 @@ import kotlin.math.min
  * (a SQLite DB of strokes), and Templates ns_pdf files (page backgrounds). See the `noteshelf-format`
  * memory for the decoded byte layout.
  *
- * Ink: one row per stroke in the `annotation` table; `stroke_segments_v3` is packed 16-byte records
- * (float32 x, float32 y, …). Points are uniformly contain-fit into NoteOrg's 8.5x11 page so nothing
- * is squished. This version imports editable ink + structure + page color only; rendering the page
- * line/worksheet backgrounds from the Templates PDFs is a planned follow-up.
+ * Ink: one row per stroke in the `annotation` table; `stroke_segments_v3` is packed fixed-size
+ * point records, the first two float32s of each being (x, y). The record size is NOT constant across
+ * notebooks — most use 28-byte records, some use 16 — so the stride is derived per stroke as
+ * `blobLength / segmentCount` (never hardcoded; a wrong stride scatters points to the top-left and
+ * produces an "ellipse hairball"). Points are uniformly contain-fit into NoteOrg's 8.5x11 page so
+ * nothing is squished. This version imports editable ink + structure + page color only; rendering the
+ * page line/worksheet backgrounds from the Templates PDFs is a planned follow-up.
  *
  * Runs on a background thread; [onProgress]/[onDone] are delivered on the main thread.
  */
@@ -162,23 +165,38 @@ object NoteshelfImport {
         val con = SQLiteDatabase.openDatabase(db.path, null, SQLiteDatabase.OPEN_READONLY)
         try {
             val cur = con.rawQuery(
-                "SELECT strokeColor,strokeWidth,annotationType,txMatrix,stroke_segments_v3 FROM annotation",
+                "SELECT strokeColor,strokeWidth,annotationType,txMatrix,segmentCount,stroke_segments_v3 FROM annotation",
                 null,
             )
             cur.use { c ->
                 while (c.moveToNext()) {
                     if (c.getInt(2) != 0) continue // only freehand ink strokes
-                    val blob = c.getBlob(4) ?: continue
-                    if (blob.size < 16) continue
+                    val blob = c.getBlob(5) ?: continue
+                    if (blob.size < 8) continue
+                    // Record size varies by notebook (usually 28 bytes, sometimes 16). Derive the
+                    // stride from segmentCount rather than assuming 16 — the first two float32s of
+                    // each record are (x, y). A hardcoded stride mis-reads the other records' bytes
+                    // as coordinates and scatters the stroke toward (0,0) (the "hairball").
+                    val segCount = c.getInt(4)
+                    val stride: Int
+                    val n: Int
+                    if (segCount > 0 && blob.size % segCount == 0 && blob.size / segCount >= 8) {
+                        stride = blob.size / segCount
+                        n = segCount
+                    } else {
+                        stride = 16
+                        n = blob.size / 16
+                    }
                     val m = parseMatrix(c.getString(3))
                     val rgb = c.getInt(0) and 0xFFFFFF
                     val width = (c.getDouble(1).toFloat() * s).coerceAtLeast(0.3f)
                     val bb = ByteBuffer.wrap(blob).order(ByteOrder.LITTLE_ENDIAN)
-                    val n = blob.size / 16
                     val pts = JSONArray()
                     for (k in 0 until n) {
-                        val x = bb.getFloat(k * 16)
-                        val y = bb.getFloat(k * 16 + 4)
+                        val off = k * stride
+                        if (off + 8 > blob.size) break
+                        val x = bb.getFloat(off)
+                        val y = bb.getFloat(off + 4)
                         val mx = m[0] * x + m[2] * y + m[4]
                         val my = m[1] * x + m[3] * y + m[5]
                         pts.put(JSONArray().put((ox + mx * s).toDouble()).put((oy + my * s).toDouble()))

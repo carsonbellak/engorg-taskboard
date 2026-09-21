@@ -30,7 +30,7 @@ android {
         // versionCode makes Android's installer treat new APKs as "not an update" and silently
         // keep the old app (which stranded users on stale import code). Local builds get 101.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 100
-        versionName = "1.3.27"
+        versionName = "1.3.28"
         buildConfigField("String", "WEB_CLIENT_ID", "\"$webClientId\"")
     }
 
