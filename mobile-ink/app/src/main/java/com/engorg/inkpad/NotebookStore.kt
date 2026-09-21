@@ -12,7 +12,7 @@ import java.util.UUID
  */
 class NotebookStore(private val dir: File) {
 
-    data class Folder(val id: String, var name: String)
+    data class Folder(val id: String, var name: String, var parentId: String? = null)
     data class Notebook(
         val id: String,
         var title: String,
@@ -46,7 +46,8 @@ class NotebookStore(private val dir: File) {
             doc.optJSONArray("folders")?.let { fa ->
                 for (i in 0 until fa.length()) {
                     val o = fa.getJSONObject(i)
-                    folders.add(Folder(o.getString("id"), o.getString("name")))
+                    val pid = if (o.has("parentId") && !o.isNull("parentId")) o.getString("parentId") else null
+                    folders.add(Folder(o.getString("id"), o.getString("name"), pid))
                 }
             }
             doc.optJSONArray("notebooks")?.let { na ->
@@ -75,7 +76,7 @@ class NotebookStore(private val dir: File) {
     fun save() {
         try {
             val fa = JSONArray()
-            for (fo in folders) fa.put(JSONObject().put("id", fo.id).put("name", fo.name))
+            for (fo in folders) fa.put(JSONObject().put("id", fo.id).put("name", fo.name).put("parentId", fo.parentId ?: JSONObject.NULL))
             val na = JSONArray()
             for (nb in notebooks) {
                 val pa = JSONArray(); nb.pageIds.forEach { pa.put(it) }
@@ -97,7 +98,31 @@ class NotebookStore(private val dir: File) {
 
     private fun id() = UUID.randomUUID().toString().replace("-", "").take(12)
 
-    fun createFolder(name: String): Folder = Folder(id(), name).also { folders.add(it); save() }
+    fun createFolder(name: String, parentId: String? = null): Folder = Folder(id(), name, parentId).also { folders.add(it); save() }
+
+    /** Sub-folders directly under [parentId] (null = top level). */
+    fun foldersIn(parentId: String?): List<Folder> = folders.filter { it.parentId == parentId }
+
+    /** True if [folderId] is [maybeAncestor] or nested anywhere beneath it (guards against cycles). */
+    fun isSelfOrDescendant(folderId: String, maybeAncestor: String): Boolean {
+        if (folderId == maybeAncestor) return true
+        var cur = folders.find { it.id == folderId }?.parentId
+        var guard = 0
+        while (cur != null && guard++ < 512) {
+            if (cur == maybeAncestor) return true
+            cur = folders.find { it.id == cur }?.parentId
+        }
+        return false
+    }
+
+    /** Move a notebook into a folder (null = top level). */
+    fun moveNotebook(nb: Notebook, folderId: String?) { nb.folderId = folderId; save() }
+
+    /** Move a folder under a new parent (null = top level), unless that would create a cycle. */
+    fun moveFolder(fo: Folder, parentId: String?): Boolean {
+        if (parentId != null && isSelfOrDescendant(parentId, fo.id)) return false
+        fo.parentId = parentId; save(); return true
+    }
 
     fun createNotebook(
         title: String,
@@ -118,7 +143,9 @@ class NotebookStore(private val dir: File) {
     }
 
     fun deleteFolder(fo: Folder) {
-        notebooks.filter { it.folderId == fo.id }.forEach { it.folderId = null }
+        // Reparent this folder's contents one level up (to its parent) rather than dumping to root.
+        notebooks.filter { it.folderId == fo.id }.forEach { it.folderId = fo.parentId }
+        folders.filter { it.parentId == fo.id }.forEach { it.parentId = fo.parentId }
         folders.remove(fo); save()
     }
 

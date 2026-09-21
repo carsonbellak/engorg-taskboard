@@ -69,7 +69,8 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>) {
         /** Line a→b with a V arrowhead at b, as one continuous polyline. */
         private fun arrow(a: PointF, b: PointF): List<PointF> {
             val ang = atan2((b.y - a.y).toDouble(), (b.x - a.x).toDouble())
-            val hl = (hypot(b.x - a.x, b.y - a.y) * 0.22f).coerceIn(16f, 70f)
+            // Compact arrowhead — small, notes-scale wings rather than the previous chunky ~16–70px V.
+            val hl = (hypot(b.x - a.x, b.y - a.y) * 0.13f).coerceIn(6f, 22f)
             val left = PointF((b.x - hl * cos(ang - 0.42)).toFloat(), (b.y - hl * sin(ang - 0.42)).toFloat())
             val right = PointF((b.x - hl * cos(ang + 0.42)).toFloat(), (b.y - hl * sin(ang + 0.42)).toFloat())
             val out = ArrayList<PointF>(interp(a, b, 22))
@@ -87,8 +88,8 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>) {
             out.add(arrow(c, PointF(c.x - lenX, c.y)))
             out.add(arrow(c, PointF(c.x, c.y - lenY)))
             out.add(arrow(c, PointF(c.x, c.y + lenY)))
-            // tick marks on both sides of each axis
-            val tk = 6f
+            // tick marks on both sides of each axis (small, so they read as scale marks not bars)
+            val tk = 3.5f
             var i = 1
             while (i <= 4) {
                 val dx = lenX * i / 5f

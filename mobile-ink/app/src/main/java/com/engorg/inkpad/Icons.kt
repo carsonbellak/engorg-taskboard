@@ -41,6 +41,8 @@ object Icons {
     const val HOME = "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z"
     const val PAGE = "M14,2H6C4.9,2 4.01,2.9 4.01,4L4,20c0,1.1 0.89,2 1.99,2H18c1.1,0 2,-0.9 2,-2V8l-6,-6zM13,9V3.5L18.5,9H13z"
     const val DOWNLOAD = "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z"
+    const val MORE = "M12,8c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM12,10c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2zM12,16c-1.1,0 -2,0.9 -2,2s0.9,2 2,2 2,-0.9 2,-2 -0.9,-2 -2,-2z"
+    const val SPLIT = "M3,5v14h8V5H3zM13,5v14h8V5h-8zM9,17H5V7h4v10zM19,17h-4V7h4v10z"
 
     fun bitmap(pathData: String, px: Int): Bitmap {
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)

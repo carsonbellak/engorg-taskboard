@@ -65,6 +65,7 @@ class InkActivity : ComponentActivity() {
     private lateinit var eraserOverlay: EraserOverlay
     private lateinit var scaleDetector: ScaleGestureDetector
     private lateinit var colorButton: Button
+    private var shapeButton: ImageButton? = null
     private var pageLabel: TextView? = null
     private val toolButtons = HashMap<Tool, ImageButton>()
 
@@ -80,14 +81,17 @@ class InkActivity : ComponentActivity() {
     private var addArmed = false
 
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
-    private var brushSize = 5f
+    private var brushSize = 2f
     private val eraserRadius = 13f
+
+    // The shape armed to be drawn (draw-to-place): the next stroke becomes this shape, fitted to it.
+    private var pendingShape: ShapeType? = null
 
     // Brush width in page units. The size slider maps GEOMETRICALLY across [minBrush, maxBrush],
     // so equal slider travel is an equal *ratio* change — the thin end (where handwriting lives)
-    // gets fine, granular steps while the thick end stays reachable. minBrush is a clean hairline
-    // rather than a ragged 1px line.
-    private val minBrush = 1.5f
+    // gets fine, granular steps while the thick end stays reachable. minBrush goes down to a true
+    // fine hairline (~0.8) so a ~1px line is easy to dial in.
+    private val minBrush = 0.8f
     private val maxBrush = 40f
     private val brushSteps = 100
     private fun brushForProgress(p: Int): Float = minBrush * (maxBrush / minBrush).pow(p / brushSteps.toFloat())
@@ -197,6 +201,11 @@ class InkActivity : ComponentActivity() {
         // Keep the floating toolbar clear of the status bar (clock / battery / notifications).
         SystemBars.marginTopBelowStatusBar(toolbar, dp(10))
 
+        // Restore the last-used pen so the stroke weight + color you settled on stick between sessions.
+        val ip = getSharedPreferences(INK_PREFS, MODE_PRIVATE)
+        brushSize = ip.getFloat("brushSize", brushSize).coerceIn(minBrush, maxBrush)
+        brushColor = ip.getInt("brushColor", brushColor)
+
         store = NotebookStore(filesDir)
         val nbId = intent.getStringExtra(EXTRA_NOTEBOOK_ID)
         notebook = (nbId?.let { store.notebook(it) }) ?: store.notebooks.firstOrNull() ?: store.createNotebook("Quick notes", null, accent)
@@ -287,10 +296,11 @@ class InkActivity : ComponentActivity() {
         return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec)
     }
 
-    private fun commitSamples() {
-        if (samples.isEmpty()) return
+    /** Convert the captured screen samples to page-local points on the page the stroke started on. */
+    private fun samplesToPage(): Pair<Int, ArrayList<PointF>>? {
+        if (samples.isEmpty()) return null
         val start = hitTest(samples.first().x, samples.first().y)
-        if (!start.onPage) return
+        if (!start.onPage) return null
         val page = start.page
         val pts = ArrayList<PointF>(samples.size)
         for (s in samples) {
@@ -298,9 +308,37 @@ class InkActivity : ComponentActivity() {
             val docY = (s.y - ty) / scale
             pts.add(PointF(docX.coerceIn(0f, FinishedStrokesView.PAGE_W), (docY - finishedView.pageTop(page)).coerceIn(0f, FinishedStrokesView.PAGE_H)))
         }
+        return page to pts
+    }
+
+    private fun commitSamples() {
+        val (page, pts) = samplesToPage() ?: return
         finishedView.pages[page].recs.add(freehandRec(pts, brushColor, pageUnitSize(currentHighlighter), currentHighlighter))
         finishedView.invalidate()
         savePage(page)
+    }
+
+    /** Turn the just-drawn stroke into the armed shape, fitted to what you drew, then select it. */
+    private fun commitPendingShape() {
+        val type = pendingShape ?: return
+        val (page, pts) = samplesToPage() ?: return
+        if (pts.size < 2) return
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (p in pts) { minX = min(minX, p.x); minY = min(minY, p.y); maxX = max(maxX, p.x); maxY = max(maxY, p.y) }
+        if (hypot(maxX - minX, maxY - minY) < 14f) return // too small — likely a tap, ignore
+        val a = pts.first(); val b = pts.last()
+        val verts = when (type) {
+            ShapeType.LINE, ShapeType.ARROW -> arrayListOf(PointF(a.x, a.y), PointF(b.x, b.y))
+            ShapeType.RECT, ShapeType.ELLIPSE -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
+            ShapeType.TRIANGLE -> arrayListOf(PointF((minX + maxX) / 2f, minY), PointF(maxX, maxY), PointF(minX, maxY))
+            ShapeType.AXES2D, ShapeType.AXES3D -> arrayListOf(PointF(a.x, a.y), PointF(b.x, b.y))
+        }
+        val rec = buildShapeRec(ShapeSpec(type, verts), brushColor, brushSize, false)
+        finishedView.pages[page].recs.add(rec)
+        clearPendingShape()
+        tool = Tool.SELECT; updateTools()
+        selPage = page; selRecs.clear(); selRecs.add(rec); selBox = recBounds(selRecs)
+        refreshSelectionOverlay(); finishedView.invalidate(); savePage(page)
     }
 
     // ---------- touch ----------
@@ -308,7 +346,9 @@ class InkActivity : ComponentActivity() {
         val type = event.getToolType(idx)
         val eraserBtn = (event.buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_STYLUS_SECONDARY)) != 0
         return when {
-            type == MotionEvent.TOOL_TYPE_FINGER -> Mode.PAN
+            // With the lasso tool active, a single finger should lasso (not pan) — otherwise the
+            // lasso "does nothing" for finger users. Two fingers still pinch/pan via the detector.
+            type == MotionEvent.TOOL_TYPE_FINGER -> if (tool == Tool.SELECT) Mode.SELECT else Mode.PAN
             type == MotionEvent.TOOL_TYPE_ERASER -> Mode.ERASE
             eraserBtn -> Mode.ERASE
             tool == Tool.ERASER -> Mode.ERASE
@@ -377,7 +417,7 @@ class InkActivity : ComponentActivity() {
                 val cancel = event.actionMasked == MotionEvent.ACTION_CANCEL
                 if (addArmed) { addArmed = false; if (!cancel) addPage() }
                 else when (mode) {
-                    Mode.DRAW -> { if (!cancel) commitSamples(); wetOverlay.clear(); samples.clear() }
+                    Mode.DRAW -> { if (!cancel) { if (pendingShape != null) commitPendingShape() else commitSamples() }; wetOverlay.clear(); samples.clear() }
                     Mode.ERASE -> if (dirtyErase) { dirtyErase = false; savePage(currentPage()) }
                     Mode.SELECT -> endSelect()
                     else -> {}
@@ -550,17 +590,6 @@ class InkActivity : ComponentActivity() {
         val page = selPage
         finishedView.pages[page].recs.removeAll(selRecs.toSet())
         clearSelection(); finishedView.invalidate(); savePage(page)
-    }
-
-    private fun insertShape(type: ShapeType) {
-        val page = currentPage()
-        undoPushedThisGesture = false; pushUndo()
-        val spec = ShapeSpec.make(type, FinishedStrokesView.PAGE_W / 2f, FinishedStrokesView.PAGE_H / 3f, 160f)
-        val rec = buildShapeRec(spec, brushColor, brushSize, false)
-        finishedView.pages[page].recs.add(rec)
-        tool = Tool.SELECT; updateTools()
-        selPage = page; selRecs.clear(); selRecs.add(rec); selBox = recBounds(selRecs)
-        refreshSelectionOverlay(); finishedView.invalidate(); savePage(page)
     }
 
     // ---------- undo / redo ----------
@@ -837,13 +866,13 @@ class InkActivity : ComponentActivity() {
             layoutParams = LinearLayout.LayoutParams(dp(1), dp(22)).apply { setMargins(dp(5), 0, dp(5), 0) }
             setBackgroundColor(Color.argb(0x22, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
         }
-        fun iconTool(path: String, t: Tool) = iconBtn(path) { tool = t; if (t != Tool.SELECT) clearSelection(); updateTools() }.also { toolButtons[t] = it }
+        fun iconTool(path: String, t: Tool) = iconBtn(path) { clearPendingShape(); tool = t; if (t != Tool.SELECT) clearSelection(); updateTools() }.also { toolButtons[t] = it }
 
         colorButton = Button(this).apply {
             background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(brushColor); setStroke(dp(1), Color.argb(0x40, 0x80, 0x80, 0x80)) }
             stateListAnimator = null; minWidth = 0; minimumWidth = 0; minHeight = 0; minimumHeight = 0
             layoutParams = LinearLayout.LayoutParams(dp(34), dp(30))
-            setOnClickListener { showColorPicker(it) { c -> brushColor = c; (background as GradientDrawable).setColor(c) } }
+            setOnClickListener { showColorPicker(it) { c -> brushColor = c; (background as GradientDrawable).setColor(c); saveBrushPref() } }
         }
 
         val bar = LinearLayout(this).apply {
@@ -859,7 +888,7 @@ class InkActivity : ComponentActivity() {
             addView(sep())
             addView(iconTool(Icons.PEN, Tool.PEN)); addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
             addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
-            addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) })
+            addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
             addView(sep())
             addView(colorButton)
             addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
@@ -903,9 +932,23 @@ class InkActivity : ComponentActivity() {
             background = pill(light); stateListAnimator = null
             val pd = dp(8); setPadding(pd, pd, pd, pd)
             layoutParams = GridLayout.LayoutParams().apply { width = dp(54); height = dp(50); setMargins(dp(4), dp(4), dp(4), dp(4)) }
-            setOnClickListener { popup.dismiss(); insertShape(type) }
+            setOnClickListener { popup.dismiss(); armShape(type) }
         })
         popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    /** Arm a shape so the next stroke you draw becomes it (fitted to your stroke) instead of spawning. */
+    private fun armShape(type: ShapeType) {
+        pendingShape = type
+        tool = Tool.PEN; clearSelection(); updateTools()
+        shapeButton?.background = pill(accent); shapeButton?.setColorFilter(AppTheme.onAccent())
+        val name = type.name.lowercase().replaceFirstChar { it.uppercase() }
+        Toast.makeText(this, "Draw a $name", Toast.LENGTH_SHORT).show()
+    }
+    private fun clearPendingShape() {
+        if (pendingShape == null) return
+        pendingShape = null
+        shapeButton?.background = pill(light); shapeButton?.setColorFilter(onSurface)
     }
 
     private fun showSizePopup(anchor: View) {
@@ -930,7 +973,7 @@ class InkActivity : ComponentActivity() {
                     brushSize = brushForProgress(p); sizeLabel.text = "%.1f".format(brushSize); preview.invalidate()
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) { saveBrushPref() }
             })
         }
         val col = LinearLayout(this).apply {
@@ -967,7 +1010,13 @@ class InkActivity : ComponentActivity() {
         popup.showAsDropDown(anchor, 0, dp(6))
     }
 
+    private fun saveBrushPref() {
+        getSharedPreferences(INK_PREFS, MODE_PRIVATE).edit()
+            .putFloat("brushSize", brushSize).putInt("brushColor", brushColor).apply()
+    }
+
     companion object {
         const val EXTRA_NOTEBOOK_ID = "notebookId"
+        private const val INK_PREFS = "ink_prefs"
     }
 }

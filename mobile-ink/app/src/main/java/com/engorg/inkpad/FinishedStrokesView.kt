@@ -212,7 +212,9 @@ class FinishedStrokesView(context: Context) : View(context) {
                 // A single small dot needs far more weight than a continuous grid line to be
                 // visible at the same spacing — bump the alpha and scale the radius with zoom.
                 paperPaint.color = if (lum < 128) Color.argb(96, 255, 255, 255) else Color.argb(74, 30, 50, 90)
-                val r = (2.1f * s).coerceIn(1.9f, 3.6f)
+                // Radius tracks the zoom (≈1.35 page-units) so the dots stay proportional as you
+                // zoom into a page instead of pinning to a tiny 3.6px cap and looking like specks.
+                val r = (1.35f * s).coerceIn(1.6f, 14f)
                 var yw = sp
                 while (yw < PAGE_H) {
                     var xw = sp

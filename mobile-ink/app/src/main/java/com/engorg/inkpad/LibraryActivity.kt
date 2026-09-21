@@ -50,8 +50,16 @@ class LibraryActivity : ComponentActivity() {
         Color.rgb(0x8E, 0x24, 0xAA), Color.rgb(0x5E, 0x35, 0xB1), Color.rgb(0x45, 0x4B, 0x55),
     )
     private val pageColors = intArrayOf(
-        Color.WHITE, Color.rgb(0xFB, 0xF7, 0xEC), Color.rgb(0xF3, 0xF4, 0xF6),
-        Color.rgb(0xEA, 0xF3, 0xEC), Color.rgb(0x22, 0x27, 0x31), Color.rgb(0x0F, 0x11, 0x16),
+        Color.WHITE,
+        Color.rgb(0xFB, 0xF7, 0xEC), // warm ivory
+        Color.rgb(0xFC, 0xF6, 0xD8), // soft cream-yellow
+        Color.rgb(0xFA, 0xEF, 0xC0), // butter
+        Color.rgb(0xF7, 0xE9, 0x8E), // legal pad
+        Color.rgb(0xF1, 0xDE, 0x6E), // deeper yellow
+        Color.rgb(0xF3, 0xF4, 0xF6), // cool gray
+        Color.rgb(0xEA, 0xF3, 0xEC), // mint
+        Color.rgb(0x22, 0x27, 0x31), // slate (dark)
+        Color.rgb(0x0F, 0x11, 0x16), // near-black
     )
     private val paperOptions = listOf("PLAIN", "GRID", "RULED", "DOTS")
 
@@ -80,7 +88,7 @@ class LibraryActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (currentFolder != null) { currentFolder = null; rebuild() } else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+                if (!goUp()) { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
     }
@@ -92,7 +100,20 @@ class LibraryActivity : ComponentActivity() {
         rebuild()
     }
 
+    // This activity handles orientation itself (configChanges), so it won't recreate on rotate —
+    // rebuild so the grid re-flows to the new width (landscape gets more columns).
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        rebuild()
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /** Columns that fit the current width (each tile is ~150dp + 12dp margins). Landscape → more. */
+    private fun gridColumns(): Int {
+        val avail = resources.displayMetrics.widthPixels - dp(32) // content h-padding (16 each side)
+        return (avail / dp(162)).coerceIn(2, 8)
+    }
     private fun muted() = Color.argb(0x99, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text))
     private fun pillBg(color: Int) = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(color) }
 
@@ -138,7 +159,9 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun buildBar(): View {
-        backButton = iconBtn(Icons.BACK) { if (currentFolder != null) { currentFolder = null; rebuild() } else finish() }
+        backButton = iconBtn(Icons.BACK) { if (!goUp()) finish() }
+        // Also a drop target: drag an item onto Back to move it OUT to the parent folder.
+        backButton.setOnDragListener(dropUpListener(backButton))
         titleView = TextView(this).apply {
             text = ""; textSize = 17f; setTypeface(null, Typeface.BOLD); setTextColor(AppTheme.text)
             setPadding(dp(10), 0, 0, 0)
@@ -158,18 +181,19 @@ class LibraryActivity : ComponentActivity() {
     private fun rebuild() {
         content.removeAllViews()
         val inFolder = currentFolder
-        if (inFolder == null) {
-            titleView.text = "Notebooks"
-            if (store.folders.isNotEmpty()) content.addView(folderGrid(store.folders))
-            val top = store.notebooksIn(null)
-            if (top.isNotEmpty()) content.addView(notebookGrid(top))
-            if (store.folders.isEmpty() && top.isEmpty()) content.addView(emptyState())
-        } else {
-            val fo = store.folders.first { it.id == inFolder }
-            titleView.text = fo.name
-            val nbs = store.notebooksIn(inFolder)
-            if (nbs.isEmpty()) content.addView(emptyState()) else content.addView(notebookGrid(nbs))
-        }
+        titleView.text = if (inFolder == null) "Notebooks" else (store.folders.find { it.id == inFolder }?.name ?: "Notebooks")
+        val subFolders = store.foldersIn(inFolder)
+        val nbs = store.notebooksIn(inFolder)
+        if (subFolders.isNotEmpty()) content.addView(folderGrid(subFolders))
+        if (nbs.isNotEmpty()) content.addView(notebookGrid(nbs))
+        if (subFolders.isEmpty() && nbs.isEmpty()) content.addView(emptyState())
+    }
+
+    /** Navigate to the parent of the current folder. Returns false if already at the top. */
+    private fun goUp(): Boolean {
+        val cur = currentFolder ?: return false
+        currentFolder = store.folders.find { it.id == cur }?.parentId
+        rebuild(); return true
     }
 
     private fun emptyState() = LinearLayout(this).apply {
@@ -178,13 +202,90 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun folderGrid(folders: List<NotebookStore.Folder>): View = GridLayout(this).apply {
-        columnCount = 3; clipChildren = false; clipToPadding = false
+        columnCount = gridColumns(); clipChildren = false; clipToPadding = false
         for (fo in folders) addView(folderTile(fo))
     }
 
     private fun notebookGrid(nbs: List<NotebookStore.Notebook>): View = GridLayout(this).apply {
-        columnCount = 3; clipChildren = false; clipToPadding = false
+        columnCount = gridColumns(); clipChildren = false; clipToPadding = false
         for (nb in nbs) addView(notebookTile(nb))
+    }
+
+    // ---- drag & drop reorg (hold a tile to drag it into a folder, or onto Back to move it out) ----
+    private fun startItemDrag(view: View, token: String) {
+        val clip = android.content.ClipData.newPlainText("engorg-item", token)
+        val shadow = View.DragShadowBuilder(view)
+        view.startDragAndDrop(clip, shadow, token, 0)
+    }
+
+    private fun draggedToken(e: android.view.DragEvent): String? =
+        (e.localState as? String) ?: e.clipDescription?.label?.toString()
+
+    /** Move the dragged notebook/folder to [targetFolder] (null = that container's top level). */
+    private fun applyDrop(token: String?, targetFolder: String?): Boolean {
+        if (token == null) return false
+        val parts = token.split(":", limit = 2)
+        if (parts.size != 2) return false
+        return when (parts[0]) {
+            "nb" -> {
+                val nb = store.notebook(parts[1]) ?: return false
+                if (nb.folderId == targetFolder) return false
+                store.moveNotebook(nb, targetFolder); true
+            }
+            "fo" -> {
+                val fo = store.folders.find { it.id == parts[1] } ?: return false
+                if (fo.parentId == targetFolder) return false
+                val ok = store.moveFolder(fo, targetFolder)
+                if (!ok) Toast.makeText(this, "Can't move a folder inside itself", Toast.LENGTH_SHORT).show()
+                ok
+            }
+            else -> false
+        }
+    }
+
+    /** Drop listener for a folder card — moves the dragged item INTO that folder. */
+    private fun folderDropListener(fo: NotebookStore.Folder, card: View): View.OnDragListener {
+        val baseElev = dp(3).toFloat()
+        return View.OnDragListener { _, e ->
+            when (e.action) {
+                android.view.DragEvent.ACTION_DRAG_STARTED -> draggedToken(e) != "fo:${fo.id}" // not onto itself
+                android.view.DragEvent.ACTION_DRAG_ENTERED -> { card.alpha = 0.7f; card.elevation = baseElev + dp(6); true }
+                android.view.DragEvent.ACTION_DRAG_EXITED -> { card.alpha = 1f; card.elevation = baseElev; true }
+                android.view.DragEvent.ACTION_DRAG_ENDED -> { card.alpha = 1f; card.elevation = baseElev; true }
+                android.view.DragEvent.ACTION_DROP -> {
+                    card.alpha = 1f; card.elevation = baseElev
+                    val moved = applyDrop(draggedToken(e), fo.id)
+                    if (moved) rebuild()
+                    moved
+                }
+                else -> true
+            }
+        }
+    }
+
+    /** Drop listener for the Back button — moves the dragged item OUT to the parent folder. */
+    private fun dropUpListener(view: View): View.OnDragListener = View.OnDragListener { _, e ->
+        when (e.action) {
+            android.view.DragEvent.ACTION_DRAG_STARTED -> currentFolder != null // only meaningful inside a folder
+            android.view.DragEvent.ACTION_DRAG_ENTERED -> { view.alpha = 0.6f; true }
+            android.view.DragEvent.ACTION_DRAG_EXITED -> { view.alpha = 1f; true }
+            android.view.DragEvent.ACTION_DRAG_ENDED -> { view.alpha = 1f; true }
+            android.view.DragEvent.ACTION_DROP -> {
+                view.alpha = 1f
+                val parent = store.folders.find { it.id == currentFolder }?.parentId
+                val moved = applyDrop(draggedToken(e), parent)
+                if (moved) rebuild()
+                moved
+            }
+            else -> true
+        }
+    }
+
+    private fun menuDot(tint: Int, onClick: () -> Unit) = ImageButton(this).apply {
+        setImageBitmap(Icons.bitmap(Icons.MORE, dp(18))); setColorFilter(tint)
+        background = null; scaleType = ImageView.ScaleType.FIT_CENTER; stateListAnimator = null
+        val pd = dp(6); setPadding(pd, pd, pd, pd)
+        setOnClickListener { onClick() }
     }
 
     private fun folderTile(fo: NotebookStore.Folder): View {
@@ -200,8 +301,10 @@ class LibraryActivity : ComponentActivity() {
             elevation = dp(3).toFloat()
             foreground = rippleFg(14, Color.argb(0x28, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
             setOnClickListener { currentFolder = fo.id; rebuild() }
-            setOnLongClickListener { folderMenu(fo); true }
+            setOnLongClickListener { startItemDrag(this, "fo:${fo.id}"); true }
         }
+        card.setOnDragListener(folderDropListener(fo, card))
+        val subCount = store.foldersIn(fo.id).size
         card.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(12), dp(14), dp(12))
@@ -212,8 +315,13 @@ class LibraryActivity : ComponentActivity() {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 addView(ImageView(this@LibraryActivity).apply { setImageBitmap(Icons.bitmap(Icons.BOOK, dp(13))); setColorFilter(muted()); layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) })
                 addView(TextView(this@LibraryActivity).apply { text = "  $count"; setTextColor(muted()); textSize = 12f })
+                if (subCount > 0) {
+                    addView(ImageView(this@LibraryActivity).apply { setImageBitmap(Icons.bitmap(Icons.FOLDER, dp(12))); setColorFilter(muted()); layoutParams = LinearLayout.LayoutParams(dp(12), dp(12)).apply { leftMargin = dp(8) } })
+                    addView(TextView(this@LibraryActivity).apply { text = "  $subCount"; setTextColor(muted()); textSize = 12f })
+                }
             })
         })
+        card.addView(menuDot(AppTheme.text) { folderMenu(fo) }, FrameLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP or Gravity.END; setMargins(0, dp(4), dp(4), 0) })
         return card
     }
 
@@ -230,7 +338,7 @@ class LibraryActivity : ComponentActivity() {
             elevation = dp(5).toFloat()
             foreground = rippleFg(14, Color.argb(0x40, 255, 255, 255))
             setOnClickListener { openNotebook(nb) }
-            setOnLongClickListener { notebookMenu(nb); true }
+            setOnLongClickListener { startItemDrag(this, "nb:${nb.id}"); true }
         }
         // Darker "spine" down the left edge (its square right side is clipped to the rounded card).
         card.addView(View(this).apply {
@@ -249,11 +357,12 @@ class LibraryActivity : ComponentActivity() {
         })
         card.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            layoutParams = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.END }
+            setPadding(dp(12), dp(11), dp(10), dp(10))
+            layoutParams = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.START }
             addView(ImageView(this@LibraryActivity).apply { setImageBitmap(Icons.bitmap(Icons.PAGE, dp(13))); setColorFilter(Color.argb(0xCC, 255, 255, 255)); layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) })
             addView(TextView(this@LibraryActivity).apply { text = "  ${nb.pageIds.size}"; setTextColor(Color.argb(0xCC, 255, 255, 255)); textSize = 11f })
         })
+        card.addView(menuDot(Color.argb(0xE0, 255, 255, 255)) { notebookMenu(nb) }, FrameLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP or Gravity.END; setMargins(0, dp(4), dp(4), 0) })
         return card
     }
 
@@ -367,7 +476,7 @@ class LibraryActivity : ComponentActivity() {
         box.addView(iconView(Icons.FOLDER_ADD, 24, AppTheme.text))
         val input = themedInput("")
         box.addView(input, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
-        actionRow(box, dialog) { store.createFolder(input.text.toString().ifBlank { "Folder" }); rebuild() }
+        actionRow(box, dialog) { store.createFolder(input.text.toString().ifBlank { "Folder" }, currentFolder); rebuild() }
     }
 
     // ---- icon menus ----
