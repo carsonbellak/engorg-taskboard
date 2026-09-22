@@ -20,6 +20,7 @@
   const PANE_INDEX = parseInt(params.get('pane') || '-1', 10);
   const LS_LAYOUT = 'splitLayout';
   const LS_LOCAL_THEME = 'localTheme';
+  const LS_LOCAL_SIDEBAR = 'sidebarHidden'; // per-window project-sidebar visibility (local, not synced)
 
   // type -> { panes, css (grid), label }. "vertical" = columns (widescreen),
   // "horizontal" = rows (tall/portrait).
@@ -67,7 +68,10 @@
       const frame = document.createElement('iframe');
       frame.className = 'split-frame';
       const theme = config.themes && config.themes[i];
-      frame.src = `index.html?embedded=1&pane=${i}` + (theme ? '&theme=' + encodeURIComponent(theme) : '');
+      const noSidebar = config.sidebars && config.sidebars[i];
+      frame.src = `index.html?embedded=1&pane=${i}`
+        + (theme ? '&theme=' + encodeURIComponent(theme) : '')
+        + (noSidebar ? '&nosidebar=1' : '');
       root.appendChild(frame);
     }
     buildShellControls();
@@ -106,6 +110,11 @@
       const c = readConfig();
       c.themes = c.themes || [];
       c.themes[d.index] = d.theme || null;
+      writeConfig(c);
+    } else if (d.type === 'split-sidebar' && typeof d.index === 'number' && d.index >= 0) {
+      const c = readConfig();
+      c.sidebars = c.sidebars || [];
+      c.sidebars[d.index] = !!d.hidden;
       writeConfig(c);
     } else if (d.type === 'split-setlayout' && LAYOUTS[d.layout]) {
       applyLayout(d.layout);
@@ -150,6 +159,30 @@
     try { return Object.entries(COLOR_THEMES).map(([id, t]) => ({ id, name: t.name })); } catch { return []; }
   }
 
+  // ---- project sidebar visibility (local, per-window/per-pane) -------------
+  // Like the local theme: for a pane the value rides the iframe URL (?nosidebar=1)
+  // and is reported back to the shell so it survives a reload; for the top window
+  // it lives in localStorage. Never synced — that's the point: each window/pane
+  // sets it independently (e.g. hide it in every split pane but one).
+  function startupSidebarHidden() {
+    if (EMBEDDED) return params.get('nosidebar') === '1';
+    try { return localStorage.getItem(LS_LOCAL_SIDEBAR) === '1'; } catch { return false; }
+  }
+  let runtimeSidebarHidden = startupSidebarHidden();
+
+  function applySidebarClass(hidden) {
+    try { document.documentElement.classList.toggle('sidebar-hidden', !!hidden); } catch {}
+  }
+
+  function setSidebarHidden(hidden) {
+    hidden = !!hidden;
+    runtimeSidebarHidden = hidden;
+    applySidebarClass(hidden);
+    try { window.dispatchEvent(new CustomEvent('sidebar-visibility-changed', { detail: { hidden } })); } catch {}
+    if (EMBEDDED) { try { parent.postMessage({ type: 'split-sidebar', index: PANE_INDEX, hidden }, '*'); } catch {} }
+    else { try { hidden ? localStorage.setItem(LS_LOCAL_SIDEBAR, '1') : localStorage.removeItem(LS_LOCAL_SIDEBAR); } catch {} }
+  }
+
   window.windowSplit = {
     EMBEDDED,
     isShell: () => isShell,
@@ -162,9 +195,14 @@
     currentLocalTheme: () => runtimeTheme,
     themeList,
     startupThemeOverride,
+    sidebarHidden: () => runtimeSidebarHidden,
+    setSidebarHidden,
   };
 
   if (EMBEDDED) document.documentElement.classList.add('is-embedded');
+  // Apply the saved sidebar visibility up front (skip the shell — it has no
+  // sidebar of its own; each pane applies its own from ?nosidebar=1).
+  if (!isShell) applySidebarClass(runtimeSidebarHidden);
 
   // Render the shell now (DOM up to this script already exists), before app.js.
   if (isShell) {

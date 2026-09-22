@@ -154,11 +154,95 @@ function applyTheme(themeId) {
   applyGlassStrength();
 }
 
-// Reflect the synced Liquid Glass translucency (0 = frosted, 1 = fully see-through).
+// Reflect the Liquid Glass translucency (0 = frosted, 1 = fully see-through). The PWA's
+// own override wins; otherwise it follows the desktop's synced slider.
 function applyGlassStrength() {
-  const s = (typeof data !== 'undefined' && typeof data.settings?.glassStrength === 'number')
-    ? data.settings.glassStrength : 0.5;
+  const s = (typeof pwaSettings !== 'undefined' && typeof pwaSettings.glassStrength === 'number')
+    ? pwaSettings.glassStrength
+    : (typeof data !== 'undefined' && typeof data.settings?.glassStrength === 'number')
+      ? data.settings.glassStrength : 0.5;
   document.documentElement.style.setProperty('--glass-strength', String(Math.max(0, Math.min(1, s))));
+}
+
+// The theme actually shown: the PWA's own pick, or the desktop's when set to "Match desktop".
+function effectiveTheme() {
+  const t = pwaSettings.theme;
+  if (t && t !== 'sync' && COLOR_THEMES[t]) return t;
+  const dt = data && data.settings && data.settings.theme;
+  return (dt && COLOR_THEMES[dt]) ? dt : 'dark';
+}
+function applyAppearance() {
+  applyTheme(effectiveTheme()); // applyTheme() also calls applyGlassStrength()
+}
+
+// Nav ids in display order: the user's order first (known ids only), then any nav item
+// they haven't explicitly ordered, in the default order.
+function orderedNavIds() {
+  const order = [];
+  (pwaSettings.navOrder || []).forEach(id => {
+    if (PWA_NAV_ITEMS.find(n => n.id === id) && !order.includes(id)) order.push(id);
+  });
+  PWA_NAV_ITEMS.forEach(n => { if (!order.includes(n.id)) order.push(n.id); });
+  return order;
+}
+
+// Reorder + show/hide the bottom-nav tabs from the PWA hotbar settings. The Printer tab
+// stays gated on the desktop's printerEnabled flag even when the user un-hides it here.
+function applyHotbar() {
+  const nav = document.getElementById('bottom-nav');
+  if (!nav) return;
+  const printerOn = !!(data && data.settings && data.settings.printerEnabled);
+  const hidden = new Set(pwaSettings.navHidden || []);
+  let visibleCount = 0;
+  orderedNavIds().forEach(id => {
+    const el = nav.querySelector(`.nav-item[data-navid="${id}"]`);
+    if (!el) return;
+    nav.appendChild(el); // moving an existing node keeps its click listener
+    let visible = !hidden.has(id);
+    if (id === 'printer') visible = visible && printerOn;
+    el.style.display = visible ? '' : 'none';
+    if (visible) visibleCount++;
+  });
+  // Never leave the bar completely empty — fall back to Notes.
+  if (visibleCount === 0) {
+    const notes = nav.querySelector('.nav-item[data-navid="notes"]');
+    if (notes) notes.style.display = '';
+  }
+}
+
+// Keep the notes/board filter bar's Sort/Color selects in step with the saved defaults.
+function syncFilterBarSelects() {
+  const s = document.getElementById('filter-sort'); if (s) s.value = noteSortMode;
+  const c = document.getElementById('filter-color'); if (c) c.value = noteColorMode;
+}
+
+// Merge a patch into pwaSettings, cache it, apply it, and persist to Firestore.
+async function savePwaSettings(patch, opts = {}) {
+  pwaSettings = { ...pwaSettings, ...patch };
+  try { localStorage.setItem(PWA_SETTINGS_LS_KEY, JSON.stringify(pwaSettings)); } catch (e) {}
+  if (opts.apply !== false) { applyAppearance(); applyHotbar(); }
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  try {
+    await db.collection('users').doc(uid).collection('data').doc('pwaSettings').set({
+      ...pwaSettings,
+      _updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      _source: 'pwa'
+    });
+  } catch (e) { console.warn('pwaSettings save failed:', e); }
+}
+
+// Load the cached PWA settings and apply them before Firestore responds (instant theme).
+function loadPwaSettingsCache() {
+  try {
+    const raw = localStorage.getItem(PWA_SETTINGS_LS_KEY);
+    if (raw) pwaSettings = { ...PWA_SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+  } catch (e) {}
+  noteSortMode = pwaSettings.noteSortMode || 'priority';
+  noteColorMode = pwaSettings.noteColorMode || 'category';
+  applyAppearance();
+  applyHotbar();
+  syncFilterBarSelects();
 }
 
 // ===================== PUSH NOTIFICATIONS =====================
@@ -238,6 +322,10 @@ let calShowCompleted = false; // day list: reveal the collapsed "completed" sect
 let filters = { priority: '', category: '', overdue: false };
 let noteSortMode = 'priority';
 let noteColorMode = 'category';
+
+// Apply the cached PWA settings now (theme + hotbar) so there's no flash before the
+// Firestore listener (set up on sign-in) delivers the synced copy.
+loadPwaSettingsCache();
 
 // Tertiary note-sort tie-breaker (mirrors desktop Settings → noteTertiarySort):
 // age-based unless the primary sort is already date-based, else alphabetical.
@@ -369,30 +457,47 @@ function setupListeners(uid) {
     listeners.push(unsub);
   }
 
-  // Settings — includes theme
+  // Desktop settings — the theme here is only applied when the PWA is set to "Match
+  // desktop"; printerEnabled still gates the Printer tab. PWA-specific prefs live in the
+  // separate pwaSettings doc (below).
   const unsubSettings = base.doc('settings').onSnapshot(snap => {
     if (!snap.exists) return;
     const d = snap.data();
     delete d._updatedAt;
     delete d._source;
     data.settings = d;
-    // Apply synced theme
-    if (d.theme && COLOR_THEMES[d.theme]) {
-      applyTheme(d.theme);
-    }
-    // Apply synced Liquid Glass translucency (even when the theme didn't change).
-    applyGlassStrength();
-    // Show/hide printer tab based on setting
-    const printerNav = document.querySelector('.nav-item[data-view="printer"]');
-    if (printerNav) printerNav.style.display = d.printerEnabled ? '' : 'none';
-    // If on printer view and it just got disabled, switch to notes
+    // Re-apply appearance (honors the PWA's own theme / "Match desktop") + hotbar
+    // (honors printerEnabled + the PWA's show/hide/order).
+    applyAppearance();
+    applyHotbar();
+    // If on the printer view and it just got disabled, switch to notes.
     if (!d.printerEnabled && currentView === 'printer') {
-      const notesNav = document.querySelector('.nav-item[data-view="notes"]');
+      const notesNav = document.querySelector('.nav-item[data-navid="notes"]');
       if (notesNav) notesNav.click();
     }
     populateFilterCategory();
   });
   listeners.push(unsubSettings);
+
+  // PWA-only settings (theme, hotbar, note defaults) — its own doc so the desktop's full
+  // settings .set() never clobbers it. Syncs across the user's PWA devices.
+  const unsubPwa = base.doc('pwaSettings').onSnapshot(snap => {
+    if (!snap.exists) return; // first run → keep defaults (behaves like before this feature)
+    const d = snap.data();
+    delete d._updatedAt;
+    delete d._source;
+    pwaSettings = { ...PWA_SETTINGS_DEFAULTS, ...d };
+    try { localStorage.setItem(PWA_SETTINGS_LS_KEY, JSON.stringify(pwaSettings)); } catch (e) {}
+    noteSortMode = pwaSettings.noteSortMode || 'priority';
+    noteColorMode = pwaSettings.noteColorMode || 'category';
+    applyAppearance();
+    applyHotbar();
+    syncFilterBarSelects();
+    const ov = document.getElementById('settings-overlay');
+    if (ov && !ov.classList.contains('hidden')) renderPwaSettings();
+    render();
+  });
+  listeners.push(unsubPwa);
 
   const unsubProjects = base.doc('projects').onSnapshot(snap => {
     if (!snap.exists) return;
@@ -475,8 +580,8 @@ document.getElementById('filter-overdue').addEventListener('click', () => {
   document.getElementById('filter-overdue').classList.toggle('active', filters.overdue);
   render();
 });
-document.getElementById('filter-sort').addEventListener('change', e => { noteSortMode = e.target.value; render(); });
-document.getElementById('filter-color').addEventListener('change', e => { noteColorMode = e.target.value; render(); });
+document.getElementById('filter-sort').addEventListener('change', e => { noteSortMode = e.target.value; savePwaSettings({ noteSortMode: e.target.value }, { apply: false }); render(); });
+document.getElementById('filter-color').addEventListener('change', e => { noteColorMode = e.target.value; savePwaSettings({ noteColorMode: e.target.value }, { apply: false }); render(); });
 
 function populateFilterCategory() {
   const sel = document.getElementById('filter-category');
@@ -2298,6 +2403,185 @@ document.getElementById('btn-signout').addEventListener('click', async () => {
 document.querySelectorAll('.overlay').forEach(overlay => {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.add('hidden'); });
 });
+
+// ===================== PWA SETTINGS SHEET =====================
+let _psetTab = 'appearance';
+
+function openPwaSettings() {
+  renderPwaSettings();
+  document.getElementById('settings-overlay').classList.remove('hidden');
+}
+function closePwaSettings() {
+  document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+function renderPwaSettings() {
+  const body = document.getElementById('settings-body');
+  if (!body) return;
+  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['about', 'About']];
+  let html = `<div class="pset-tabs">` + tabs.map(([id, label]) =>
+    `<button class="pset-tab${id === _psetTab ? ' active' : ''}" data-ptab="${id}">${label}</button>`).join('') + `</div>`;
+  html += `<div class="pset-panel">`;
+  if (_psetTab === 'appearance') html += psetAppearance();
+  else if (_psetTab === 'hotbar') html += psetHotbar();
+  else if (_psetTab === 'notes') html += psetNotes();
+  else html += psetAbout();
+  html += `</div>`;
+  body.innerHTML = html;
+  bindPsetEvents();
+}
+
+function psetAppearance() {
+  const cur = pwaSettings.theme || 'sync';
+  const card = (id, name, vars, badge) => `
+    <button class="pset-theme${id === cur ? ' active' : ''}" data-settheme="${id}">
+      <span class="pset-theme-swatch" style="background:${vars['--bg']};border-color:${vars['--border']}">
+        <span class="pset-theme-card" style="background:${vars['--bg-card']}"></span>
+        <span class="pset-theme-accent" style="background:${vars['--accent']}"></span>
+      </span>
+      <span class="pset-theme-name">${escapeHtml(name)}</span>
+      ${badge ? `<span class="pset-theme-badge">${badge}</span>` : ''}
+      ${id === cur ? '<span class="pset-theme-check">&#10003;</span>' : ''}
+    </button>`;
+  let grid = card('sync', 'Match desktop', COLOR_THEMES[effectiveTheme()].vars, 'Auto');
+  grid += Object.entries(COLOR_THEMES).map(([id, t]) => card(id, t.name, t.vars)).join('');
+  const gs = (typeof pwaSettings.glassStrength === 'number') ? pwaSettings.glassStrength
+    : (typeof data.settings?.glassStrength === 'number' ? data.settings.glassStrength : 0.5);
+  return `
+    <div class="pset-section">
+      <h3 class="pset-h3">Theme</h3>
+      <p class="pset-hint">This device's web-app theme, kept separate from the desktop. &ldquo;Match desktop&rdquo; follows whatever the desktop app is set to.</p>
+      <div class="pset-theme-grid">${grid}</div>
+    </div>
+    <div class="pset-section">
+      <h3 class="pset-h3">Liquid Glass</h3>
+      <p class="pset-hint">Translucency for the Liquid Glass themes — frosted to see-through.</p>
+      <div class="pset-slider-row">
+        <span>Frosted</span>
+        <input type="range" class="pset-slider" id="pset-glass" min="0" max="1" step="0.05" value="${gs}">
+        <span>Max</span>
+      </div>
+    </div>`;
+}
+
+function psetHotbar() {
+  const printerOn = !!(data.settings && data.settings.printerEnabled);
+  const hidden = new Set(pwaSettings.navHidden || []);
+  const ids = orderedNavIds();
+  const iconFor = id => document.querySelector(`.nav-item[data-navid="${id}"] .nav-icon`)?.innerHTML || '';
+  const rows = ids.map((id, i) => {
+    const n = PWA_NAV_ITEMS.find(x => x.id === id);
+    const shown = !hidden.has(id);
+    const note = (id === 'printer' && !printerOn)
+      ? `<div class="pset-hb-note">Enable 3D Printer support in the desktop app to show this.</div>` : '';
+    return `<div class="pset-hb-row${shown ? '' : ' off'}" data-hbid="${id}">
+      <span class="pset-hb-icon">${iconFor(id)}</span>
+      <span class="pset-hb-main"><span class="pset-hb-name">${escapeHtml(n.label)}</span>${note}</span>
+      <button class="pset-hb-arrow" data-hbmove="up" data-hbid="${id}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">&#9650;</button>
+      <button class="pset-hb-arrow" data-hbmove="down" data-hbid="${id}" ${i === ids.length - 1 ? 'disabled' : ''} aria-label="Move down">&#9660;</button>
+      <label class="alarm-switch">
+        <input type="checkbox" data-hbshow="${id}" ${shown ? 'checked' : ''}>
+        <span class="alarm-switch-track"></span>
+      </label>
+    </div>`;
+  }).join('');
+  return `<div class="pset-section">
+    <h3 class="pset-h3">Bottom bar</h3>
+    <p class="pset-hint">Pick which tabs show in the bottom navigation and their order. This device only.</p>
+    <div class="pset-hb-list">${rows}</div>
+    <button class="btn-secondary-full" id="pset-hb-reset" style="margin-top:12px">Reset to default</button>
+  </div>`;
+}
+
+function psetNotes() {
+  const sortOpts = [['priority', 'Priority'], ['created', 'Newest'], ['created-asc', 'Oldest'], ['due', 'Due date'], ['alpha', 'A–Z'], ['category', 'Category'], ['project', 'Project']];
+  const colorOpts = [['category', 'Category'], ['priority', 'Priority'], ['project', 'Project'], ['status', 'Status'], ['due', 'Due date']];
+  const sel = (id, opts, val) => `<select class="form-input" id="${id}">` +
+    opts.map(([v, l]) => `<option value="${v}"${v === val ? ' selected' : ''}>${l}</option>`).join('') + `</select>`;
+  return `<div class="pset-section">
+    <h3 class="pset-h3">Default sorting</h3>
+    <p class="pset-hint">How the Notes &amp; Board open. You can still change it live from the filter bar &mdash; and that choice is remembered here too.</p>
+    <label class="pset-field"><span>Sort by</span>${sel('pset-sort', sortOpts, pwaSettings.noteSortMode || 'priority')}</label>
+    <label class="pset-field"><span>Color by</span>${sel('pset-color', colorOpts, pwaSettings.noteColorMode || 'category')}</label>
+  </div>`;
+}
+
+function psetAbout() {
+  const email = auth.currentUser?.email || '';
+  return `<div class="pset-section">
+    <h3 class="pset-h3">About these settings</h3>
+    <p class="pset-hint">These preferences apply only to the EngOrg web app and are kept separate from the desktop app. Your theme, hotbar and note defaults sync across your own phones, tablets and browsers &mdash; but never change the desktop.</p>
+  </div>
+  <div class="pset-section">
+    <h3 class="pset-h3">Account</h3>
+    ${email ? `<div class="pset-acct">${escapeHtml(email)}</div>` : ''}
+    <button class="btn-danger-full" id="pset-signout" style="margin-top:10px">Sign out</button>
+  </div>`;
+}
+
+function moveNav(id, dir) {
+  const ids = orderedNavIds();
+  const i = ids.indexOf(id);
+  if (i < 0) return;
+  const j = i + dir;
+  if (j < 0 || j >= ids.length) return;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  savePwaSettings({ navOrder: ids });
+  renderPwaSettings();
+}
+
+function bindPsetEvents() {
+  const body = document.getElementById('settings-body');
+  if (!body) return;
+
+  body.querySelectorAll('.pset-tab').forEach(btn =>
+    btn.addEventListener('click', () => { _psetTab = btn.dataset.ptab; renderPwaSettings(); }));
+
+  // Theme cards
+  body.querySelectorAll('[data-settheme]').forEach(btn =>
+    btn.addEventListener('click', () => { savePwaSettings({ theme: btn.dataset.settheme }); renderPwaSettings(); }));
+
+  // Glass slider — apply live on input, persist on release.
+  const glass = body.querySelector('#pset-glass');
+  if (glass) {
+    glass.addEventListener('input', e => {
+      pwaSettings.glassStrength = parseFloat(e.target.value);
+      applyGlassStrength();
+    });
+    glass.addEventListener('change', e => savePwaSettings({ glassStrength: parseFloat(e.target.value) }));
+  }
+
+  // Hotbar move + show/hide + reset
+  body.querySelectorAll('[data-hbmove]').forEach(btn =>
+    btn.addEventListener('click', () => { if (!btn.disabled) moveNav(btn.dataset.hbid, btn.dataset.hbmove === 'up' ? -1 : 1); }));
+  body.querySelectorAll('[data-hbshow]').forEach(cb =>
+    cb.addEventListener('change', () => {
+      const id = cb.dataset.hbshow;
+      const hidden = new Set(pwaSettings.navHidden || []);
+      if (cb.checked) hidden.delete(id); else hidden.add(id);
+      savePwaSettings({ navHidden: [...hidden] });
+      renderPwaSettings();
+    }));
+  const reset = body.querySelector('#pset-hb-reset');
+  if (reset) reset.addEventListener('click', () => { savePwaSettings({ navOrder: [], navHidden: [] }); renderPwaSettings(); });
+
+  // Note defaults
+  const sortSel = body.querySelector('#pset-sort');
+  if (sortSel) sortSel.addEventListener('change', e => {
+    noteSortMode = e.target.value; savePwaSettings({ noteSortMode: e.target.value }, { apply: false }); syncFilterBarSelects(); render();
+  });
+  const colorSel = body.querySelector('#pset-color');
+  if (colorSel) colorSel.addEventListener('change', e => {
+    noteColorMode = e.target.value; savePwaSettings({ noteColorMode: e.target.value }, { apply: false }); syncFilterBarSelects(); render();
+  });
+
+  // Account
+  const signout = body.querySelector('#pset-signout');
+  if (signout) signout.addEventListener('click', async () => { closePwaSettings(); await auth.signOut(); });
+}
+
+document.getElementById('btn-settings').addEventListener('click', openPwaSettings);
+document.getElementById('btn-close-settings').addEventListener('click', closePwaSettings);
 
 // ===================== TIMERS VIEW =====================
 

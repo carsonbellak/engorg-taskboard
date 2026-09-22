@@ -1045,6 +1045,11 @@ function renderSettings() {
             <input type="checkbox" class="settings-checkbox" id="settings-compact-sidebar" ${dataManager.settings.compactSidebar === true ? 'checked' : ''}>
           </label>
           <label class="settings-toggle-row">
+            <span class="settings-toggle-label">Show project sidebar</span>
+            <span class="settings-toggle-desc">Hide the left projects sidebar for more room. Per-window — in Split&nbsp;View each pane keeps its own setting, so you can show it in just one.</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-show-sidebar" ${(window.windowSplit && window.windowSplit.sidebarHidden()) ? '' : 'checked'}>
+          </label>
+          <label class="settings-toggle-row">
             <span class="settings-toggle-label">Check for updates on startup</span>
             <span class="settings-toggle-desc">Scan the app repository for new versions and prompt to update</span>
             <input type="checkbox" class="settings-checkbox" id="settings-auto-update" ${dataManager.settings.autoCheckUpdates !== false ? 'checked' : ''}>
@@ -1424,6 +1429,11 @@ function renderSettings() {
   document.getElementById('settings-compact-sidebar').addEventListener('change', (e) => {
     dataManager.updateSettings({ compactSidebar: e.target.checked });
     document.body.classList.toggle('compact-sidebar', e.target.checked);
+  });
+  const showSidebarCb = document.getElementById('settings-show-sidebar');
+  if (showSidebarCb) showSidebarCb.addEventListener('change', (e) => {
+    // Per-window / per-pane (local, not synced) — handled by window-split.js.
+    if (window.windowSplit) window.windowSplit.setSidebarHidden(!e.target.checked);
   });
   document.getElementById('settings-auto-update').addEventListener('change', (e) => {
     dataManager.updateSettings({ autoCheckUpdates: e.target.checked });

@@ -120,6 +120,10 @@ body.split-shell #split-root {
   border: none;
   background: var(--bg-secondary, #0F172A);
 }
+/* Per-window "Hide project sidebar" (Settings → General, or View menu). Local to
+   this window/pane — set via window-split.js so each split pane can differ. The
+   main content is flex:1 so it reclaims the freed width automatically. */
+html.sidebar-hidden #sidebar { display: none !important; }
 /* Window controls live in a small floating cluster (top-right) since the shell
    titlebar is hidden. The left padding is a drag-grab strip to move the window. */
 #split-winctrls {

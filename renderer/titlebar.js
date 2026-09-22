@@ -45,6 +45,8 @@
     ];
     if (ws) {
       items.push({ sep: true });
+      // Per-window project-sidebar toggle (local; each split pane keeps its own).
+      items.push({ label: 'Hide Sidebar', checked: ws.sidebarHidden(), onClick: () => ws.setSidebarHidden(!ws.sidebarHidden()) });
       // Panes drive layout too (a pane forwards the change to the shell) so you can
       // re-split or return to Single from inside any view.
       items.push({ label: 'Split Window', submenu: splitSubmenu });
