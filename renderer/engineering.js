@@ -62,8 +62,15 @@ const engineeringUtilities = (() => {
       activate() { enginkMirror.mount(document.getElementById('view-engink')); enginkMirror.activate(); },
       deactivate() { enginkMirror.deactivate(); },
     },
+    'file-merger': {
+      id: 'file-merger', name: 'File Merger', icon: '📎',
+      description: 'Combine PDFs and images into a single PDF — add files, drag to arrange the order, and export one document.',
+      paneId: 'eng-util-file-merger',
+      activate() { fileMerger.mount(document.getElementById('view-file-merger')); fileMerger.activate(); },
+      deactivate() { fileMerger.deactivate(); },
+    },
   };
-  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink'];
+  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {

@@ -299,6 +299,12 @@ const __api = {
     // raw cli
     raw: (dir, commandLine) => ipcRenderer.invoke('git:raw', dir, commandLine),
   },
+  // File Merger — pick PDFs/images (native dialog) and save the assembled PDF.
+  // The merge itself runs in the renderer with the bundled pdf-lib global.
+  fileMerger: {
+    selectFiles: () => ipcRenderer.invoke('fileMerger:selectFiles'),
+    save: (bytes, defaultName) => ipcRenderer.invoke('fileMerger:save', bytes, defaultName),
+  },
   // EngInk live mirror — LAN server the native EngInk (Android) app streams strokes to; the
   // Engineering > EngInk utility reflects them read-only. onMessage delivers both the tablet's
   // notebook/stroke traffic and synthetic server/client status events.
