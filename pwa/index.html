@@ -56,7 +56,7 @@
     <!-- Top Bar -->
     <header id="app-header">
       <div class="app-header-left">
-        <span class="app-logo">&#9881;</span>
+        <button id="btn-settings" class="app-logo app-logo-btn" title="Settings" aria-label="Settings">&#9881;</button>
         <select id="project-selector" class="project-select">
           <option value="all">All Projects</option>
         </select>
@@ -103,43 +103,43 @@
 
     <!-- Bottom Navigation -->
     <nav id="bottom-nav">
-      <button class="nav-item active" data-view="notes">
+      <button class="nav-item active" data-navid="notes" data-view="notes">
         <span class="nav-icon">&#128204;</span>
         <span class="nav-label">Notes</span>
       </button>
-      <button class="nav-item" data-view="board">
+      <button class="nav-item" data-navid="board" data-view="board">
         <span class="nav-icon">&#128203;</span>
         <span class="nav-label">Board</span>
       </button>
-      <button class="nav-item" data-href="ink.html">
+      <button class="nav-item" data-navid="ink" data-href="ink.html">
         <span class="nav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>
         <span class="nav-label">EngInk</span>
       </button>
-      <button class="nav-item" data-view="ecosystem">
+      <button class="nav-item" data-navid="ecosystem" data-view="ecosystem">
         <span class="nav-icon">&#127795;</span>
         <span class="nav-label">Tree</span>
       </button>
-      <button class="nav-item" data-view="timeline">
+      <button class="nav-item" data-navid="timeline" data-view="timeline">
         <span class="nav-icon">&#128197;</span>
         <span class="nav-label">Timeline</span>
       </button>
-      <button class="nav-item" data-view="calendar">
+      <button class="nav-item" data-navid="calendar" data-view="calendar">
         <span class="nav-icon">&#128198;</span>
         <span class="nav-label">Calendar</span>
       </button>
-      <button class="nav-item" data-view="purchases">
+      <button class="nav-item" data-navid="purchases" data-view="purchases">
         <span class="nav-icon">&#128230;</span>
         <span class="nav-label">Orders</span>
       </button>
-      <button class="nav-item" data-view="stats">
+      <button class="nav-item" data-navid="stats" data-view="stats">
         <span class="nav-icon">&#128202;</span>
         <span class="nav-label">Stats</span>
       </button>
-      <button class="nav-item" data-view="timers">
+      <button class="nav-item" data-navid="timers" data-view="timers">
         <span class="nav-icon">&#9201;</span>
         <span class="nav-label">Timers</span>
       </button>
-      <button class="nav-item" data-view="printer">
+      <button class="nav-item" data-navid="printer" data-view="printer">
         <span class="nav-icon">&#127912;</span>
         <span class="nav-label">Printer</span>
       </button>
@@ -285,6 +285,17 @@
           <button id="btn-cancel-purch" class="btn-secondary">Cancel</button>
           <button id="btn-save-purch" class="btn-primary">Save</button>
         </div>
+      </div>
+    </div>
+
+    <!-- PWA Settings Sheet (separate from desktop settings) -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div class="overlay-sheet overlay-sheet-tall pset-sheet">
+        <div class="pset-header">
+          <h2>Settings</h2>
+          <button id="btn-close-settings" class="pset-close" aria-label="Close">&times;</button>
+        </div>
+        <div id="settings-body" class="pset-body"></div>
       </div>
     </div>
   </div>

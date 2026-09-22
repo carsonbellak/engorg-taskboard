@@ -224,6 +224,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
     fun toggleFit() { fitVertical = !fitVertical; fitPage() }
 
+    /** Re-center + fit this notebook to the pane's current size (after the pane is added/resized). */
+    fun refit() { finishedView.post { fitVertical = false; fitPage() } }
+
     fun zoomBy(factor: Float) {
         val fx = finishedView.width / 2f; val fy = finishedView.height / 2f
         val ns = (scale * factor).coerceIn(0.2f, 6f)

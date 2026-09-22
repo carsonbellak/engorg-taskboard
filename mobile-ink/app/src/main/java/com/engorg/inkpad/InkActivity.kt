@@ -45,7 +45,10 @@ import kotlin.math.roundToInt
 class InkActivity : ComponentActivity() {
 
     private lateinit var store: NotebookStore
+    private lateinit var panesRow: LinearLayout
     private val panes = ArrayList<PageCanvas>()
+    private val paneChips = HashMap<PageCanvas, View>()
+    private val paneTitles = HashMap<PageCanvas, TextView>()
     private var focused: PageCanvas? = null
 
     // Shared pen/tool state, read live by every pane through [hostImpl].
@@ -110,13 +113,8 @@ class InkActivity : ComponentActivity() {
             ?: listOf(null)
         val n = ids.size.coerceIn(1, 4)
 
-        val panesRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (i in 0 until n) {
-            val pane = PageCanvas(this, store, hostImpl)
-            panesRow.addView(pane, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
-            panes.add(pane)
-            if (i < n - 1) panesRow.addView(makeDivider(panesRow), LinearLayout.LayoutParams(dp(6), MATCH_PARENT))
-        }
+        panesRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        for (i in 0 until n) panes.add(makePane(ids.getOrNull(i)))
 
         val toolbar = buildToolbar()
         val root = FrameLayout(this).apply {
@@ -130,7 +128,7 @@ class InkActivity : ComponentActivity() {
         // Keep the floating toolbar clear of the status bar (clock / battery / notifications).
         SystemBars.marginTopBelowStatusBar(toolbar, dp(10))
 
-        for (i in panes.indices) panes[i].open(ids.getOrNull(i))
+        rebuildPanesRow()
         panes.firstOrNull()?.let { setFocused(it) }
         updateTools()
 
@@ -154,10 +152,126 @@ class InkActivity : ComponentActivity() {
     // ---------- panes / focus ----------
     private fun setFocused(pane: PageCanvas) {
         focused = pane
-        if (panes.size > 1) panes.forEach { it.setFocusedVisual(it === pane) }
+        val multi = panes.size > 1
+        panes.forEach { it.setFocusedVisual(multi && it === pane) }
         MirrorManager.bind(pane)   // stream the focused pane if a desktop mirror is connected
         updatePageLabel()
     }
+
+    // ---------- dynamic split panes (add/close/swap from within a notebook) ----------
+    private fun makePane(id: String?): PageCanvas {
+        val pane = PageCanvas(this, store, hostImpl)
+        val chip = buildPaneChip(pane)
+        pane.addView(chip, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.START; leftMargin = dp(10); topMargin = dp(10)
+        })
+        paneChips[pane] = chip
+        pane.open(id)
+        return pane
+    }
+
+    /** Re-tile the row from the current [panes] list (equal widths) with dividers between. */
+    private fun rebuildPanesRow() {
+        panesRow.removeAllViews()
+        for (i in panes.indices) {
+            panesRow.addView(panes[i], LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
+            if (i < panes.size - 1) panesRow.addView(makeDivider(panesRow), LinearLayout.LayoutParams(dp(6), MATCH_PARENT))
+        }
+        refreshChrome()
+        panes.forEach { it.refit() }
+    }
+
+    private fun addPane(id: String?) {
+        if (panes.size >= 4) { Toast.makeText(this, "Up to 4 notebooks side by side.", Toast.LENGTH_SHORT).show(); return }
+        val pane = makePane(id)
+        panes.add(pane)
+        rebuildPanesRow()
+        setFocused(pane)
+    }
+
+    private fun removePane(pane: PageCanvas) {
+        if (panes.size <= 1) return
+        panes.remove(pane); paneChips.remove(pane); paneTitles.remove(pane)
+        rebuildPanesRow()
+        setFocused(if (focused === pane) panes.first() else (focused ?: panes.first()))
+    }
+
+    /** Show pane title chips only in split mode; keep their titles fresh after a swap. */
+    private fun refreshChrome() {
+        val multi = panes.size > 1
+        for (p in panes) {
+            paneChips[p]?.visibility = if (multi) View.VISIBLE else View.GONE
+            if (::panesRow.isInitialized) paneTitles[p]?.text = p.notebook.title
+        }
+    }
+
+    private fun buildPaneChip(pane: PageCanvas): View {
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            visibility = View.GONE
+            background = GradientDrawable().apply {
+                cornerRadius = dp(15).toFloat()
+                setColor(Color.argb(0xF0, Color.red(AppTheme.surface), Color.green(AppTheme.surface), Color.blue(AppTheme.surface)))
+                setStroke(dp(1), Color.argb(0x2A, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            elevation = dp(6).toFloat(); setPadding(dp(11), dp(5), dp(5), dp(5))
+        }
+        val title = TextView(this).apply {
+            text = pane.notebook.title; setTextColor(onSurface); textSize = 12.5f
+            maxLines = 1; maxWidth = dp(150); ellipsize = android.text.TextUtils.TruncateAt.END
+            setOnClickListener { notebookPickerPopup(this, pane) { id -> pane.open(id); refreshChrome(); setFocused(pane) } }
+        }
+        paneTitles[pane] = title
+        row.addView(title)
+        row.addView(ImageButton(this).apply {
+            setImageBitmap(Icons.bitmap(Icons.CLOSE, dp(15))); setColorFilter(muted)
+            background = pill(light); scaleType = ImageView.ScaleType.FIT_CENTER; stateListAnimator = null
+            val pd = dp(4); setPadding(pd, pd, pd, pd)
+            layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply { leftMargin = dp(6) }
+            setOnClickListener { removePane(pane) }
+        })
+        return row
+    }
+
+    private fun showAddPane(anchor: View) {
+        if (panes.size >= 4) { Toast.makeText(this, "Up to 4 notebooks side by side.", Toast.LENGTH_SHORT).show(); return }
+        notebookPickerPopup(anchor, null) { id -> addPane(id) }
+    }
+
+    /** A compact dropdown of every notebook (newest cover dot + title). Reused for add + swap. */
+    private fun notebookPickerPopup(anchor: View, current: PageCanvas?, onPick: (String) -> Unit) {
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
+        val container = android.widget.ScrollView(this).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            addView(list)
+        }
+        val h = (dp(50) * store.notebooks.size + dp(16)).coerceIn(dp(60), dp(380))
+        val popup = PopupWindow(container, dp(250), h, true).apply { elevation = dp(12).toFloat() }
+        val curId = current?.notebook?.id
+        for (nb in store.notebooks) list.addView(pickRow(nb, nb.id == curId) { popup.dismiss(); onPick(nb.id) })
+        popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    private fun pickRow(nb: NotebookStore.Notebook, selected: Boolean, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (selected) AppTheme.accent else AppTheme.elevated) }
+            setPadding(dp(10), dp(9), dp(12), dp(9))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
+            addView(View(this@InkActivity).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(nb.coverColor) }
+                layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply { rightMargin = dp(10) }
+            })
+            addView(TextView(this@InkActivity).apply {
+                text = nb.title; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(if (selected) AppTheme.onAccent() else AppTheme.text)
+            })
+            setOnClickListener { onClick() }
+        }
 
     private fun updatePageLabel() {
         val f = focused ?: return
@@ -275,6 +389,7 @@ class InkActivity : ComponentActivity() {
             addView(iconBtn(Icons.NEXT) { focused?.scrollPage(1); updatePageLabel() })
             addView(iconBtn(Icons.ADD) { focused?.addPage(); updatePageLabel() })
             addView(sep())
+            addView(iconBtn(Icons.SPLIT) { showAddPane(it) })
             addView(iconBtn(Icons.CAST) { showMirrorDialog() }.also { mirrorButton = it })
             addView(iconBtn(Icons.EMAIL) { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
         }

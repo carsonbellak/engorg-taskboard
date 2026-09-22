@@ -109,6 +109,30 @@ const COLOR_THEMES = {
   sunset: { name:'Sunset', dark:true, vars:{'--bg':'#241530','--bg-card':'rgba(255,255,255,0.05)','--bg-elevated':'rgba(255,255,255,0.08)','--border':'rgba(255,140,80,0.15)','--text':'#FDE8D8','--text-secondary':'#E8C4AC','--text-muted':'#B08870','--accent':'#FF8C50','--accent-light':'rgba(255,140,80,0.12)','--success':'#4ADE80','--warning':'#FBBF24','--danger':'#FB7185','--radius':'14px'} },
 };
 
+// ===================== PWA-LOCAL SETTINGS =====================
+// The PWA keeps its OWN settings (theme, hotbar, note defaults) independent of the
+// desktop app. They live in a dedicated Firestore doc — users/{uid}/data/pwaSettings —
+// that the desktop never reads or writes (the desktop uploads its settings doc with a
+// full .set(), which would otherwise clobber anything we stashed in the shared doc).
+// A localStorage cache mirrors them so the theme + hotbar apply instantly on load and
+// keep working offline. This doc DOES sync across the user's own phones/tablets/browsers.
+const PWA_NAV_ITEMS = [
+  { id: 'notes', label: 'Notes' }, { id: 'board', label: 'Board' }, { id: 'ink', label: 'EngInk' },
+  { id: 'ecosystem', label: 'Tree' }, { id: 'timeline', label: 'Timeline' }, { id: 'calendar', label: 'Calendar' },
+  { id: 'purchases', label: 'Orders' }, { id: 'stats', label: 'Stats' }, { id: 'timers', label: 'Timers' },
+  { id: 'printer', label: 'Printer' },
+];
+const PWA_SETTINGS_DEFAULTS = {
+  theme: 'sync',           // 'sync' = follow the desktop theme; otherwise a COLOR_THEMES id
+  glassStrength: null,     // null = follow the desktop's Liquid Glass slider; 0..1 to override
+  noteSortMode: 'priority',
+  noteColorMode: 'category',
+  navHidden: [],           // nav ids hidden from the bottom bar
+  navOrder: [],            // nav ids in display order (any missing appended in default order)
+};
+const PWA_SETTINGS_LS_KEY = 'engorg_pwa_settings';
+let pwaSettings = { ...PWA_SETTINGS_DEFAULTS };
+
 function applyTheme(themeId) {
   if (themeId === 'glass') themeId = 'glassDark'; // old single glass → dark variant
   const theme = COLOR_THEMES[themeId] || COLOR_THEMES.dark;
