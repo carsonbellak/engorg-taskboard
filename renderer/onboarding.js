@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.3.30': {
+      title: "What's new",
+      intro: 'Handwriting leveled up — split notebooks, and a live desktop mirror.',
+      slides: [
+        { emoji: '🖋️', title: 'EngInk', body: 'The handwriting app is now “EngInk” — same fast, low-latency ink, with a cleaner tab and icon.' },
+        { emoji: '📚', title: 'Split notebooks', body: 'Open up to four notebooks side by side on the tablet. In your library, tap a notebook’s ⋮ menu → “Open in split,” pick which ones, and drag the dividers to re-balance.' },
+        { emoji: '🖥️', title: 'Mirror to your PC', body: 'Watch your tablet’s EngInk notebook live on the desktop over Wi‑Fi. Open Engineering → EngInk on the PC, then on the tablet tap the cast icon and choose it. Read-only — great on a big screen, and you can export the mirrored notebook to PDF.' },
+      ],
+    },
     '1.2.0': {
       title: "What's new",
       intro: 'A pass over the themes — cleaner looks and a new way to tune the glass.',

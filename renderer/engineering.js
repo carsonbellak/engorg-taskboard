@@ -55,8 +55,15 @@ const engineeringUtilities = (() => {
       activate() { gitManager.mount(document.getElementById('view-git-manager')); gitManager.activate(); },
       deactivate() { gitManager.deactivate(); },
     },
+    'engink': {
+      id: 'engink', name: 'EngInk', icon: '🖋️',
+      description: 'A live reflection of your tablet’s EngInk notebook over Wi-Fi — watch pages and strokes appear as you write, then export the mirrored notebook to PDF.',
+      paneId: 'eng-util-engink',
+      activate() { enginkMirror.mount(document.getElementById('view-engink')); enginkMirror.activate(); },
+      deactivate() { enginkMirror.deactivate(); },
+    },
   };
-  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager'];
+  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {

@@ -118,6 +118,7 @@ the repo and opens a PR via GitHub sign-in (no PAT, no git, no terminal). Full d
 | `ipc/email.js` | All `email:*` handlers — IMAP (imapflow) receive + SMTP (nodemailer) send. App passwords encrypted at rest via Electron `safeStorage`; decrypted only in main, never sent to renderer. One pooled IMAP connection per account. |
 | `ipc/kicad-importer.js` | All `kicad:*` handlers — KiCad library importer (port of `kicadImporter.py`). Staged: `extractZips` (dependency-free unzip via `tar`/`Expand-Archive`), `digikeyLookup` (OAuth2 client-credentials → metadata via global `fetch`), `addStepFile`, `writeLibrary` (regex s-expr manipulation). DigiKey creds from `config.js` defaults or `settings.json` override. |
 | `ipc/utility-store.js` | All `store:*` handlers — Utility Store. Fetches catalog JSON from GitHub (`UTILITY_STORE_CATALOG_URL`); downloads remote utility HTML to `appdata/utilities/<id>/`. Remote utilities render in a sandboxed iframe (no Node/IPC) — never run with app privileges. |
+| `ipc/engink-mirror.js` | `engink:*` — **EngInk live mirror** server. Runs a LAN WebSocket server (`ws`, `ENGINK_MIRROR_PORT` 8770) the native EngInk (Android) app streams strokes to, plus a UDP discovery responder (`dgram`, `ENGINK_DISCOVERY_PORT` 8771) that answers the tablet's broadcast probe with `{name,port,code}`. A 6-digit pairing code gates connections. Parsed client messages are forwarded to the renderer via `engink:message`; the renderer draws them (view-only mirror). Lives on `state.enginkMirror`; started on demand by the utility, stopped on quit. Desktop-only (no cloud — direct tablet↔PC LAN). |
 
 ### Renderer modules (`renderer/`)
 
@@ -152,6 +153,7 @@ the repo and opens a PR via GitHub sign-in (no PAT, no git, no terminal). Full d
 | `wifi-checker.js` | Wi-Fi / network diagnostics utility |
 | `uart-bridge.js` | Serial/UART bridge utility |
 | `git-manager.js` | **Git Manager** utility — GitHub-Desktop-style git client: repo + branch dropdowns, Fetch/Pull/Push/Sync, stage checkboxes, commit box (with **amend**), History + diff viewer with a **right-click commit context menu** (checkout/branch/tag/cherry-pick/revert/reset/copy-SHA), **conflict resolution** (ours/theirs/edit/continue/abort banner), stash/tags/remotes **manager dialogs**, optional **auto-fetch** (5 min), one-click **Upload folder** / **Download folder**, plus a raw git terminal. Tracked repos persist in `settings.json` (`gitRepos`, `gitLastRepo`); auto-fetch toggle in `gitAutoFetch`. Mounts in the Engineering Utilities tab via the `git-manager` BUILTIN. Backed by `window.api.git.*`. Desktop-only. |
+| `engink-mirror.js` | **EngInk** utility (`enginkMirror`) — a **view-only live reflection of the tablet's EngInk notebook over the LAN** (no cloud). Starts the desktop mirror server (`window.api.engink.*` → `ipc/engink-mirror.js`), shows a pairing panel (this PC's IP:port + 6-digit code + connected device), and renders the incoming strokes on a canvas that reproduces the native `FinishedStrokesView` (816×1056 pages, GRID/RULED/DOTS/PLAIN paper, highlighter alpha, Catmull-Rom ink) — with page-follow (mirrors the tablet's current page), inspect pan/zoom, and **Export PDF** (browser print-to-PDF of all mirrored pages). Mounts via the `engink` BUILTIN. The tablet side is the native `mobile-ink` app's `MirrorManager`/`MirrorClient` (OkHttp WS + UDP discovery). Desktop-only (no PWA equivalent). |
 | `components/add-note-modal.js` | **`ModalManager`** — owns ALL modals: add/edit note, schedule event, **project**, category. (Despite the filename, this is the central modal controller, not just notes.) |
 | `components/sticky-note.js` | Sticky-note card rendering/helpers |
 | `components/project-manager.js` | Stub only — project CRUD actually lives in `ModalManager` (`add-note-modal.js`) |
@@ -304,6 +306,12 @@ All shell out to system `git` (no native deps). Network ops run with `GIT_TERMIN
   - `git:sparseDownload(remoteUrl, subfolder, destParent, { branch? })` → `{ dest }` — sparse-checkout just one subfolder from a remote, copy it out (temp clone auto-cleaned)
   - `git:listFolders(dirPath)` → `{ folders: [name] }` — immediate subfolders (excludes `.git`)
 - `git:raw(dirPath, commandLine)` → `{ stdout, stderr, ok, error? }` (powers the in-utility git terminal; a leading `git` is tolerated)
+
+### EngInk mirror (Engineering → EngInk)
+LAN, view-only reflection of the native EngInk (Android) notebook. `ipc/engink-mirror.js` runs the sockets; `renderer/engink-mirror.js` draws. No cloud.
+- `engink:start()` → `{ running, host, port, code, clients:[{device,version}] }` — starts (idempotent) the WebSocket server (`ENGINK_MIRROR_PORT`) + UDP discovery responder (`ENGINK_DISCOVERY_PORT`) and returns pairing info.
+- `engink:stop()` → `{ running:false }` · `engink:status()` → same shape as start.
+- Push channels (renderer subscribes): `engink:message` (the tablet's `open`/`page`/`wet`/`wetClear`/`view` traffic + synthetic `server`/`client` status events) and `engink:status` (pairing/connection snapshot). Preload: `window.api.engink.{start,stop,status,onMessage,onStatus,removeListeners}`.
 
 ### Auth
 - `auth:googleSignIn()` → `{ idToken, accessToken }`

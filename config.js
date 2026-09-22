@@ -4,6 +4,12 @@ module.exports = {
   DATA_DIR: 'C:\\Assistant\\appdata',
   FLUIDD_DIR: path.join(__dirname, 'tools', 'fluidd'),
   FLUIDD_PORT: 8765,
+  // EngInk live mirror — the desktop runs a LAN WebSocket server the native EngInk (Android)
+  // app connects to and streams strokes at; the desktop reflects them read-only. A UDP port is
+  // used for zero-config discovery (the tablet broadcasts a probe, the desktop replies with its
+  // host/port/pairing-code). Both are localhost-network only (no cloud).
+  ENGINK_MIRROR_PORT: 8770,   // WebSocket (stroke stream)
+  ENGINK_DISCOVERY_PORT: 8771, // UDP (discovery broadcast/response)
   MOONRAKER_URL: 'http://192.168.0.131:7125',
   ORCASLICER_EXE: path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'OrcaSlicer', 'orca-slicer.exe'),
   ORCASLICER_RESOURCES: path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'OrcaSlicer', 'resources', 'profiles', 'Creality'),

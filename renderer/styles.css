@@ -13078,3 +13078,49 @@ embed.eco-media-content { object-fit: fill; }
   border-color: color-mix(in srgb, var(--eco-accent, #818CF8) 62%, transparent);
   background: color-mix(in srgb, var(--eco-accent, #818CF8) 15%, var(--bg-card, #fff));
 }
+
+/* === EngInk live mirror (Engineering utility) === */
+#view-engink { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.engink-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.engink-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; border-bottom: 1px solid var(--border, rgba(148,163,184,.2));
+}
+.engink-title { font-weight: 700; font-size: 14px; margin-right: 4px; color: var(--text-primary, #E8ECF3); }
+.engink-btn {
+  appearance: none; border: 1px solid var(--border, rgba(148,163,184,.25));
+  background: var(--bg-card, #1E293B); color: var(--text-primary, #E8ECF3);
+  font: inherit; font-size: 13px; font-weight: 600; border-radius: 9px;
+  padding: 7px 12px; cursor: pointer; line-height: 1;
+}
+.engink-btn:hover { border-color: var(--accent, #818CF8); }
+.engink-btn.engink-ic { padding: 7px 10px; min-width: 34px; text-align: center; }
+.engink-btn.active { background: var(--accent, #818CF8); color: #fff; border-color: var(--accent, #818CF8); }
+.engink-pagenav { display: flex; align-items: center; gap: 4px; }
+.engink-pagelabel { font-size: 12px; color: var(--text-muted, #94A3B8); font-variant-numeric: tabular-nums; min-width: 46px; text-align: center; }
+.engink-pair { padding: 12px; border-bottom: 1px solid var(--border, rgba(148,163,184,.15)); }
+.engink-pair-grid { display: flex; gap: 18px; flex-wrap: wrap; }
+.engink-pair-cell { display: flex; flex-direction: column; gap: 3px; }
+.engink-pair-cell b { font-size: 15px; color: var(--text-primary, #E8ECF3); font-variant-numeric: tabular-nums; }
+.engink-pair-cell.engink-code b { font-size: 22px; letter-spacing: .18em; color: var(--accent, #818CF8); }
+.engink-k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--text-muted, #94A3B8); }
+.engink-hint { margin-top: 10px; font-size: 12.5px; color: var(--text-muted, #94A3B8); line-height: 1.5; }
+.engink-hint b { color: var(--text-primary, #E8ECF3); font-weight: 700; }
+.engink-stage {
+  position: relative; flex: 1; min-height: 0; overflow: hidden;
+  background: var(--bg-elevated, #14171D); touch-action: none; cursor: grab;
+}
+.engink-stage:active { cursor: grabbing; }
+.engink-stage canvas { position: absolute; inset: 0; display: block; }
+.engink-stage.engink-waiting::after {
+  content: attr(data-msg); position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  color: var(--text-muted, #94A3B8); font-size: 14px; text-align: center; pointer-events: none; padding: 0 20px;
+}
+
+/* Export PDF: show only the stacked mirrored pages when printing. */
+#engink-print { display: none; }
+#engink-print img { display: block; width: 100%; page-break-after: always; }
+@media print {
+  body.engink-printing > *:not(#engink-print) { display: none !important; }
+  body.engink-printing #engink-print { display: block !important; }
+}

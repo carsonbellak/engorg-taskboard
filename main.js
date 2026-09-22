@@ -29,6 +29,7 @@ const registerFtdi          = require('./ipc/ftdi');
 const registerUartPrograms  = require('./ipc/uart-programs');
 const registerUpdates       = require('./ipc/updates');
 const registerWindow        = require('./ipc/window');
+const registerEnginkMirror  = require('./ipc/engink-mirror');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -227,6 +228,7 @@ app.whenReady().then(() => {
   registerUartPrograms(getMainWindow);
   registerUpdates();
   registerWindow(getMainWindow);
+  registerEnginkMirror(getMainWindow);
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
@@ -261,5 +263,6 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (state.fluiddServer) state.fluiddServer.close();
+  try { registerEnginkMirror.stop(); } catch (_) {}
   app.quit();
 });

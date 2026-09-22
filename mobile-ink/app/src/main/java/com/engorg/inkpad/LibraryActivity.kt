@@ -490,11 +490,51 @@ class LibraryActivity : ComponentActivity() {
     }
 
     private fun notebookMenu(nb: NotebookStore.Notebook) = iconMenu(listOf<Pair<String, () -> Unit>>(
+        Icons.SPLIT to { splitPickDialog(nb) },
         Icons.PEN to { renameDialog(nb.title) { nb.title = it.ifBlank { nb.title }; store.save(); rebuild() } },
         Icons.PALETTE to { coverColorDialog(nb) },
         Icons.FOLDER to { moveDialog(nb) },
         Icons.TRASH to { confirmDelete { store.deleteNotebook(nb); rebuild() } },
     ))
+
+    /** Pick 1–3 more notebooks to open beside [primary] as split panes (up to 4 total). */
+    private fun splitPickDialog(primary: NotebookStore.Notebook) = sheet { box, dialog ->
+        box.addView(iconView(Icons.SPLIT, 24, AppTheme.text))
+        box.addView(TextView(this).apply {
+            text = "Open side by side (up to 4)"; setTextColor(muted()); textSize = 13f
+            setPadding(0, dp(6), 0, dp(2))
+        })
+        val selected = linkedSetOf(primary.id)
+        val ordered = listOf(primary) + store.notebooks.filter { it.id != primary.id }
+        val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        for (rowNb in ordered) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(10), dp(14), dp(10))
+                layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
+                addView(View(this@LibraryActivity).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(rowNb.coverColor) }
+                    layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { rightMargin = dp(12) }
+                })
+                addView(TextView(this@LibraryActivity).apply { text = rowNb.title; setTextColor(AppTheme.text); textSize = 15f; maxLines = 1 })
+            }
+            fun paint() { row.background = pillBg(if (selected.contains(rowNb.id)) AppTheme.accent else AppTheme.elevated) }
+            row.setOnClickListener {
+                if (rowNb.id != primary.id) {
+                    if (selected.contains(rowNb.id)) selected.remove(rowNb.id)
+                    else if (selected.size < 4) selected.add(rowNb.id)
+                    else Toast.makeText(this, "Up to 4 notebooks.", Toast.LENGTH_SHORT).show()
+                    paint()
+                }
+            }
+            paint()
+            list.addView(row)
+        }
+        box.addView(list, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+        actionRow(box, dialog) {
+            startActivity(Intent(this, InkActivity::class.java).putStringArrayListExtra(InkActivity.EXTRA_NOTEBOOK_IDS, ArrayList(selected)))
+        }
+    }
 
     private fun folderMenu(fo: NotebookStore.Folder) = iconMenu(listOf<Pair<String, () -> Unit>>(
         Icons.FOLDER to { currentFolder = fo.id; rebuild() },

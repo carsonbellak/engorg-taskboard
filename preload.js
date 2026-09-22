@@ -298,6 +298,17 @@ const __api = {
     listFolders: (dir) => ipcRenderer.invoke('git:listFolders', dir),
     // raw cli
     raw: (dir, commandLine) => ipcRenderer.invoke('git:raw', dir, commandLine),
+  },
+  // EngInk live mirror — LAN server the native EngInk (Android) app streams strokes to; the
+  // Engineering > EngInk utility reflects them read-only. onMessage delivers both the tablet's
+  // notebook/stroke traffic and synthetic server/client status events.
+  engink: {
+    start: () => ipcRenderer.invoke('engink:start'),
+    stop: () => ipcRenderer.invoke('engink:stop'),
+    status: () => ipcRenderer.invoke('engink:status'),
+    onMessage: (cb) => ipcRenderer.on('engink:message', (e, msg) => cb(msg)),
+    onStatus: (cb) => ipcRenderer.on('engink:status', (e, s) => cb(s)),
+    removeListeners: () => { ipcRenderer.removeAllListeners('engink:message'); ipcRenderer.removeAllListeners('engink:status'); },
   }
 };
 
