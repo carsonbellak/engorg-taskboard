@@ -86,6 +86,10 @@ class LibraryActivity : ComponentActivity() {
         SystemBars.padTopForStatusBar(bar)
         SystemBars.padBottomForNavBar(content)
 
+        // Also surface a newer sideloaded build here (throttled) — not only at the WebView shell's
+        // cold start — so a long-running session still notices updates when you open the library.
+        InkUpdater.checkInBackground(this)
+
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (!goUp()) { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
@@ -172,6 +176,7 @@ class LibraryActivity : ComponentActivity() {
             setBackgroundColor(AppTheme.surface); setPadding(dp(10), dp(8), dp(10), dp(8))
             elevation = dp(4).toFloat()  // hairline separation from the scrolling grid
             addView(backButton); addView(titleView)
+            addView(iconBtn(Icons.MORE) { aboutSheet() }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.DOWNLOAD) { importPicker.launch(arrayOf("*/*")) }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.FOLDER_ADD) { createFolderDialog() }.apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(6) })
             addView(iconBtn(Icons.ADD, accent = true) { createNotebookDialog(currentFolder) })
@@ -473,6 +478,31 @@ class LibraryActivity : ComponentActivity() {
         val input = themedInput(initial)
         box.addView(input, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
         actionRow(box, dialog) { onOk(input.text.toString()) }
+    }
+
+    /** App/version sheet with a manual "Check for updates" — native counterpart to the desktop's
+     *  Settings → About, and a way to verify the auto-updater on demand. */
+    private fun aboutSheet() = sheet { box, dialog ->
+        box.addView(LinearLayout(this).apply { gravity = Gravity.CENTER; addView(iconView(Icons.BOOK, 34, AppTheme.text)) })
+        box.addView(TextView(this).apply {
+            text = "EngInk"; setTextColor(AppTheme.text); textSize = 18f; setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER; setPadding(0, dp(10), 0, 0)
+        })
+        box.addView(TextView(this).apply {
+            text = "Version ${BuildConfig.VERSION_NAME}"; setTextColor(muted()); textSize = 13f
+            gravity = Gravity.CENTER; setPadding(0, dp(4), 0, 0)
+        })
+        box.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = pillBg(AppTheme.accent); foreground = rippleFg(18, Color.argb(0x40, 255, 255, 255))
+            setPadding(dp(16), dp(11), dp(16), dp(11))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(20) }
+            addView(iconView(Icons.DOWNLOAD, 20, AppTheme.onAccent()).apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(12) })
+            addView(TextView(this@LibraryActivity).apply {
+                text = "Check for updates"; setTextColor(AppTheme.onAccent()); textSize = 15f; setTypeface(null, Typeface.BOLD)
+            })
+            setOnClickListener { dialog.dismiss(); InkUpdater.checkNow(this@LibraryActivity) }
+        })
     }
 
     private fun createFolderDialog() = sheet { box, dialog ->

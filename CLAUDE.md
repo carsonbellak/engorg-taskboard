@@ -94,6 +94,34 @@ the repo and opens a PR via GitHub sign-in (no PAT, no git, no terminal). Full d
 
 ---
 
+## 🤖 Development automation (`.claude/`) — use it
+
+This workspace includes a Claude Code automation layer (in `.claude/`, dev-machine tooling —
+see the scope note in `.claude/AUTOMATION.md`; it is **not** shipped by the installer and
+`submit-changes.js` skips it until the repo tracks it) that detects the **common development
+paths** and fans work out to **pre-loaded specialist agents** (so recurring work is fast and
+parity is never forgotten). Posture: **aggressive auto-dispatch**. Full reference:
+`.claude/AUTOMATION.md`.
+
+- **Hooks (the "pointers")** — auto-fire and route you:
+  - editing a parity-relevant `renderer/` file ⇒ flags a pending PWA mirror and tells you to
+    dispatch the **`pwa-mirror`** agent (editing the PWA side auto-clears it);
+  - your prompt's intent (ship / mirror / IPC / integration / utility) ⇒ points you at the
+    matching agent/command;
+  - running `release.js` with unmirrored PWA changes ⇒ **blocked** until you mirror or ack.
+- **Agents** (`.claude/agents/`): `pwa-mirror`, `ipc-feature`, `integration-builder`,
+  `utility-builder`, `parity-auditor` — each carries the verified recipe for its path.
+- **Commands** (`.claude/commands/`): `/push` (= `/ship`), `/ship`, `/mirror`, `/add-ipc`,
+  `/new-integration`, `/new-utility`, `/parity-check`.
+- **`.claude/parity-map.json`** is the source of truth for desktop↔PWA pairs, class-name
+  translations, and ship commands — **keep it current** when you add a shared feature.
+
+**Default behavior:** when a task matches one of these paths, delegate to the named agent
+instead of doing it all inline; always mirror desktop↔PWA in the same task; "push"/"ship"
+⇒ `/ship` (release.js), never a hand-push of the clone.
+
+---
+
 ## File Map
 
 | File | Purpose |

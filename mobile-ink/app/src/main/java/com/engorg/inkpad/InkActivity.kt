@@ -167,8 +167,13 @@ class InkActivity : ComponentActivity() {
         pane.open(id)
         val chip = buildPaneChip(pane)
         pane.addView(chip, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
-            gravity = Gravity.TOP or Gravity.START; leftMargin = dp(10); topMargin = dp(10)
+            gravity = Gravity.TOP or Gravity.START; leftMargin = dp(10); topMargin = dp(72)
         })
+        // The floating toolbar owns the top strip (it sits just below the status bar). Drop the
+        // pane's title/close chip beneath it so it no longer lines up with — and on inner panes
+        // tucks under — the hotbar; there's ample canvas room lower down. Under edge-to-edge this
+        // also folds in the real status-bar inset so the chip never hides behind the clock.
+        SystemBars.marginTopBelowStatusBar(chip, dp(72))
         paneChips[pane] = chip
         return pane
     }
