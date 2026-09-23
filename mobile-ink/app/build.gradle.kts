@@ -30,7 +30,10 @@ android {
         // versionCode makes Android's installer treat new APKs as "not an update" and silently
         // keep the old app (which stranded users on stale import code). Local builds get 101.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 100
-        versionName = "1.3.29"
+        // The in-app updater compares this baked semver against the newest published GitHub
+        // release (see InkUpdater), so CI stamps it with the real release version via
+        // -PappVersionName=<X.Y.Z>. The fallback is only for local dev builds.
+        versionName = (findProperty("appVersionName") as String?)?.takeIf { it.isNotBlank() } ?: "1.3.33"
         buildConfigField("String", "WEB_CLIENT_ID", "\"$webClientId\"")
     }
 

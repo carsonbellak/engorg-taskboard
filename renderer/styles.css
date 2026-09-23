@@ -5700,7 +5700,9 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  grid-auto-flow: row dense; /* backfill gaps left beside a narrow card by a following wide card */
   gap: 14px;
+  align-items: start;
 }
 .stats-card {
   background: var(--bg-card, #fff);
@@ -6151,12 +6153,13 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   display: flex;
   align-items: center;
   gap: 24px;
+  padding: 8px 0 4px;
 }
-.stats-ring-visual.stats-ring-lg { width: 120px; height: 120px; }
-.stats-score-number { font-size: 28px; font-weight: 800; color: var(--text-primary, #0F172A); }
-.stats-score-breakdown { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.stats-ring-visual.stats-ring-lg { width: 140px; height: 140px; }
+.stats-score-number { font-size: 34px; font-weight: 800; color: var(--text-primary, #0F172A); }
+.stats-score-breakdown { flex: 1; display: flex; flex-direction: column; gap: 11px; }
 .stats-score-factor {
-  display: flex; align-items: center; gap: 8px; font-size: 11px; color: #64748B;
+  display: flex; align-items: center; gap: 8px; font-size: 12px; color: #64748B;
 }
 .stats-score-factor span:first-child { width: 110px; flex-shrink: 0; }
 .stats-score-pts { font-weight: 600; color: var(--text-muted, #64748B); width: 35px; text-align: right; flex-shrink: 0; }
@@ -6186,7 +6189,9 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   font-size: 10px; color: var(--text-muted, #64748B); justify-content: flex-end;
 }
 .stats-heatmap-legend .stats-heatmap-cell { width: 12px; height: 12px; }
-.stats-streak-badges { display: flex; gap: 8px; }
+.stats-streak-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Heatmap card is now normal-width, so let its header wrap the streak badges */
+.stats-heatmap-header { flex-wrap: wrap; gap: 6px 8px; }
 .stats-streak-badge {
   font-size: 11px; font-weight: 600; color: #F59E0B; background: #FEF3C7;
   padding: 2px 8px; border-radius: 99px;
@@ -11453,24 +11458,44 @@ body.theme-light .syn-builtin { color: #059669; }
 }
 .email-layout {
   display: grid;
-  grid-template-columns: 230px 320px 1fr;
+  /* First track is a slim icon rail; the sidebar overlays it and expands on hover. */
+  grid-template-columns: 56px 320px 1fr;
   flex: 1;
   min-height: 0;
   width: 100%;
+  position: relative;
   background: var(--bg-primary, #fff);
 }
+/* Keep the list + read panes pinned to tracks 2 & 3 so the (overlaid) sidebar
+   expanding on hover never reflows them. */
+.email-list-pane { grid-column: 2; }
+.email-read-pane { grid-column: 3; }
 
-/* Sidebar */
+/* Sidebar — a slim icon rail that expands to full width on hover, floating over
+   the message list instead of pushing it. */
 .email-sidebar {
+  grid-column: 1;
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 56px;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 12px;
+  padding: 14px 10px;
   border-right: 1px solid var(--border-color, #E2E8F0);
   background: var(--bg-sidebar, #fff);
+  overflow: hidden;
+  transition: width 0.16s ease, box-shadow 0.16s ease, padding 0.16s ease;
+}
+.email-sidebar:hover {
+  width: 230px;
+  padding: 14px 12px;
   overflow-y: auto;
+  box-shadow: 8px 0 28px rgba(0,0,0,0.22);
 }
 .email-compose-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: 10px 14px;
   border: none;
   border-radius: 10px;
@@ -11482,6 +11507,7 @@ body.theme-light .syn-builtin { color: #059669; }
   cursor: pointer;
   box-shadow: var(--btn-shadow, 0 2px 8px rgba(59,130,246,0.3));
 }
+.email-compose-btn .email-btn-ic { font-size: 15px; line-height: 1; }
 .email-compose-btn:active { transform: scale(0.98); }
 .email-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .email-nav-item {
@@ -11519,11 +11545,24 @@ body.theme-light .syn-builtin { color: #059669; }
 .email-folder.active { background: var(--bg-hover, #F1F5F9); color: var(--text-primary, #1E293B); font-weight: 600; }
 .email-folder-loading { font-size: 11px; color: var(--text-faint, #94A3B8); padding: 4px 8px; }
 .email-add-account {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 8px; border: 1px dashed var(--border-color, #E2E8F0); border-radius: 8px;
   background: transparent; color: var(--text-muted, #64748B); font-weight: 600;
   font-size: 12px; font-family: inherit; cursor: pointer;
 }
 .email-add-account:hover { border-color: var(--accent, #3B82F6); color: var(--accent, #3B82F6); }
+.email-add-account .email-btn-ic { font-size: 15px; line-height: 1; }
+
+/* ── Idle (not hovered) = slim icon rail: show only icons / account logos ── */
+.email-sidebar:not(:hover) .email-btn-label,
+.email-sidebar:not(:hover) .email-account-name,
+.email-sidebar:not(:hover) .email-folders,
+.email-sidebar:not(:hover) .email-acct-remove { display: none; }
+.email-sidebar:not(:hover) .email-compose-btn,
+.email-sidebar:not(:hover) .email-add-account { padding: 9px 0; gap: 0; }
+.email-sidebar:not(:hover) .email-nav-item { justify-content: center; padding: 8px 0; gap: 0; }
+.email-sidebar:not(:hover) .email-nav-dot { width: 14px; height: 14px; }
+.email-sidebar:not(:hover) .email-acct-ic.has-logo { width: 22px; height: 22px; }
 
 /* List pane */
 .email-list-pane {
@@ -12540,6 +12579,16 @@ body.theme-light .syn-builtin { color: #059669; }
 .brief-item.done .brief-title { text-decoration: line-through; color: var(--text-muted, #94A3B8); }
 .brief-item.overdue .brief-time { color: #EF4444; font-weight: 700; }
 .brief-empty { text-align: center; color: var(--text-secondary, #475569); font-size: 14px; margin: 10px 0 2px; }
+/* Daily-briefing stat strip */
+.brief-warn { color: #EF4444; font-weight: 600; }
+.brief-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 16px; }
+.brief-chip { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 9px 6px 8px; border-radius: 12px; background: var(--bg-secondary, #F1F5F9); border: 1px solid var(--border-color, #E2E8F0); }
+.brief-chip-emoji { font-size: 15px; line-height: 1.1; }
+.brief-chip-val { font-size: 18px; font-weight: 800; line-height: 1.15; color: var(--text-primary, #1E293B); font-variant-numeric: tabular-nums; }
+.brief-chip-label { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--text-muted, #94A3B8); }
+.brief-chip-good .brief-chip-val { color: #22C55E; }
+.brief-chip-bad .brief-chip-val { color: #EF4444; }
+.brief-chip-warn .brief-chip-val { color: #F59E0B; }
 
 /* ============================================================
    Ecosystem view — the branched "engineering ecosystem" canvas

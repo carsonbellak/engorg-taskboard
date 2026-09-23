@@ -194,7 +194,10 @@ function buildMenu() {
         },
         { type: 'separator' },
         { role: 'reload' }, { role: 'forceReload' }, { type: 'separator' },
-        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' },
+        // Zoom roles are intentionally omitted: their Ctrl +/-/0 accelerators zoom
+        // the whole webContents (every split pane at once). Zoom is handled per
+        // window/pane in the renderer (window-split.js) so a split pane zooms only
+        // itself; the View-menu items call window.windowSplit.zoom*.
         { role: 'togglefullscreen' }
       ]
     },

@@ -21,36 +21,35 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.FileProvider
-import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 
 /**
  * In-app auto-update for the sideloaded APK. There's no Play Store, so we pull new builds from the
- * project's rolling "latest" GitHub Release (where CI attaches [ASSET]) and hand them to Android's
- * package installer.
+ * project's GitHub Releases and hand them to Android's package installer.
  *
- * Version detection sidesteps the fact that the APK's baked versionName never changes: we compare
- * the release ASSET's server-side `updated_at` (when CI last rebuilt & uploaded the APK) against
- * this device's [android.content.pm.PackageInfo.lastUpdateTime] (when the running app was installed).
- * If the published APK is newer than what's installed, there's a new build to offer — and once the
- * user installs it, lastUpdateTime moves past the asset, so the prompt goes away on its own.
+ * Every `release.js` ship pushes a `vX.Y.Z` tag, and CI (release-installer.yml → the `android` job)
+ * attaches that version's `EngOrg-Ink-vX.Y.Z.apk` to the matching GitHub Release. Old version
+ * releases are pruned, so the newest `vX.Y.Z` release always carries the current APK.
+ *
+ * Detection is a plain semantic-version compare: the tag of the newest published `vX.Y.Z` release
+ * vs. this build's baked [BuildConfig.VERSION_NAME] (CI stamps that with the release version — see
+ * app/build.gradle.kts `appVersionName`). If the release is a higher version, there's a real update
+ * to offer. This replaces the old approach of comparing the rolling "latest" APK's upload timestamp
+ * to the device install time, which silently broke whenever "latest" drifted from the tagged release
+ * that users actually install.
  */
 object InkUpdater {
     private const val PREF = "engorg_update"
-    private const val API = "https://api.github.com/repos/carsonbellak/engorg-taskboard/releases/tags/latest"
-    private const val ASSET = "EngOrg-Ink.apk"
+    private const val RELEASES_API = "https://api.github.com/repos/carsonbellak/engorg-taskboard/releases?per_page=30"
     private const val CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000   // check at most this often
-    private const val GRACE_MS = 90_000L                         // asset must beat our install time by this margin
 
-    private data class Release(val url: String, val updatedAtMs: Long, val sizeBytes: Long)
+    private data class Release(val version: String, val apkUrl: String, val sizeBytes: Long)
 
     /**
-     * Throttled background check. On a newer published build, prompts on the UI thread.
+     * Throttled background check. On a newer published version, prompts on the UI thread.
      * [force] ignores the interval and the "Later" suppression (for a manual "check for updates").
      */
     fun checkInBackground(activity: Activity, force: Boolean = false) {
@@ -59,47 +58,70 @@ object InkUpdater {
         if (!force && now - prefs.getLong("lastCheck", 0L) < CHECK_INTERVAL_MS) return
         Thread {
             try {
-                val rel = fetchLatest() ?: return@Thread
+                val rel = fetchNewestRelease() ?: return@Thread
                 prefs.edit().putLong("lastCheck", now).apply()
-                val installedAt = installedAt(activity)
-                if (rel.updatedAtMs <= installedAt + GRACE_MS) return@Thread            // already on this build (or newer)
-                if (!force && rel.updatedAtMs <= prefs.getLong("skipUntil", 0L)) return@Thread  // user said "Later" for this build
+                if (!isNewer(rel.version)) return@Thread                          // already on this version (or newer)
+                if (!force && rel.version == prefs.getString("skipVersion", "")) return@Thread  // user said "Later" for this one
                 if (activity.isFinishing || activity.isDestroyed) return@Thread
                 activity.runOnUiThread { if (!activity.isFinishing) promptUpdate(activity, rel) }
             } catch (_: Exception) { /* offline / rate-limited — try again next interval */ }
         }.start()
     }
 
-    private fun installedAt(activity: Activity): Long = try {
-        activity.packageManager.getPackageInfo(activity.packageName, 0).lastUpdateTime
-    } catch (_: Exception) { 0L }
-
-    private fun fetchLatest(): Release? {
-        val conn = (URL(API).openConnection() as HttpURLConnection).apply {
+    /** The newest published `vX.Y.Z` release that has an EngOrg-Ink APK attached, or null. */
+    private fun fetchNewestRelease(): Release? {
+        val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
             connectTimeout = 12_000; readTimeout = 12_000
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("User-Agent", "EngOrg-Ink")
         }
         try {
             if (conn.responseCode != 200) return null
-            val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
-            val assets = o.optJSONArray("assets") ?: return null
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                if (a.optString("name") == ASSET) {
-                    val url = a.optString("browser_download_url")
-                    if (url.isBlank()) return null
-                    return Release(url, parseIso(a.optString("updated_at")), a.optLong("size", 0L))
+            val arr = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+            var best: Release? = null
+            var bestVer: IntArray? = null
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                if (o.optBoolean("draft") || o.optBoolean("prerelease")) continue
+                val tag = o.optString("tag_name")
+                if (!Regex("^v?\\d+\\.\\d+\\.\\d+$").matches(tag)) continue        // only version tags (skip "latest"/"build-deps")
+                val ver = parseSemver(tag) ?: continue
+                val assets = o.optJSONArray("assets") ?: continue
+                var apkUrl = ""; var size = 0L
+                for (j in 0 until assets.length()) {
+                    val a = assets.getJSONObject(j)
+                    val name = a.optString("name")
+                    if (name.startsWith("EngOrg-Ink") && name.endsWith(".apk")) {
+                        apkUrl = a.optString("browser_download_url"); size = a.optLong("size", 0L); break
+                    }
+                }
+                if (apkUrl.isBlank()) continue
+                if (bestVer == null || compareSemver(ver, bestVer) > 0) {
+                    bestVer = ver; best = Release(tag.removePrefix("v"), apkUrl, size)
                 }
             }
-            return null
+            return best
         } finally { conn.disconnect() }
     }
 
-    private fun parseIso(s: String): Long = try {
-        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-            .apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(s)?.time ?: 0L
-    } catch (_: Exception) { 0L }
+    /** True if [candidate] (e.g. "1.3.34") is a higher semver than this installed build. */
+    private fun isNewer(candidate: String): Boolean {
+        val c = parseSemver(candidate) ?: return false
+        // Unknown installed version (e.g. a local dev build with a non-release name) → don't nag.
+        val installed = parseSemver(BuildConfig.VERSION_NAME) ?: return false
+        return compareSemver(c, installed) > 0
+    }
+
+    private fun parseSemver(s: String?): IntArray? {
+        if (s.isNullOrBlank()) return null
+        val m = Regex("(\\d+)\\.(\\d+)\\.(\\d+)").find(s) ?: return null
+        return intArrayOf(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
+    }
+
+    private fun compareSemver(a: IntArray, b: IntArray): Int {
+        for (i in 0 until 3) if (a[i] != b[i]) return a[i] - b[i]
+        return 0
+    }
 
     // ---------- UI ----------
     private fun promptUpdate(activity: Activity, rel: Release) {
@@ -117,9 +139,9 @@ object InkUpdater {
         box.addView(TextView(activity).apply {
             text = "Update available"; setTextColor(AppTheme.text); textSize = 18f; setTypeface(null, Typeface.BOLD)
         })
-        val sizeMb = if (rel.sizeBytes > 0) String.format(Locale.US, " (%.1f MB)", rel.sizeBytes / 1_048_576.0) else ""
+        val sizeMb = if (rel.sizeBytes > 0) String.format(java.util.Locale.US, " (%.1f MB)", rel.sizeBytes / 1_048_576.0) else ""
         box.addView(TextView(activity).apply {
-            text = "A newer build of EngOrg is ready to install$sizeMb."
+            text = "EngInk ${rel.version} is ready to install$sizeMb."
             setTextColor(muted); textSize = 14f; setPadding(0, dp(8), 0, 0)
         })
 
@@ -144,7 +166,7 @@ object InkUpdater {
             setOnClickListener { onClick() }
         }
 
-        val later = textButton("Later", accent = false) { prefs.edit().putLong("skipUntil", rel.updatedAtMs).apply(); dialog.dismiss() }
+        val later = textButton("Later", accent = false) { prefs.edit().putString("skipVersion", rel.version).apply(); dialog.dismiss() }
         lateinit var update: TextView
         update = textButton("Update", accent = true) {
             later.isEnabled = false; update.isEnabled = false; update.alpha = 0.5f
@@ -173,8 +195,8 @@ object InkUpdater {
             try {
                 val dir = File(activity.cacheDir, "updates").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
-                val out = File(dir, ASSET)
-                val conn = (URL(rel.url).openConnection() as HttpURLConnection).apply {
+                val out = File(dir, "EngOrg-Ink.apk")
+                val conn = (URL(rel.apkUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 15_000; readTimeout = 30_000; instanceFollowRedirects = true
                     setRequestProperty("User-Agent", "EngOrg-Ink")
                 }

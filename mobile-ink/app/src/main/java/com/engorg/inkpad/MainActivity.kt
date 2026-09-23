@@ -39,6 +39,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var googleClient: GoogleSignInClient
     private lateinit var signInLauncher: ActivityResultLauncher<Intent>
 
+    // Snapshot of the ink-app prefs we last synced with the profile. Stays null until the user has
+    // opened Ink at least once (so we never push device defaults before reading the profile); after
+    // that, returning from Ink pushes any change back. See onResume.
+    private var lastSyncedInkSettings: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -99,7 +104,14 @@ class MainActivity : ComponentActivity() {
                             AppTheme.saveFromJson(this@MainActivity, theme)
                             view.evaluateJavascript(ACCOUNTS_JS) { accounts ->
                                 EmailPrefs.saveAccounts(this@MainActivity, accounts)
-                                startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                                // Adopt the ink-app preferences saved on the user's profile (pen,
+                                // default email, new-notebook defaults) so they're the same on
+                                // every Android device.
+                                view.evaluateJavascript(INK_SETTINGS_JS) { settings ->
+                                    InkSettings.applyJson(this@MainActivity, settings)
+                                    lastSyncedInkSettings = InkSettings.toJson(this@MainActivity)
+                                    startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
+                                }
                             }
                         }
                         return true
@@ -149,6 +161,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Returning from the native Ink/Library screens: if a synced pref changed there, push it
+        // back to the profile through the PWA. Guarded on lastSyncedInkSettings so we never write
+        // before we've read the profile at least once (avoids clobbering it with device defaults).
+        val last = lastSyncedInkSettings ?: return
+        if (!::web.isInitialized) return
+        val cur = InkSettings.toJson(this)
+        if (cur != last) {
+            lastSyncedInkSettings = cur
+            web.evaluateJavascript(
+                "window.__saveInkSettings && window.__saveInkSettings(${JSONObject.quote(cur)})",
+                null,
+            )
+        }
+    }
+
     override fun onDestroy() {
         web.destroy()
         super.onDestroy()
@@ -168,6 +197,12 @@ class MainActivity : ComponentActivity() {
   });
 })()
 """
+
+        // Reads the ink-app preferences the PWA holds for this user (from users/{uid}/data/
+        // inkSettings, exposed synchronously via window.__readInkSettings). Empty object before the
+        // profile listener has populated it, or if the bridge isn't present.
+        private const val INK_SETTINGS_JS =
+            "(function(){try{return (window.__readInkSettings&&window.__readInkSettings())||'{}';}catch(_){return '{}';}})()"
 
         // Reads the signed-in account(s) from the PWA's Firebase session so the ink app can offer
         // "email this notebook to me" with the right address + profile picture.

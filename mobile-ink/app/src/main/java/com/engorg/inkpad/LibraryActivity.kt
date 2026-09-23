@@ -443,7 +443,9 @@ class LibraryActivity : ComponentActivity() {
 
     // ---- create / rename ----
     private fun createNotebookDialog(folderId: String?) {
-        var cover = covers.random(); var paper = "GRID"; var pageColor = Color.WHITE
+        // Start from the defaults saved on the user's profile (synced across devices) so the dialog
+        // reuses your last choice instead of resetting each time.
+        var cover = InkSettings.nbCover(this); var paper = InkSettings.nbPaper(this); var pageColor = InkSettings.nbPageColor(this)
         sheet { box, dialog ->
             box.addView(iconView(Icons.BOOK, 26, AppTheme.text))
             val input = themedInput("")
@@ -452,6 +454,7 @@ class LibraryActivity : ComponentActivity() {
             box.addView(fieldRow(Icons.GRID, paperChipRow(paper) { paper = it }))
             box.addView(fieldRow(Icons.DROPLET, colorChipRow(pageColors, pageColor) { pageColor = it }))
             actionRow(box, dialog) {
+                InkSettings.setNotebookDefaults(this, paper, cover, pageColor)  // remember + sync the choice
                 val nb = store.createNotebook(input.text.toString().ifBlank { "Untitled" }, folderId, cover, paper, pageColor)
                 rebuild(); openNotebook(nb)
             }

@@ -124,7 +124,7 @@ function renderStats() {
   const recentlyCompleted = completed
     .filter(t => t.completedAt)
     .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
-    .slice(0, 8);
+    .slice(0, 5);
 
   // SVG ring helper
   function ring(pctVal, size, stroke, color, bgColor) {
@@ -572,7 +572,7 @@ function renderStats() {
           <h3 class="stats-card-title">Productivity Score</h3>
           <div class="stats-score-container">
             <div class="stats-ring-visual stats-ring-lg">
-              ${ring(productivityScore, 120, 10, productivityScore >= 70 ? '#22C55E' : productivityScore >= 40 ? '#F59E0B' : '#EF4444')}
+              ${ring(productivityScore, 140, 11, productivityScore >= 70 ? '#22C55E' : productivityScore >= 40 ? '#F59E0B' : '#EF4444')}
               <div class="stats-ring-center stats-score-number">${productivityScore}</div>
             </div>
             <div class="stats-score-breakdown">
@@ -606,8 +606,8 @@ function renderStats() {
         </div>
 
         <!-- Activity Heatmap -->
-        <div class="stats-card stats-card-wide">
-          <div class="stats-card-header">
+        <div class="stats-card">
+          <div class="stats-card-header stats-heatmap-header">
             <h3 class="stats-card-title">Activity Heatmap</h3>
             <div class="stats-streak-badges">
               <span class="stats-streak-badge" title="Current streak">\uD83D\uDD25 ${currentStreak}d streak</span>

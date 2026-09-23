@@ -69,9 +69,11 @@
       frame.className = 'split-frame';
       const theme = config.themes && config.themes[i];
       const noSidebar = config.sidebars && config.sidebars[i];
+      const zoom = config.zooms && config.zooms[i];
       frame.src = `index.html?embedded=1&pane=${i}`
         + (theme ? '&theme=' + encodeURIComponent(theme) : '')
-        + (noSidebar ? '&nosidebar=1' : '');
+        + (noSidebar ? '&nosidebar=1' : '')
+        + (zoom ? '&zoom=' + encodeURIComponent(zoom) : '');
       root.appendChild(frame);
     }
     buildShellControls();
@@ -115,6 +117,11 @@
       const c = readConfig();
       c.sidebars = c.sidebars || [];
       c.sidebars[d.index] = !!d.hidden;
+      writeConfig(c);
+    } else if (d.type === 'split-zoom' && typeof d.index === 'number' && d.index >= 0) {
+      const c = readConfig();
+      c.zooms = c.zooms || [];
+      c.zooms[d.index] = d.level || 0;
       writeConfig(c);
     } else if (d.type === 'split-setlayout' && LAYOUTS[d.layout]) {
       applyLayout(d.layout);
@@ -183,6 +190,45 @@
     else { try { hidden ? localStorage.setItem(LS_LOCAL_SIDEBAR, '1') : localStorage.removeItem(LS_LOCAL_SIDEBAR); } catch {} }
   }
 
+  // ---- per-window / per-pane view zoom (local, like theme & sidebar) --------
+  // In a split, every pane shares ONE webContents, so browser-level zoom
+  // (webContents.setZoomLevel, via the View-menu roles) would zoom EVERY pane at
+  // once. Instead a pane zooms only its OWN document via CSS `zoom`; the top
+  // (non-split) window keeps real browser zoom. Level mirrors Electron's zoom
+  // levels (factor = 1.2^level, ±0.5 per step). Persisted per pane (rides the
+  // iframe URL + reported to the shell) so it survives the reloads that layout
+  // changes trigger.
+  const ZOOM_STEP = 0.5, ZOOM_MIN = -3.5, ZOOM_MAX = 5;
+  function startupZoomLevel() {
+    if (EMBEDDED) { const z = parseFloat(params.get('zoom')); return Number.isFinite(z) ? z : 0; }
+    return 0;
+  }
+  let zoomLevel = startupZoomLevel();
+  function applyZoom() {
+    try {
+      document.documentElement.style.zoom =
+        Math.abs(zoomLevel) < 1e-6 ? '' : String(Math.pow(1.2, zoomLevel));
+    } catch {}
+  }
+  function commitZoom(level) {
+    zoomLevel = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, level));
+    applyZoom();
+    if (EMBEDDED) { try { parent.postMessage({ type: 'split-zoom', index: PANE_INDEX, level: zoomLevel }, '*'); } catch {} }
+  }
+  function zoomIn() {
+    // Top window → real browser zoom (whole app); a pane → just this pane.
+    if (!EMBEDDED) { try { window.api.menu.action('zoomIn'); } catch {} return; }
+    commitZoom(zoomLevel + ZOOM_STEP);
+  }
+  function zoomOut() {
+    if (!EMBEDDED) { try { window.api.menu.action('zoomOut'); } catch {} return; }
+    commitZoom(zoomLevel - ZOOM_STEP);
+  }
+  function zoomReset() {
+    if (!EMBEDDED) { try { window.api.menu.action('zoomReset'); } catch {} return; }
+    commitZoom(0);
+  }
+
   window.windowSplit = {
     EMBEDDED,
     isShell: () => isShell,
@@ -197,12 +243,31 @@
     startupThemeOverride,
     sidebarHidden: () => runtimeSidebarHidden,
     setSidebarHidden,
+    zoomIn,
+    zoomOut,
+    zoomReset,
+    zoomLevel: () => zoomLevel,
   };
 
   if (EMBEDDED) document.documentElement.classList.add('is-embedded');
   // Apply the saved sidebar visibility up front (skip the shell — it has no
   // sidebar of its own; each pane applies its own from ?nosidebar=1).
   if (!isShell) applySidebarClass(runtimeSidebarHidden);
+  // Restore this pane's own zoom (the shell just tiles iframes — nothing to zoom).
+  if (EMBEDDED) applyZoom();
+
+  // Ctrl +/-/0 zoom the FOCUSED pane only, matching the View-menu items. The
+  // global zoom-role accelerators were removed from the native menu (main.js),
+  // so this owns those keys. Attached in real app windows/panes, not the shell
+  // container (whose keystrokes belong to whichever pane has focus).
+  if (!isShell) {
+    window.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomIn(); }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomOut(); }
+      else if (e.key === '0') { e.preventDefault(); zoomReset(); }
+    });
+  }
 
   // Render the shell now (DOM up to this script already exists), before app.js.
   if (isShell) {

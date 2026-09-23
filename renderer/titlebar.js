@@ -37,9 +37,11 @@
       { label: 'Reload', action: 'reload', accel: 'Ctrl+R' },
       { label: 'Force Reload', action: 'forceReload' },
       { sep: true },
-      { label: 'Reset Zoom', action: 'zoomReset' },
-      { label: 'Zoom In', action: 'zoomIn' },
-      { label: 'Zoom Out', action: 'zoomOut' },
+      // Route zoom through windowSplit so a split PANE zooms only itself (its own
+      // CSS zoom), while the non-split window still uses real browser zoom.
+      { label: 'Reset Zoom', onClick: () => (ws ? ws.zoomReset() : api.menu.action('zoomReset')) },
+      { label: 'Zoom In', onClick: () => (ws ? ws.zoomIn() : api.menu.action('zoomIn')) },
+      { label: 'Zoom Out', onClick: () => (ws ? ws.zoomOut() : api.menu.action('zoomOut')) },
       { sep: true },
       { label: 'Toggle Fullscreen', action: 'toggleFullscreen', accel: 'F11' },
     ];

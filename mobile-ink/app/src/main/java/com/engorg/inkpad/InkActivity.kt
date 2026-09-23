@@ -161,12 +161,15 @@ class InkActivity : ComponentActivity() {
     // ---------- dynamic split panes (add/close/swap from within a notebook) ----------
     private fun makePane(id: String?): PageCanvas {
         val pane = PageCanvas(this, store, hostImpl)
+        // Open (which sets pane.notebook) BEFORE building the chip — the chip reads
+        // pane.notebook.title, and notebook is a lateinit, so building it first crashes
+        // the whole notebook open with UninitializedPropertyAccessException.
+        pane.open(id)
         val chip = buildPaneChip(pane)
         pane.addView(chip, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
             gravity = Gravity.TOP or Gravity.START; leftMargin = dp(10); topMargin = dp(10)
         })
         paneChips[pane] = chip
-        pane.open(id)
         return pane
     }
 

@@ -40,7 +40,16 @@ jobs:
 
       - name: Build debug APK
         working-directory: mobile-ink
-        run: gradle assembleDebug --no-daemon --stacktrace
+        shell: bash
+        run: |
+          # Stamp the APK's versionName with the repo's current package.json version so the
+          # "latest" sideload build reports a real semver (the in-app updater compares versions).
+          VER=$(node -p "require('../package.json').version" 2>/dev/null || echo "")
+          if [ -n "$VER" ]; then
+            gradle assembleDebug --no-daemon --stacktrace -PappVersionName="$VER"
+          else
+            gradle assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Stage APK
         shell: bash

@@ -59,9 +59,9 @@ class EmailView {
     root.innerHTML = `
       <div class="email-layout">
         <aside class="email-sidebar">
-          <button class="email-compose-btn" id="email-compose">&#9998; Compose</button>
+          <button class="email-compose-btn" id="email-compose" title="Compose"><span class="email-btn-ic">&#9998;</span><span class="email-btn-label">Compose</span></button>
           <div class="email-nav" id="email-nav"></div>
-          <button class="email-add-account" id="email-add-account">+ Add account</button>
+          <button class="email-add-account" id="email-add-account" title="Add account"><span class="email-btn-ic">&#43;</span><span class="email-btn-label">Add account</span></button>
         </aside>
         <section class="email-list-pane">
           <div class="email-list-header">
@@ -127,8 +127,8 @@ class EmailView {
     const nav = document.getElementById('email-nav');
     let html = '';
     if (this.accounts.length > 1) {
-      html += `<div class="email-nav-item ${this.selection === 'unified' ? 'active' : ''}" data-sel="unified">
-        <span class="email-nav-dot" style="background:linear-gradient(135deg,#3B82F6,#8B5CF6)"></span>All Inboxes</div>`;
+      html += `<div class="email-nav-item ${this.selection === 'unified' ? 'active' : ''}" data-sel="unified" title="All Inboxes">
+        <span class="email-nav-dot" style="background:linear-gradient(135deg,#3B82F6,#8B5CF6)"></span><span class="email-account-name">All Inboxes</span></div>`;
     }
     this._logoCache = this._logoCache || {};
     for (const a of this.accounts) {

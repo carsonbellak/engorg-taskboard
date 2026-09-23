@@ -1,25 +1,27 @@
-// Weekly briefings — two automatic popups, both rendered through the shared appTour
-// slideshow engine (tour.js), so they match the onboarding / What's-New look:
+// Daily briefings — an automatic once-a-day popup rendered through the shared appTour
+// slideshow engine (tour.js), so it matches the onboarding / What's-New look.
 //
-//   • Monday  "Week ahead"   — an itinerary of everything due this week (notes with a
-//     due date + calendar events), grouped by day. Shown once, on the first launch of
-//     the week (gated by localStorage per Monday date).
-//   • Friday  "Week wrapped" — a recap of what you finished this week plus what's left
-//     for the weekend. Shown once on Friday, the moment every assignment due this week
-//     is complete (re-checked live on tasks-changed), with a 5 PM fallback so it never
-//     gets stuck if something's left undone.
+// It fires at most once per calendar day (gated by a localStorage flag per YYYY-MM-DD)
+// on the first launch of the day, and always leads with:
+//   1. a greeting + a one-line summary of the day's load + a strip of relevant stats
+//      (streak, done this week, completion rate, net flow, overdue, stale);
+//   2. today's agenda — anything due today + today's events, with overdue carryover.
+// Two days get an extra, day-appropriate slide folded on:
+//   • Monday  → "This week's itinerary" (everything due this week, grouped by day);
+//   • Friday  → "Week wrapped" recap + the weekend/overdue outlook.
 //
 // Everything here reads the in-memory dataManager collections; nothing is persisted
-// except the tiny per-week "already shown" flags in localStorage (device-local).
+// except the tiny per-day "already shown" flag in localStorage (device-local).
 
 const briefings = (() => {
   const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const FRIDAY_FALLBACK_HOUR = 17; // show the Friday wrap-up by 5 PM even if work is left
   const esc = (s) => { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; };
   const pad = (n) => String(n).padStart(2, '0');
   const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const ONE_WEEK = 7 * ONE_DAY;
 
-  // Monday (00:00) of the week containing d — the week anchor used for gating + ranges.
+  // Monday (00:00) of the week containing d — the week anchor used for ranges + stats.
   function mondayOf(d) {
     const x = new Date(d); x.setHours(0, 0, 0, 0);
     x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); // Sun→-6, Mon→0, … Sat→-5
@@ -36,9 +38,9 @@ const briefings = (() => {
 
   const projOf = (id) => (dataManager.projects || []).find(p => p.id === id) || null;
 
-  // Unified item shape used by both briefings, gathered from notes (by dueDate) and
-  // calendar events (by date) within [startStr, endStr] inclusive (YYYY-MM-DD strings
-  // compare lexicographically, so no Date objects needed for the range test).
+  // Unified item shape, gathered from notes (by dueDate) and calendar events (by date)
+  // within [startStr, endStr] inclusive (YYYY-MM-DD strings compare lexicographically,
+  // so no Date objects needed for the range test).
   function collectItems(startStr, endStr) {
     const now = new Date();
     const items = [];
@@ -101,7 +103,139 @@ const briefings = (() => {
     return html ? `<div class="brief-list">${html}</div>` : `<p class="brief-empty">${esc(emptyMsg)}</p>`;
   }
 
-  // ── Monday: the week ahead ──────────────────────────────────────────────────
+  // ── Relevant stats (a light echo of the Stats dashboard's headline numbers) ─────
+  function computeStats(now) {
+    const tasks = dataManager.tasks || [];
+    const nowMs = now.getTime();
+    const todayStr = ymd(now);
+    const yStr = ymd(new Date(nowMs - ONE_DAY));
+    const wkStartMs = mondayOf(now).getTime();
+
+    const completed = tasks.filter(t => t.completed);
+    const total = tasks.length;
+    const rate = total ? Math.round((completed.length / total) * 100) : 0;
+
+    const compDay = (t) => (t.completedAt ? ymd(new Date(t.completedAt)) : null);
+    const completedToday = completed.filter(t => compDay(t) === todayStr).length;
+    const completedYest = completed.filter(t => compDay(t) === yStr).length;
+    const completedThisWeek = completed.filter(t => t.completedAt && new Date(t.completedAt).getTime() >= wkStartMs).length;
+    const createdThisWeek = tasks.filter(t => t.createdAt && new Date(t.createdAt).getTime() >= wkStartMs).length;
+    const net = completedThisWeek - createdThisWeek;
+
+    const last30 = completed.filter(t => t.completedAt && (nowMs - new Date(t.completedAt).getTime()) < 30 * ONE_DAY).length;
+    const velocity = +(last30 / (30 / 7)).toFixed(1);
+
+    const incomplete = tasks.filter(t => !t.completed);
+    const stale = incomplete.filter(t => (nowMs - new Date(t.modifiedAt || t.createdAt).getTime()) > ONE_WEEK).length;
+
+    let dueTodayTotal = 0, dueTodayLeft = 0, overdue = 0;
+    for (const t of tasks) {
+      if (!t.dueDate) continue;
+      if (t.dueDate === todayStr) { dueTodayTotal++; if (!t.completed) dueTodayLeft++; }
+      if (!t.completed && new Date(t.dueDate + 'T' + (t.dueTime || '23:59')) < now) overdue++;
+    }
+
+    // Current completion streak (must run up to today or yesterday).
+    const days = [...new Set(completed.filter(t => t.completedAt).map(t => ymd(new Date(t.completedAt))))].sort();
+    let streak = 0;
+    if (days.length) {
+      const last = days[days.length - 1];
+      if (last === todayStr || last === yStr) {
+        streak = 1;
+        for (let i = days.length - 2; i >= 0; i--) {
+          if ((new Date(days[i + 1]) - new Date(days[i])) / ONE_DAY <= 1) streak++; else break;
+        }
+      }
+    }
+
+    return { rate, completedToday, completedYest, completedThisWeek, createdThisWeek,
+             net, velocity, stale, dueTodayTotal, dueTodayLeft, overdue, streak };
+  }
+
+  function chip(emoji, value, label, tone) {
+    return `<div class="brief-chip${tone ? ' brief-chip-' + tone : ''}">
+      <span class="brief-chip-emoji">${emoji}</span>
+      <span class="brief-chip-val">${esc(value)}</span>
+      <span class="brief-chip-label">${esc(label)}</span>
+    </div>`;
+  }
+  function statChipsHtml(s) {
+    return `<div class="brief-chips">
+      ${chip('🔥', s.streak, 'day streak')}
+      ${chip('✅', s.completedThisWeek, 'done this wk')}
+      ${chip('📊', s.rate + '%', 'completion')}
+      ${chip('⚖️', (s.net >= 0 ? '+' : '') + s.net, 'net this wk', s.net >= 0 ? 'good' : 'bad')}
+      ${chip('⏳', s.overdue, 'overdue', s.overdue > 0 ? 'bad' : '')}
+      ${chip('💤', s.stale, 'stale', s.stale > 0 ? 'warn' : '')}
+    </div>`;
+  }
+
+  function greeting(now) {
+    const h = now.getHours();
+    if (h < 12) return { emoji: '☀️', word: 'Good morning' };
+    if (h < 17) return { emoji: '🌤️', word: 'Good afternoon' };
+    return { emoji: '🌙', word: 'Good evening' };
+  }
+
+  // Today's agenda: any still-overdue carryover, then everything on today's plate.
+  function todayAgendaHtml(now, todayItems) {
+    const yesterday = ymd(new Date(now.getTime() - ONE_DAY));
+    const overdue = collectItems('1970-01-01', yesterday).filter(i => !i.completed && i.overdue);
+    const rows = [...todayItems].sort((a, b) => a.sortT.localeCompare(b.sortT) || a.title.localeCompare(b.title));
+
+    let html = '';
+    if (overdue.length) {
+      html += `<div class="brief-day brief-day-overdue"><span class="brief-day-name">Overdue</span>
+          <span class="brief-day-count">${overdue.length}</span></div>
+        <ul class="brief-ul">${overdue.sort((a, b) => a.dateStr.localeCompare(b.dateStr)).map(itemRow).join('')}</ul>`;
+    }
+    if (rows.length) {
+      html += `<div class="brief-day"><span class="brief-day-name">Today</span>
+          <span class="brief-day-date">${fmtDayDate(now)}</span><span class="brief-day-count">${rows.length}</span></div>
+        <ul class="brief-ul">${rows.map(itemRow).join('')}</ul>`;
+    }
+    if (!html) return '<p class="brief-empty">Nothing due today and nothing overdue — enjoy the open day. 🌿</p>';
+    return `<div class="brief-list">${html}</div>`;
+  }
+
+  // ── The daily briefing ──────────────────────────────────────────────────────
+  function dailySlides(now) {
+    const s = computeStats(now);
+    const g = greeting(now);
+    const todayStr = ymd(now);
+    const todayItems = collectItems(todayStr, todayStr);
+    const dueNotes = todayItems.filter(i => i.kind === 'note' && !i.completed).length;
+    const events = todayItems.filter(i => i.kind === 'event' && !i.completed).length;
+
+    const bits = [];
+    if (dueNotes) bits.push(`<b>${dueNotes}</b> due`);
+    if (events) bits.push(`<b>${events}</b> event${events === 1 ? '' : 's'}`);
+    let summary = bits.length
+      ? `You have ${bits.join(' and ')} today.`
+      : "Nothing's on the calendar for today — a clear runway. 🛫";
+    if (s.overdue) summary += ` <span class="brief-warn">⚠️ ${s.overdue} still overdue.</span>`;
+
+    const dateLine = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    const slides = [
+      { emoji: g.emoji, title: g.word,
+        bodyHtml: `<p class="brief-range">${esc(dateLine)}</p><p>${summary}</p>${statChipsHtml(s)}` },
+      { emoji: '🗓️', title: "Today's agenda", bodyHtml: todayAgendaHtml(now, todayItems) },
+    ];
+
+    // Day-appropriate extra: the week ahead on Monday, the week wrapped on Friday.
+    const dow = now.getDay();
+    if (dow === 1) {
+      const wk = weekAheadSlides(now);
+      slides.push(wk[wk.length - 1]); // "This week's itinerary"
+    } else if (dow === 5) {
+      const wr = weekReviewSlides(now);
+      slides.push(wr[0], wr[1]); // "Week wrapped" recap + weekend/overdue outlook
+    }
+    return slides;
+  }
+
+  // ── Monday: the week ahead (itinerary slide is reused by the Monday daily brief) ─
   function weekAheadSlides(now) {
     const weekStart = mondayOf(now);
     const weekEnd = addDays(weekStart, 6);
@@ -155,7 +289,6 @@ const briefings = (() => {
     // Left for the weekend: incomplete items due Sat/Sun, plus any still-overdue carryover.
     const weekendItems = collectItems(ymd(saturday), ymd(sunday)).filter(i => !i.completed);
     const overdue = collectItems('1970-01-01', ymd(friday)).filter(i => !i.completed && i.overdue);
-    // De-dupe overdue vs weekend (different ranges, so no overlap) — just concat.
     const left = overdue.concat(weekendItems);
 
     let leftHtml;
@@ -188,66 +321,34 @@ const briefings = (() => {
   const seen = (key) => { try { return !!localStorage.getItem(key); } catch { return false; } };
   const markSeen = (key) => { try { localStorage.setItem(key, new Date().toISOString()); } catch {} };
 
-  function assignmentsDueThroughFriday(now) {
-    const weekStart = mondayOf(now);
-    const fri = ymd(addDays(weekStart, 4));
-    const start = ymd(weekStart);
-    return (dataManager.tasks || []).filter(t =>
-      t.category === 'assignment' && t.dueDate && t.dueDate >= start && t.dueDate <= fri);
-  }
-
   async function showTour(slides, finishLabel) {
     if (typeof appTour === 'undefined' || appTour.isActive()) return false;
     await appTour.run(slides, { finishLabel: finishLabel || 'Got it' });
     return true;
   }
 
-  // Called at startup and again on tasks-changed. Idempotent: the per-week localStorage
-  // flags mean each briefing shows at most once per week regardless of how often we run.
+  // Called at startup and again on tasks-changed. Idempotent: the per-day localStorage
+  // flag means the briefing shows at most once per calendar day regardless of how often
+  // this runs. The flag is set only once the popup has actually shown — otherwise a
+  // briefing blocked behind onboarding would be burned for the whole day unseen.
   async function maybeShow() {
     if (typeof dataManager === 'undefined' || typeof appTour === 'undefined') return false;
     if (appTour.isActive()) return false;
     const now = new Date();
-    const dow = now.getDay();
-    const wkKey = ymd(mondayOf(now));
-
-    // Mark the week "seen" only once the popup has actually shown — otherwise a briefing
-    // that's blocked (e.g. onboarding still on screen) would be burned for the whole week
-    // without ever appearing, which is why these never surfaced before.
-    if (dow === 1) { // Monday
-      const key = 'engorg_brief_mon_' + wkKey;
-      if (seen(key)) return false;
-      const shown = await showTour(weekAheadSlides(now), 'Let’s go');
-      if (shown) markSeen(key);
-      return shown;
-    }
-
-    if (dow === 5) { // Friday
-      const key = 'engorg_brief_fri_' + wkKey;
-      if (seen(key)) return false;
-      const asg = assignmentsDueThroughFriday(now);
-      const allDone = asg.length > 0 && asg.every(t => t.completed);
-      const pastFallback = now.getHours() >= FRIDAY_FALLBACK_HOUR;
-      if (!allDone && !pastFallback) return false; // wait until finished (or the evening)
-      const shown = await showTour(weekReviewSlides(now), 'Have a great weekend');
-      if (shown) markSeen(key);
-      return shown;
-    }
-
-    return false;
+    const key = 'engorg_brief_day_' + ymd(now);
+    if (seen(key)) return false;
+    const shown = await showTour(dailySlides(now), "Let's go");
+    if (shown) markSeen(key);
+    return shown;
   }
 
   // Manual previews (ignore gating) — handy for testing and for the Settings button.
+  function previewDaily() { return showTour(dailySlides(new Date()), 'Close'); }
   function previewWeekAhead() { return showTour(weekAheadSlides(new Date()), 'Close'); }
   function previewWeekReview() { return showTour(weekReviewSlides(new Date()), 'Close'); }
-  // Day-aware manual trigger for the "Show weekly briefing" button: the wrap-up recap
-  // on Fri/Sat/Sun, the week-ahead itinerary otherwise.
-  function preview() {
-    const dow = new Date().getDay();
-    return (dow === 5 || dow === 6 || dow === 0) ? previewWeekReview() : previewWeekAhead();
-  }
+  const preview = previewDaily; // the "Show briefing" button always shows today's brief
 
-  return { maybeShow, preview, previewWeekAhead, previewWeekReview };
+  return { maybeShow, preview, previewDaily, previewWeekAhead, previewWeekReview };
 })();
 
 window.briefings = briefings;

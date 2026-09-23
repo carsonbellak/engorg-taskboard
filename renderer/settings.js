@@ -1246,10 +1246,10 @@ function renderSettings() {
       </div>
       <div class="settings-section">
         <h3 class="settings-section-title">Tour &amp; Tips</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update. The weekly briefing normally pops on Monday (week ahead) and Friday (week wrapped) — show it any time here.</p>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update. The daily briefing pops once a day with your agenda and key stats (plus the week ahead on Monday and the week wrapped on Friday) — show it any time here.</p>
         <button id="settings-replay-tour" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Take the tour</button>
         <button id="settings-replay-whatsnew" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">What's new</button>
-        <button id="settings-show-briefing" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">Weekly briefing</button>
+        <button id="settings-show-briefing" class="settings-btn" style="margin-left:10px;padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600">Daily briefing</button>
       </div>
       <!-- App Distribution (Build Installer) -->
       <div class="settings-section">

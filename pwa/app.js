@@ -30,6 +30,36 @@ window.__nativeGoogleCredential = async function (idToken) {
   }
 };
 
+// ===================== NATIVE INK APP SETTINGS BRIDGE =====================
+// The native Android "EngInk" shell keeps a few of its own preferences — pen color/size, the
+// "email notebook to" address, and new-notebook defaults (paper, cover/page color). To make them
+// the same on every Android device, they live in the user's profile at users/{uid}/data/inkSettings
+// and are bridged through this WebView: the native side reads window.__readInkSettings() when it
+// opens Ink and pushes changes back via window.__saveInkSettings(json) when it returns. A profile
+// listener (setupListeners) keeps the cache fresh. No-ops in a normal browser.
+const INK_SETTINGS_LS_KEY = 'engorg_ink_settings';
+let inkSettings = {};
+try { inkSettings = JSON.parse(localStorage.getItem(INK_SETTINGS_LS_KEY) || '{}') || {}; } catch (e) { inkSettings = {}; }
+
+// Synchronous read for the native side (its evaluateJavascript reads the returned value).
+window.__readInkSettings = function () {
+  try { return JSON.stringify(inkSettings || {}); } catch (e) { return '{}'; }
+};
+
+// Merge the native side's changed prefs into the cache + localStorage + the profile.
+window.__saveInkSettings = async function (json) {
+  try {
+    const patch = (typeof json === 'string') ? JSON.parse(json) : (json || {});
+    if (!patch || typeof patch !== 'object') return;
+    inkSettings = { ...inkSettings, ...patch };
+    try { localStorage.setItem(INK_SETTINGS_LS_KEY, JSON.stringify(inkSettings)); } catch (e) {}
+    const uid = auth.currentUser && auth.currentUser.uid;
+    if (!uid) return;
+    await db.collection('users').doc(uid).collection('data').doc('inkSettings')
+      .set({ ...inkSettings, _updatedAt: Date.now() }, { merge: true });
+  } catch (e) { console.warn('inkSettings save failed:', e); }
+};
+
 const IN_APP_WEBVIEW = /\bwv\b/.test(navigator.userAgent || '');
 const NATIVE_AUTH = !!(window.AndroidAuth && typeof window.AndroidAuth.signInWithGoogle === 'function');
 // Only hide the web Google button in a WebView that has NO native bridge (there it can't
@@ -319,6 +349,8 @@ let editingPurchaseId = null;
 let calendarMonth = new Date();
 let selectedCalDate = null; // YYYY-MM-DD of the open day (persists across re-renders)
 let calShowCompleted = false; // day list: reveal the collapsed "completed" section
+let calView = 'month';        // 'month' | 'week' | 'agenda' — mirrors the desktop calendar
+let calWeekStart = null;      // Monday of the visible week (lazy-init in renderCalendar)
 let filters = { priority: '', category: '', overdue: false };
 let noteSortMode = 'priority';
 let noteColorMode = 'category';
@@ -498,6 +530,18 @@ function setupListeners(uid) {
     render();
   });
   listeners.push(unsubPwa);
+
+  // Native ink app preferences (pen, default email, new-notebook defaults) — its own doc so the
+  // Android EngInk shell is the same on every device. Kept in the cache the native bridge reads.
+  const unsubInk = base.doc('inkSettings').onSnapshot(snap => {
+    if (!snap.exists) return; // first run → keep whatever the device has
+    const d = snap.data();
+    delete d._updatedAt;
+    delete d._source;
+    inkSettings = { ...inkSettings, ...d };
+    try { localStorage.setItem(INK_SETTINGS_LS_KEY, JSON.stringify(inkSettings)); } catch (e) {}
+  });
+  listeners.push(unsubInk);
 
   const unsubProjects = base.doc('projects').onSnapshot(snap => {
     if (!snap.exists) return;
@@ -1512,213 +1556,539 @@ function bindTimelineEvents() {
 }
 
 // ===================== CALENDAR VIEW =====================
+// A full mirror of the desktop calendar (renderer/taskboard.js): Month / Week / Agenda
+// views, a Today button + prev/next nav, completion-aware month cells, a 24-hour week
+// time grid with a "Due" deadline strip + project work blocks + a "now" line, an agenda
+// list, and a rich day-detail panel with checkable items, priority dots and source
+// launches. The panel lives below the grid on mobile (the desktop shows it as a side
+// panel). Syllabus import stays desktop-only (it needs the Electron main process).
+const CAL_DOW_MON = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const CAL_DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+const CAL_MON_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function calDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function calWeekStartOf(date) {           // Monday-anchored week start
+  const d = new Date(date);
+  const dow = d.getDay();                 // 0=Sun
+  const diff = dow === 0 ? 6 : dow - 1;   // Mon=0
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function calDayName(date) { return CAL_DAY_NAMES[date.getDay()]; }
+
+// All items for one day (events + due-date notes + synthesized project work blocks).
+// Note the calendar shows every project (the mobile filter bar is hidden here), matching
+// the previous PWA behavior.
+function calDayItems(dateStr, dayName) {
+  const events = data.scheduleItems
+    .filter(it => it.date === dateStr || (!it.date && it.day === dayName))
+    .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+  const notes = data.tasks.filter(n => n.dueDate === dateStr);
+  const workBlocks = getWorkBlocks(dayName, dateStr);
+  return { events, notes, workBlocks };
+}
+
+// Header (prev / title / next + Today) followed by the Month/Week/Agenda segmented toggle.
+function calTopHtml(title) {
+  return `<div class="calendar-header">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="cal-prev">&#9664;</button>
+        <span class="cal-month-title">${title}</span>
+        <button class="cal-nav-btn" id="cal-next">&#9654;</button>
+      </div>
+      <button class="cal-today-btn" id="cal-today">Today</button>
+    </div>
+    <div class="cal-view-toggle">
+      <button class="cal-view-btn ${calView==='month'?'active':''}" data-cview="month">Month</button>
+      <button class="cal-view-btn ${calView==='week'?'active':''}"  data-cview="week">Week</button>
+      <button class="cal-view-btn ${calView==='agenda'?'active':''}" data-cview="agenda">Agenda</button>
+    </div>`;
+}
+
 function renderCalendar() {
+  if (!selectedCalDate) selectedCalDate = calDateStr(new Date());
+  if (!calWeekStart) calWeekStart = calWeekStartOf(new Date());
+  let r;
+  if (calView === 'week') r = renderCalWeek();
+  else if (calView === 'agenda') r = renderCalAgenda();
+  else r = renderCalMonth();
+  return `${calTopHtml(r.title)}
+    <div class="cal-view-area cal-view-${calView}">${r.body}</div>
+    <div id="cal-day-events" class="cal-day-events"></div>`;
+}
+
+// ── MONTH VIEW — completion-aware cells with color pills + "+N more" ──
+function renderCalMonth() {
   const year = calendarMonth.getFullYear();
   const month = calendarMonth.getMonth();
-  const monthName = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const firstDay = new Date(year, month, 1).getDay();
+  const title = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const firstDay = new Date(year, month, 1);
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = new Date(); today.setHours(0,0,0,0);
-  const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  let startDow = firstDay.getDay(); startDow = startDow === 0 ? 6 : startDow - 1; // Mon=0
 
-  // Event map
-  const eventMap = {};
+  let html = `<div class="calendar-grid">`;
+  html += CAL_DOW_MON.map(d => `<div class="cal-day-label">${d}</div>`).join('');
+  for (let i = 0; i < startDow; i++) html += `<div class="cal-cell empty"></div>`;
+
+  const CAP = 2;
   for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
-    const dateStr = date.toISOString().slice(0, 10);
-    const dayName = DAYS[date.getDay()];
-    const dayEvents = data.scheduleItems.filter(item => {
-      if (item.date === dateStr) return true;
-      if (!item.date && item.day === dayName) return true;
-      return false;
+    const dateObj = new Date(year, month, d);
+    const dateStr = calDateStr(dateObj);
+    const dayName = calDayName(dateObj);
+    const isToday = dateObj.getTime() === today.getTime();
+    const isPast = dateObj < today;
+    const { events, notes, workBlocks } = calDayItems(dateStr, dayName);
+
+    let doneClass = '';
+    if (notes.length > 0) doneClass = notes.every(n => n.completed) ? 'cal-all-done' : 'cal-incomplete';
+    else if (isPast) doneClass = 'cal-all-done';
+
+    // Incomplete first, completed (dimmed) last — same ordering as the desktop grid.
+    const items = [
+      ...events.map(x => ({ item: x, kind: 'event' })),
+      ...notes.map(x => ({ item: x, kind: 'note' })),
+      ...workBlocks.map(x => ({ item: x, kind: 'work' })),
+    ].sort((a, b) => (a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0));
+
+    let pills = '';
+    items.slice(0, CAP).forEach(({ item, kind }) => {
+      const done = item.completed ? ' done' : '';
+      if (kind === 'work') {
+        const col = getProjectColor(item.projectId);
+        pills += `<div class="cal-pill cal-pill-work${done}" style="--pc:${col}"><span>&#128188; ${escapeHtml(item.title)}</span></div>`;
+      } else if (kind === 'event') {
+        const col = getProjectColor(item.projectId);
+        pills += `<div class="cal-pill${done}" style="background:${col}"><span>${escapeHtml(item.title)}</span></div>`;
+      } else {
+        const sc = resolveBoardStickyColor(item);
+        pills += `<div class="cal-pill cal-pill-note${done}" style="background:${sc.border}22;color:${sc.border};border-left:3px solid ${sc.border}"><span>&#128204; ${escapeHtml(item.title)}</span></div>`;
+      }
     });
-    // Notes with a due date show on the calendar too — an assignment note IS its own
-    // calendar entry (no duplicate schedule event is created for it).
-    const dayNotes = data.tasks.filter(n => n.dueDate === dateStr);
-    const dayItems = [...dayEvents, ...dayNotes, ...getWorkBlocks(dayName, dateStr)];
-    if (dayItems.length > 0) eventMap[d] = dayItems;
-  }
+    const more = items.length - CAP;
+    if (more > 0) pills += `<div class="cal-more">+${more} more</div>`;
 
-  let html = `<div class="calendar-header">
-    <button class="cal-nav-btn" id="cal-prev">&#9664;</button>
-    <span class="cal-month-title">${monthName}</span>
-    <button class="cal-nav-btn" id="cal-next">&#9654;</button>
-  </div>`;
-
-  html += `<div class="calendar-grid">`;
-  html += ['S','M','T','W','T','F','S'].map(d => `<div class="cal-day-label">${d}</div>`).join('');
-  for (let i = 0; i < firstDay; i++) html += `<div class="cal-cell empty"></div>`;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
-    const isToday = date.getTime() === today.getTime();
-    const hasEvents = eventMap[d];
-    const evCount = hasEvents ? hasEvents.length : 0;
-    html += `<div class="cal-cell ${isToday ? 'today' : ''} ${hasEvents ? 'has-events' : ''}" data-day="${d}">
+    html += `<div class="cal-cell ${isToday ? 'today' : ''} ${doneClass}" data-date="${dateStr}" data-day="${dayName}">
       <span class="cal-date">${d}</span>
-      ${evCount > 0 ? `<div class="cal-dot-row">${evCount > 3 ? '<div class="cal-dot"></div><div class="cal-dot"></div><div class="cal-dot"></div>' : Array(evCount).fill('<div class="cal-dot"></div>').join('')}</div>` : ''}
+      <div class="cal-cell-pills">${pills}</div>
     </div>`;
   }
   html += `</div>`;
-  html += `<div id="cal-day-events" class="cal-day-events"></div>`;
-  return html;
+  return { title, body: html };
+}
+
+// ── WEEK VIEW — 24-hour time grid (Mon-first), "Due" deadline strip, work blocks ──
+function renderCalWeek() {
+  const today = new Date();
+  const weekStart = calWeekStart;
+  const HOUR_H = 46, START = 0, END = 24, HOURS = END - START;
+
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const dt = new Date(weekStart.getTime() + i * 86400000);
+    return { date: dt, dateStr: calDateStr(dt), dayName: calDayName(dt) };
+  });
+  const weekEnd = days[6].date;
+  const title = days[0].date.getMonth() === weekEnd.getMonth()
+    ? `${CAL_MON_ABBR[days[0].date.getMonth()]} ${days[0].date.getDate()}–${weekEnd.getDate()}`
+    : `${CAL_MON_ABBR[days[0].date.getMonth()]} ${days[0].date.getDate()} – ${CAL_MON_ABBR[weekEnd.getMonth()]} ${weekEnd.getDate()}`;
+
+  const dayData = days.map(d => calDayItems(d.dateStr, d.dayName));
+
+  let html = `<div class="cal-week">`;
+
+  // Column headers
+  html += `<div class="cal-week-head"><div class="cal-week-gutter"></div>`;
+  days.forEach((d, i) => {
+    const isToday = d.date.toDateString() === today.toDateString();
+    html += `<div class="cal-week-colhead ${isToday ? 'today' : ''}" data-date="${d.dateStr}" data-day="${d.dayName}">
+      <div class="cal-week-dow">${CAL_DOW_MON[i]}</div>
+      <div class="cal-week-datenum ${isToday ? 'today' : ''}">${d.date.getDate()}</div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  // "Due" strip — note deadlines live here (as chips), not in the timed grid.
+  if (dayData.some(d => d.notes.length > 0)) {
+    html += `<div class="cal-week-due"><div class="cal-week-gutter cal-week-due-lbl">Due</div>`;
+    dayData.forEach(({ notes }, i) => {
+      html += `<div class="cal-week-due-cell" data-date="${days[i].dateStr}">`;
+      notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
+        const sc = resolveBoardStickyColor(note);
+        html += `<div class="cal-week-chip ${note.completed ? 'done' : ''}" data-note-id="${note.id}"
+          style="background:${sc.border}22;border-left:3px solid ${sc.border};color:${sc.border}"
+          title="${escapeHtml(note.title)}">${srcLaunch(note)}${escapeHtml(note.title)}</div>`;
+      });
+      html += `</div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Scrollable time grid
+  html += `<div class="cal-week-bodywrap"><div class="cal-week-body">`;
+  html += `<div class="cal-week-gutter cal-week-timecol">`;
+  for (let h = START; h < END; h++) {
+    const label = h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
+    html += `<div class="cal-week-hour" style="height:${HOUR_H}px">${label}</div>`;
+  }
+  html += `</div>`;
+
+  days.forEach((d, ci) => {
+    const isToday = d.date.toDateString() === today.toDateString();
+    const { events, workBlocks } = dayData[ci];
+    html += `<div class="cal-week-col ${isToday ? 'today' : ''}" data-date="${d.dateStr}" data-day="${d.dayName}" style="height:${HOURS * HOUR_H}px">`;
+    for (let h = 0; h < HOURS; h++) html += `<div class="cal-week-hline" style="top:${h * HOUR_H}px"></div>`;
+    if (isToday) {
+      const now = new Date();
+      const mins = (now.getHours() - START) * 60 + now.getMinutes();
+      if (mins >= 0 && mins <= HOURS * 60) html += `<div class="cal-week-now" style="top:${(mins / 60) * HOUR_H}px"></div>`;
+    }
+
+    const place = (item, cls, extraStyle, inner) => {
+      const [sh, sm] = (item.startTime || '00:00').split(':').map(Number);
+      const [eh, em] = (item.endTime || item.startTime || '00:30').split(':').map(Number);
+      const topMins = (sh - START) * 60 + sm;
+      const durMins = Math.max(30, (eh * 60 + em) - (sh * 60 + sm));
+      if (topMins < 0 || topMins > HOURS * 60) return '';
+      const top = (topMins / 60) * HOUR_H;
+      const height = Math.min((durMins / 60) * HOUR_H, ((HOURS * 60 - topMins) / 60) * HOUR_H);
+      return `<div class="${cls}" style="top:${top}px;height:${height - 2}px;${extraStyle}">${inner}</div>`;
+    };
+
+    workBlocks.forEach(item => {
+      const col = getProjectColor(item.projectId);
+      html += place(item, `cal-week-block cal-week-workblock${item.completed ? ' done' : ''}`, `--pc:${col}`,
+        `<div class="cal-week-btitle">&#128188; ${escapeHtml(item.title)}</div>
+         <div class="cal-week-btime">${formatTime12(item.startTime)}${item.endTime ? '–' + formatTime12(item.endTime) : ''}</div>`);
+    });
+    events.filter(e => e.startTime).forEach(item => {
+      const col = getProjectColor(item.projectId);
+      html += place(item, `cal-week-block${item.completed ? ' done' : ''}`, `background:${col};border-color:${col}`,
+        `<div class="cal-week-btitle">${srcLaunch(item)}${escapeHtml(item.title)}</div>
+         <div class="cal-week-btime">${formatTime12(item.startTime)}${item.endTime ? '–' + formatTime12(item.endTime) : ''}</div>`);
+    });
+
+    html += `</div>`;
+  });
+  html += `</div></div></div>`;
+  return { title, body: html };
+}
+
+// ── AGENDA VIEW — the visible month as a grouped day list ──
+function renderCalAgenda() {
+  const today = new Date();
+  const year = calendarMonth.getFullYear();
+  const month = calendarMonth.getMonth();
+  const title = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const rows = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month, d);
+    const dateStr = calDateStr(dateObj);
+    const dayName = calDayName(dateObj);
+    const { events, notes, workBlocks } = calDayItems(dateStr, dayName);
+    if (events.length || notes.length || workBlocks.length) rows.push({ dateObj, dateStr, dayName, events, notes, workBlocks });
+  }
+
+  let html = `<div class="cal-agenda">`;
+  if (rows.length === 0) {
+    html += `<div class="cal-agenda-empty">No events this month.</div>`;
+  } else {
+    rows.forEach(({ dateObj, dateStr, dayName, events, notes, workBlocks }) => {
+      const isToday = dateObj.toDateString() === today.toDateString();
+      html += `<div class="cal-agenda-day ${isToday ? 'today' : ''}" data-date="${dateStr}" data-day="${dayName}">
+        <div class="cal-agenda-datecol">
+          <div class="cal-agenda-dow">${dayName.slice(0, 3)}</div>
+          <div class="cal-agenda-num ${isToday ? 'today' : ''}">${dateObj.getDate()}</div>
+        </div>
+        <div class="cal-agenda-items">`;
+      workBlocks.forEach(item => {
+        const col = getProjectColor(item.projectId);
+        html += `<div class="cal-agenda-item ${item.completed ? 'done' : ''}">
+          <div class="cal-agenda-bar" style="background:${col}"></div>
+          <div class="cal-agenda-content"><div class="cal-agenda-title">&#128188; ${escapeHtml(item.title)}</div>
+            <div class="cal-agenda-meta">${formatTime12(item.startTime)}${item.endTime ? ' – ' + formatTime12(item.endTime) : ''} · Schedule</div></div>
+          ${item.completed ? '<span class="cal-agenda-done">&#10003;</span>' : ''}
+        </div>`;
+      });
+      events.forEach(item => {
+        const col = getProjectColor(item.projectId);
+        const proj = getProjectName(item.projectId);
+        const t = item.startTime ? formatTime12(item.startTime) + (item.endTime ? ' – ' + formatTime12(item.endTime) : '') : 'All day';
+        html += `<div class="cal-agenda-item ${item.completed ? 'done' : ''}">
+          <div class="cal-agenda-bar" style="background:${col}"></div>
+          <div class="cal-agenda-content"><div class="cal-agenda-title">${srcLaunch(item)}${escapeHtml(item.title)}</div>
+            <div class="cal-agenda-meta">${t}${proj ? ' · ' + escapeHtml(proj) : ''}</div></div>
+          ${item.completed ? '<span class="cal-agenda-done">&#10003;</span>' : ''}
+        </div>`;
+      });
+      notes.forEach(note => {
+        const col = getProjectColor(note.projectId);
+        const proj = getProjectName(note.projectId);
+        const t = note.dueTime ? formatTime12(note.dueTime) : '';
+        html += `<div class="cal-agenda-item cal-agenda-note ${note.completed ? 'done' : ''}">
+          <div class="cal-agenda-bar" style="background:${col}"></div>
+          <div class="cal-agenda-content"><div class="cal-agenda-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
+            <div class="cal-agenda-meta">${t}${t && proj ? ' · ' : ''}${proj ? escapeHtml(proj) : ''}</div></div>
+          ${note.completed ? '<span class="cal-agenda-done">&#10003;</span>' : ''}
+        </div>`;
+      });
+      html += `</div></div>`;
+    });
+  }
+  html += `</div>`;
+  return { title, body: html };
+}
+
+// Re-render the whole calendar (view + panel) into the content area and rebind.
+function rerenderCal() {
+  document.getElementById('app-content').innerHTML = renderCalendar();
+  bindCalendarEvents();
+}
+
+// Move prev/next: weeks in week view, months in month/agenda.
+function calNav(dir) {
+  if (calView === 'week') calWeekStart = new Date(calWeekStart.getTime() + dir * 7 * 86400000);
+  else calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + dir, 1);
+  rerenderCal();
+}
+
+// Add the selected-day highlight to whichever surface the current view shows.
+function highlightCalSelected() {
+  document.querySelectorAll('#app-content .cal-selected').forEach(el => el.classList.remove('cal-selected'));
+  const d = selectedCalDate;
+  const sel = document.querySelector(
+    `#app-content .cal-cell[data-date="${d}"], #app-content .cal-week-colhead[data-date="${d}"], #app-content .cal-agenda-day[data-date="${d}"]`
+  );
+  if (sel) sel.classList.add('cal-selected');
+}
+
+function selectCalDay(dateStr, { scroll = false } = {}) {
+  selectedCalDate = dateStr;
+  renderCalDaySide();
+  highlightCalSelected();
+  if (scroll) document.getElementById('cal-day-events')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function bindCalendarEvents() {
-  const prevBtn = document.getElementById('cal-prev');
-  const nextBtn = document.getElementById('cal-next');
-  if (prevBtn) prevBtn.addEventListener('click', () => {
-    calendarMonth.setMonth(calendarMonth.getMonth() - 1);
-    document.getElementById('app-content').innerHTML = renderCalendar();
-    bindCalendarEvents();
+  document.getElementById('cal-prev')?.addEventListener('click', () => calNav(-1));
+  document.getElementById('cal-next')?.addEventListener('click', () => calNav(1));
+  document.getElementById('cal-today')?.addEventListener('click', () => {
+    const t = new Date();
+    calendarMonth = new Date(t.getFullYear(), t.getMonth(), 1);
+    calWeekStart = calWeekStartOf(t);
+    selectedCalDate = calDateStr(t);
+    rerenderCal();
   });
-  if (nextBtn) nextBtn.addEventListener('click', () => {
-    calendarMonth.setMonth(calendarMonth.getMonth() + 1);
-    document.getElementById('app-content').innerHTML = renderCalendar();
-    bindCalendarEvents();
-  });
-
-  document.querySelectorAll('.cal-cell:not(.empty)').forEach(cell => {
-    cell.addEventListener('click', () => {
-      const day = parseInt(cell.dataset.day);
-      const year = calendarMonth.getFullYear();
-      const month = calendarMonth.getMonth();
-      const date = new Date(year, month, day);
-      const dateStr = date.toISOString().slice(0, 10);
-      selectedCalDate = dateStr; // remember so a re-render re-opens this day, not today
-      const DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-      const dayName = DAYS[date.getDay()];
-
-      // Incomplete first, then completed (completed rows render dimmed/struck through).
-      const events = data.scheduleItems.filter(item => {
-        if (item.date === dateStr) return true;
-        if (!item.date && item.day === dayName) return true;
-        return false;
-      }).sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0) || (a.startTime || '').localeCompare(b.startTime || ''));
-
-      // Notes due this day show alongside events (assignment notes drive the calendar).
-      const notes = data.tasks.filter(n => n.dueDate === dateStr)
-        .sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0) || (a.dueTime || '').localeCompare(b.dueTime || ''));
-
-      const eventsEl = document.getElementById('cal-day-events');
-      if (!eventsEl) return;
-
-      document.querySelectorAll('.cal-cell').forEach(c => c.classList.remove('selected'));
-      cell.classList.add('selected');
-
-      const workBlocks = getWorkBlocks(dayName, dateStr);
-
-      const dateTitle = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      if (events.length === 0 && notes.length === 0 && workBlocks.length === 0) {
-        eventsEl.innerHTML = `<div class="cal-no-events">${dateTitle} — No events</div>`;
-        return;
-      }
-
-      const evCard = (item) => {
-        const link = launchLink(item);
-        const launches = !!link;
-        return `<div class="event-card cal-event-card ${item.completed ? 'completed' : ''}${launches ? ' launches-src' : ''}" data-id="${item.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''}>
-          <div class="event-time">${item.startTime || ''}<br>${item.endTime || ''}</div>
-          <div style="flex:1"><div class="event-title">${srcLaunch(item)}${escapeHtml(item.title)}</div></div>
-          <button class="event-edit-btn" data-id="${item.id}">&#9998;</button>
-        </div>`;
-      };
-      // Schedule blocks (edited on desktop) auto-complete once their time has passed.
-      const wCard = (item) => {
-        const col = getProjectColor(item.projectId);
-        return `<div class="event-card cal-event-card cal-work-card ${item.completed ? 'completed' : ''}" style="border-left:3px solid ${col}">
-          <div class="event-time">${item.startTime || ''}<br>${item.endTime || ''}</div>
-          <div style="flex:1"><div class="event-title">&#128188; ${escapeHtml(item.title)}</div>
-          <div class="cal-note-proj">Schedule</div></div>
-        </div>`;
-      };
-      const nCard = (note) => {
-        const projName = getProjectName(note.projectId);
-        // Tint the whole note like the board's sticky notes, honoring the color-mode
-        // selector — same as the desktop calendar day panel.
-        const sc = resolveBoardStickyColor(note);
-        // Synced notes carry a source link → the card opens that source and a ✎ opens
-        // the note details. Plain notes open details on tap.
-        const link = launchLink(note);
-        const launches = !!link;
-        return `<div class="event-card cal-event-card cal-note-card sticky-tint ${note.completed ? 'completed' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-left:4px solid ${sc.border}">
-          <div class="event-time">${note.dueTime || ''}</div>
-          <div style="flex:1"><div class="event-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
-          ${projName ? `<div class="cal-note-proj">${escapeHtml(projName)}</div>` : ''}</div>
-          ${launches ? `<button class="cal-note-detail-btn" data-note-id="${note.id}" title="Details">&#9998;</button>` : ''}
-        </div>`;
-      };
-
-      const activeEvents = events.filter(e => !e.completed), doneEvents = events.filter(e => e.completed);
-      const activeNotes = notes.filter(n => !n.completed), doneNotes = notes.filter(n => n.completed);
-      const activeWork = workBlocks.filter(w => !w.completed), doneWork = workBlocks.filter(w => w.completed);
-      const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
-      const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
-
-      let ehtml = `<div class="cal-events-title">${dateTitle}</div>`;
-      ehtml += activeWork.map(wCard).join('') + activeEvents.map(evCard).join('') + activeNotes.map(nCard).join('');
-      if (!hasActive && doneCount > 0) ehtml += `<div class="cal-alldone">&#127881; All done for this day</div>`;
-      if (doneCount > 0) {
-        ehtml += `<button class="cal-completed-toggle ${calShowCompleted ? 'open' : ''}"><span class="cal-chevron">&#9656;</span> ${calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
-        if (calShowCompleted) ehtml += `<div class="cal-completed-list">${doneWork.map(wCard).join('') + doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
-      }
-      eventsEl.innerHTML = ehtml;
-
-      // Tap a source badge → open that item's linked app (Gradescope/Variate/…),
-      // matching the desktop right bar. Stops the tap from also opening the note detail.
-      eventsEl.querySelectorAll('[data-open-url]').forEach(el => {
-        el.addEventListener('click', (e) => {
-          e.stopPropagation();
-          window.open(el.dataset.openUrl, '_blank', 'noopener');
-        });
-      });
-
-      eventsEl.querySelectorAll('.event-edit-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => { e.stopPropagation(); openScheduleForm(btn.dataset.id); });
-      });
-      // The ✎ on a synced note card opens its details.
-      eventsEl.querySelectorAll('.cal-note-detail-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => { e.stopPropagation(); showNoteDetail(btn.dataset.noteId); });
-      });
-      // Tap a note: synced notes open their source app; plain notes open details.
-      eventsEl.querySelectorAll('.cal-note-card').forEach(card => {
-        card.addEventListener('click', (e) => {
-          if (e.target.closest('.cal-note-detail-btn') || e.target.closest('[data-open-url]')) return;
-          const url = card.dataset.launchUrl;
-          if (url) { window.open(url, '_blank', 'noopener'); return; }
-          showNoteDetail(card.dataset.noteId);
-        });
-      });
-      // Tap an event that carries a source link → open it (its ✎ edit button is guarded).
-      eventsEl.querySelectorAll('.cal-event-card.launches-src[data-id]').forEach(card => {
-        card.addEventListener('click', (e) => {
-          if (e.target.closest('.event-edit-btn') || e.target.closest('[data-open-url]')) return;
-          if (card.dataset.launchUrl) window.open(card.dataset.launchUrl, '_blank', 'noopener');
-        });
-      });
-      const calToggle = eventsEl.querySelector('.cal-completed-toggle');
-      if (calToggle) calToggle.addEventListener('click', (e) => {
-        e.stopPropagation();
-        calShowCompleted = !calShowCompleted;
-        cell.click(); // re-render this day's list with the new state
-      });
+  document.querySelectorAll('.cal-view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const nv = btn.dataset.cview;
+      if (nv === calView) return;
+      if (nv === 'week') calWeekStart = calWeekStartOf(new Date(selectedCalDate + 'T00:00:00'));
+      else if (calView === 'week') calendarMonth = new Date(calWeekStart.getFullYear(), calWeekStart.getMonth(), 1);
+      calView = nv;
+      rerenderCal();
     });
   });
 
-  // Restore the previously-selected day (so checking an item off doesn't snap the
-  // panel back to today); fall back to today's cell.
-  let cellToSelect = document.querySelector('.cal-cell.today');
-  if (selectedCalDate) {
-    const sd = new Date(selectedCalDate + 'T00:00:00');
-    if (sd.getFullYear() === calendarMonth.getFullYear() && sd.getMonth() === calendarMonth.getMonth()) {
-      const c = document.querySelector(`.cal-cell[data-day="${sd.getDate()}"]`);
-      if (c) cellToSelect = c;
+  if (calView === 'week') bindCalWeek();
+  else if (calView === 'agenda') bindCalAgenda();
+  else bindCalMonth();
+
+  renderCalDaySide();
+  highlightCalSelected();
+}
+
+function bindCalMonth() {
+  document.querySelectorAll('.cal-cell:not(.empty)').forEach(cell => {
+    cell.addEventListener('click', () => selectCalDay(cell.dataset.date, { scroll: true }));
+  });
+}
+
+function bindCalAgenda() {
+  document.querySelectorAll('.cal-agenda-day').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('[data-open-url]')) return;
+      selectCalDay(row.dataset.date, { scroll: true });
+    });
+  });
+  document.querySelectorAll('.cal-agenda [data-open-url]').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); window.open(el.dataset.openUrl, '_blank', 'noopener'); });
+  });
+}
+
+function bindCalWeek() {
+  // Tap a column header → open that day's detail below.
+  document.querySelectorAll('.cal-week-colhead').forEach(el => {
+    el.addEventListener('click', () => selectCalDay(el.dataset.date, { scroll: true }));
+  });
+  // Tap a due chip → open the note detail.
+  document.querySelectorAll('.cal-week-chip').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (e.target.closest('[data-open-url]')) return;
+      showNoteDetail(el.dataset.noteId);
+    });
+  });
+  // Source logos on chips / event blocks open the linked app.
+  document.querySelectorAll('.cal-week [data-open-url]').forEach(el => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); window.open(el.dataset.openUrl, '_blank', 'noopener'); });
+  });
+  // Tap empty space in a day column → new event pre-filled at that time; tapping an
+  // existing block just opens the day detail.
+  document.querySelectorAll('.cal-week-col').forEach(col => {
+    col.addEventListener('click', (e) => {
+      if (e.target.closest('.cal-week-block')) { selectCalDay(col.dataset.date, { scroll: true }); return; }
+      const rect = col.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const totalMins = (y / 46) * 60;
+      const hour = Math.max(0, Math.min(23, Math.floor(totalMins / 60)));
+      const min = Math.round((totalMins % 60) / 15) * 15;
+      const timeStr = `${String(hour).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+      openScheduleForm(null, { date: col.dataset.date, time: timeStr });
+    });
+  });
+  // Open the grid at 8am so the working day is in view (matches the desktop week view).
+  const bodyWrap = document.querySelector('.cal-week-bodywrap');
+  if (bodyWrap) bodyWrap.scrollTop = 8 * 46;
+}
+
+// Render the selected day into the panel below the grid — Schedule / Events / Notes
+// sections, active items first with a collapsible "completed" section, checkable rows,
+// priority dots and click-to-launch for synced items. Mirrors the desktop side panel.
+function renderCalDaySide() {
+  const el = document.getElementById('cal-day-events');
+  if (!el) return;
+  const dateStr = selectedCalDate;
+  const dateObj = new Date(dateStr + 'T00:00:00');
+  const dayName = calDayName(dateObj);
+  const { events, notes, workBlocks } = calDayItems(dateStr, dayName);
+  events.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+  notes.sort((a, b) => (a.dueTime || '~').localeCompare(b.dueTime || '~'));
+
+  const isToday = dateObj.toDateString() === new Date().toDateString();
+  const dateTitle = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+  const evCard = (item) => {
+    const link = launchLink(item); const launches = !!link;
+    const col = getProjectColor(item.projectId); const proj = getProjectName(item.projectId);
+    return `<div class="cal-scard cal-sevent ${item.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-id="${item.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="border-left-color:${col}">
+      <button class="cal-check ${item.completed ? 'checked' : ''}" data-type="event" data-id="${item.id}">${item.completed ? '&#10003;' : ''}</button>
+      <div class="cal-stime"><div>${formatTime12(item.startTime)}</div>${item.endTime ? `<div class="cal-stime-end">&rarr; ${formatTime12(item.endTime)}</div>` : ''}</div>
+      <div class="cal-sinfo"><div class="cal-stitle">${srcLaunch(item)}${escapeHtml(item.title)}</div>
+        ${proj ? `<div class="cal-sproj" style="color:${col}">${escapeHtml(proj)}</div>` : ''}
+        <span class="cal-badge ${item.date ? '' : 'recurring'}">${item.date ? 'One-time' : 'Weekly'}</span></div>
+      <button class="cal-sdel" data-id="${item.id}" title="Delete event">&times;</button>
+    </div>`;
+  };
+  const wCard = (item) => {
+    const col = getProjectColor(item.projectId);
+    return `<div class="cal-scard cal-swork ${item.completed ? 'done' : ''}" style="border-left-color:${col}">
+      <div class="cal-stime"><div>${formatTime12(item.startTime)}</div>${item.endTime ? `<div class="cal-stime-end">&rarr; ${formatTime12(item.endTime)}</div>` : ''}</div>
+      <div class="cal-sinfo"><div class="cal-stitle">&#128188; ${escapeHtml(item.title)}</div>
+        <span class="cal-badge recurring">Weekly</span></div>
+    </div>`;
+  };
+  const nCard = (note) => {
+    const sc = resolveBoardStickyColor(note);
+    const proj = getProjectName(note.projectId);
+    const link = launchLink(note); const launches = !!link;
+    const pcol = PRIORITY_COLOR[note.priority] || '#F59E0B';
+    return `<div class="cal-scard cal-snote sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-color:${sc.border};border-left-color:${sc.border}">
+      <button class="cal-check ${note.completed ? 'checked' : ''}" data-type="note" data-id="${note.id}">${note.completed ? '&#10003;' : ''}</button>
+      ${note.dueTime ? `<div class="cal-stime"><div>${formatTime12(note.dueTime)}</div></div>` : ''}
+      <div class="cal-sinfo"><div class="cal-stitle">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
+        ${proj ? `<div class="cal-sproj">${escapeHtml(proj)}</div>` : ''}</div>
+      <span class="cal-pri-dot" style="color:${pcol}">&#9679; ${note.priority || 'Medium'}</span>
+      ${launches ? `<button class="cal-note-detail-btn" data-note-id="${note.id}" title="Details">&#9998;</button>` : ''}
+    </div>`;
+  };
+
+  const activeEvents = events.filter(e => !e.completed), doneEvents = events.filter(e => e.completed);
+  const activeNotes = notes.filter(n => !n.completed), doneNotes = notes.filter(n => n.completed);
+  const activeWork = workBlocks.filter(w => !w.completed), doneWork = workBlocks.filter(w => w.completed);
+  const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
+  const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
+
+  let html = `<div class="cal-side-header"><span class="cal-side-date">${dateTitle}</span>${isToday ? '<span class="cal-side-today">Today</span>' : ''}</div>`;
+  if (events.length === 0 && notes.length === 0 && workBlocks.length === 0) {
+    html += `<div class="cal-side-empty"><div class="cal-side-empty-icon">&#128197;</div><div>Nothing scheduled for this day.</div></div>`;
+  } else {
+    if (activeWork.length) html += `<div class="cal-side-label">Schedule</div>` + activeWork.map(wCard).join('');
+    if (activeEvents.length) html += `<div class="cal-side-label">Events</div>` + activeEvents.map(evCard).join('');
+    if (activeNotes.length) html += `<div class="cal-side-label">Notes</div>` + activeNotes.map(nCard).join('');
+    if (!hasActive && doneCount > 0) html += `<div class="cal-alldone">&#127881; All done for this day</div>`;
+    if (doneCount > 0) {
+      html += `<button class="cal-completed-toggle ${calShowCompleted ? 'open' : ''}"><span class="cal-chevron">&#9656;</span> ${calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
+      if (calShowCompleted) html += `<div class="cal-completed-list">${doneWork.map(wCard).join('') + doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
     }
   }
-  if (cellToSelect) cellToSelect.click();
+  el.innerHTML = html;
+
+  // Source badge → open the linked app (guarded so it doesn't also open the card).
+  el.querySelectorAll('[data-open-url]').forEach(elm => {
+    elm.addEventListener('click', (e) => { e.stopPropagation(); window.open(elm.dataset.openUrl, '_blank', 'noopener'); });
+  });
+  // Check off an item — re-render the whole calendar so the month tint updates too.
+  el.querySelectorAll('.cal-check').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (btn.dataset.type === 'note') {
+        const note = data.tasks.find(t => t.id === btn.dataset.id);
+        if (!note) return;
+        const nowDone = !note.completed;
+        note.completed = nowDone;
+        note.completedAt = nowDone ? new Date().toISOString() : null;
+        note.modifiedAt = new Date().toISOString();
+        note.status = nowDone ? 'done' : (note.status === 'done' ? 'backlog' : note.status);
+        await saveCollection('tasks', { tasks: data.tasks });
+      } else {
+        const item = data.scheduleItems.find(i => i.id === btn.dataset.id);
+        if (!item) return;
+        item.completed = !item.completed;
+        item.modifiedAt = new Date().toISOString();
+        await saveCollection('schedule', { items: data.scheduleItems });
+      }
+      render();
+    });
+  });
+  el.querySelectorAll('.cal-sdel').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete this event?')) return;
+      data.scheduleItems = data.scheduleItems.filter(i => i.id !== btn.dataset.id);
+      await saveCollection('schedule', { items: data.scheduleItems });
+      render();
+    });
+  });
+  el.querySelectorAll('.cal-note-detail-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => { e.stopPropagation(); showNoteDetail(btn.dataset.noteId); });
+  });
+  // Tap an event card that isn't synced → edit it; synced → open its source.
+  el.querySelectorAll('.cal-sevent').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.cal-check') || e.target.closest('.cal-sdel') || e.target.closest('[data-open-url]')) return;
+      if (card.dataset.launchUrl) { window.open(card.dataset.launchUrl, '_blank', 'noopener'); return; }
+      openScheduleForm(card.dataset.id);
+    });
+  });
+  // Tap a note card → source app (synced) or the note detail (plain).
+  el.querySelectorAll('.cal-snote').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.cal-check') || e.target.closest('.cal-note-detail-btn') || e.target.closest('[data-open-url]')) return;
+      if (card.dataset.launchUrl) { window.open(card.dataset.launchUrl, '_blank', 'noopener'); return; }
+      showNoteDetail(card.dataset.noteId);
+    });
+  });
+  const toggle = el.querySelector('.cal-completed-toggle');
+  if (toggle) toggle.addEventListener('click', (e) => { e.stopPropagation(); calShowCompleted = !calShowCompleted; renderCalDaySide(); });
 }
 
 // ===================== SCHEDULE CRUD =====================
-function openScheduleForm(editId = null) {
+function openScheduleForm(editId = null, prefill = null) {
   editingScheduleId = editId;
   const overlay = document.getElementById('add-schedule-overlay');
   const heading = document.getElementById('add-schedule-heading');
@@ -1742,9 +2112,10 @@ function openScheduleForm(editId = null) {
   } else {
     heading.textContent = 'New Event';
     document.getElementById('sched-title').value = '';
-    document.getElementById('sched-date').value = '';
+    // Pre-fill date/start when created from a calendar slot (week-view tap).
+    document.getElementById('sched-date').value = prefill?.date || '';
     document.getElementById('sched-day').value = '';
-    document.getElementById('sched-start').value = '';
+    document.getElementById('sched-start').value = prefill?.time || '';
     document.getElementById('sched-end').value = '';
     projSel.value = currentProject !== 'all' ? currentProject : '';
     deleteBtn.style.display = 'none';

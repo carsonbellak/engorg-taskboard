@@ -1831,17 +1831,18 @@
           const ranTour = await onboarding.maybeRunFirstRun();
           if (!ranTour) {
             const ranWhatsNew = await onboarding.maybeShowWhatsNew();
-            // Weekly briefings: Monday "week ahead" itinerary + Friday "week wrapped"
-            // recap. Only when nothing else is popping, so surfaces don't stack.
+            // Daily briefing: once-a-day agenda + stats strip (with the week ahead on
+            // Monday / week wrapped on Friday). Only when nothing else is popping, so
+            // surfaces don't stack.
             if (!ranWhatsNew && typeof briefings !== 'undefined') await briefings.maybeShow();
           }
         } catch (e) { console.warn('[Onboarding]', e.message); }
       }, 700);
     }
 
-    // Re-check the Friday briefing whenever notes change, so the "week wrapped" recap
-    // pops the moment the last assignment of the week is marked done (it's gated to
-    // show once per week, so this is a no-op the rest of the time).
+    // Re-check the daily briefing whenever notes change, so it can surface once the
+    // initial data has loaded / synced in (it's gated to show once per day, so this is
+    // a no-op the rest of the time).
     if (!EMB && typeof briefings !== 'undefined') {
       let briefTimer = null;
       window.addEventListener('tasks-changed', () => {
