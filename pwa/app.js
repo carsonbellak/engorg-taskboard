@@ -1602,8 +1602,9 @@ function calTopHtml(title) {
       <button class="cal-today-btn" id="cal-today">Today</button>
     </div>
     <div class="cal-view-toggle">
-      <button class="cal-view-btn ${calView==='month'?'active':''}" data-cview="month">Month</button>
+      <button class="cal-view-btn ${calView==='day'?'active':''}"   data-cview="day">Day</button>
       <button class="cal-view-btn ${calView==='week'?'active':''}"  data-cview="week">Week</button>
+      <button class="cal-view-btn ${calView==='month'?'active':''}" data-cview="month">Month</button>
       <button class="cal-view-btn ${calView==='agenda'?'active':''}" data-cview="agenda">Agenda</button>
     </div>`;
 }
@@ -1612,7 +1613,8 @@ function renderCalendar() {
   if (!selectedCalDate) selectedCalDate = calDateStr(new Date());
   if (!calWeekStart) calWeekStart = calWeekStartOf(new Date());
   let r;
-  if (calView === 'week') r = renderCalWeek();
+  if (calView === 'day') r = renderCalDay();
+  else if (calView === 'week') r = renderCalWeek();
   else if (calView === 'agenda') r = renderCalAgenda();
   else r = renderCalMonth();
   return `${calTopHtml(r.title)}
@@ -1682,10 +1684,7 @@ function renderCalMonth() {
 
 // ── WEEK VIEW — 24-hour time grid (Mon-first), "Due" deadline strip, work blocks ──
 function renderCalWeek() {
-  const today = new Date();
   const weekStart = calWeekStart;
-  const HOUR_H = 46, START = 0, END = 24, HOURS = END - START;
-
   const days = Array.from({ length: 7 }, (_, i) => {
     const dt = new Date(weekStart.getTime() + i * 86400000);
     return { date: dt, dateStr: calDateStr(dt), dayName: calDayName(dt) };
@@ -1694,17 +1693,35 @@ function renderCalWeek() {
   const title = days[0].date.getMonth() === weekEnd.getMonth()
     ? `${CAL_MON_ABBR[days[0].date.getMonth()]} ${days[0].date.getDate()}–${weekEnd.getDate()}`
     : `${CAL_MON_ABBR[days[0].date.getMonth()]} ${days[0].date.getDate()} – ${CAL_MON_ABBR[weekEnd.getMonth()]} ${weekEnd.getDate()}`;
+  return renderCalTimeGrid(days, title);
+}
+
+// ── DAY VIEW — the week time-grid collapsed to the single selected day ──
+function renderCalDay() {
+  if (!selectedCalDate) selectedCalDate = calDateStr(new Date());
+  const dt = new Date(selectedCalDate + 'T00:00:00');
+  const title = dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+  return renderCalTimeGrid([{ date: dt, dateStr: calDateStr(dt), dayName: calDayName(dt) }], title);
+}
+
+// Shared 24-hour time grid — 7 columns for Week, 1 for Day. The grid-template-columns
+// is set inline off days.length so a single day fills the width.
+function renderCalTimeGrid(days, title) {
+  const today = new Date();
+  const HOUR_H = 46, START = 0, END = 24, HOURS = END - START;
+  const gridCols = `30px repeat(${days.length}, 1fr)`;
+  const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   const dayData = days.map(d => calDayItems(d.dateStr, d.dayName));
 
   let html = `<div class="cal-week">`;
 
   // Column headers
-  html += `<div class="cal-week-head"><div class="cal-week-gutter"></div>`;
-  days.forEach((d, i) => {
+  html += `<div class="cal-week-head" style="grid-template-columns:${gridCols}"><div class="cal-week-gutter"></div>`;
+  days.forEach((d) => {
     const isToday = d.date.toDateString() === today.toDateString();
     html += `<div class="cal-week-colhead ${isToday ? 'today' : ''}" data-date="${d.dateStr}" data-day="${d.dayName}">
-      <div class="cal-week-dow">${CAL_DOW_MON[i]}</div>
+      <div class="cal-week-dow">${WD[d.date.getDay()]}</div>
       <div class="cal-week-datenum ${isToday ? 'today' : ''}">${d.date.getDate()}</div>
     </div>`;
   });
@@ -1712,7 +1729,7 @@ function renderCalWeek() {
 
   // "Due" strip — note deadlines live here (as chips), not in the timed grid.
   if (dayData.some(d => d.notes.length > 0)) {
-    html += `<div class="cal-week-due"><div class="cal-week-gutter cal-week-due-lbl">Due</div>`;
+    html += `<div class="cal-week-due" style="grid-template-columns:${gridCols}"><div class="cal-week-gutter cal-week-due-lbl">Due</div>`;
     dayData.forEach(({ notes }, i) => {
       html += `<div class="cal-week-due-cell" data-date="${days[i].dateStr}">`;
       notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
@@ -1727,7 +1744,7 @@ function renderCalWeek() {
   }
 
   // Scrollable time grid
-  html += `<div class="cal-week-bodywrap"><div class="cal-week-body">`;
+  html += `<div class="cal-week-bodywrap"><div class="cal-week-body" style="grid-template-columns:${gridCols}">`;
   html += `<div class="cal-week-gutter cal-week-timecol">`;
   for (let h = START; h < END; h++) {
     const label = h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`;
@@ -1851,8 +1868,15 @@ function rerenderCal() {
 
 // Move prev/next: weeks in week view, months in month/agenda.
 function calNav(dir) {
-  if (calView === 'week') calWeekStart = new Date(calWeekStart.getTime() + dir * 7 * 86400000);
-  else calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + dir, 1);
+  if (calView === 'day') {
+    const d = new Date(selectedCalDate + 'T00:00:00');
+    d.setDate(d.getDate() + dir);
+    selectedCalDate = calDateStr(d);
+  } else if (calView === 'week') {
+    calWeekStart = new Date(calWeekStart.getTime() + dir * 7 * 86400000);
+  } else {
+    calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + dir, 1);
+  }
   rerenderCal();
 }
 
@@ -1894,7 +1918,7 @@ function bindCalendarEvents() {
     });
   });
 
-  if (calView === 'week') bindCalWeek();
+  if (calView === 'day' || calView === 'week') bindCalWeek();
   else if (calView === 'agenda') bindCalAgenda();
   else bindCalMonth();
 

@@ -31,6 +31,7 @@ const registerUpdates       = require('./ipc/updates');
 const registerWindow        = require('./ipc/window');
 const registerEnginkMirror  = require('./ipc/engink-mirror');
 const registerFileMerger    = require('./ipc/file-merger');
+const registerRelease       = require('./ipc/release');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -234,6 +235,7 @@ app.whenReady().then(() => {
   registerWindow(getMainWindow);
   registerEnginkMirror(getMainWindow);
   registerFileMerger(getMainWindow);
+  registerRelease();
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,

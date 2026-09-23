@@ -1244,6 +1244,25 @@ function renderSettings() {
         <h3 class="settings-section-title">Version</h3>
         <div id="settings-version-body" class="settings-version-body">Loading…</div>
       </div>
+      <!-- Publish a Release (owner-only; revealed by refreshReleasePanel) -->
+      <div class="settings-section" id="settings-release-section" style="display:none">
+        <h3 class="settings-section-title">Publish a Release</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Owner tools. Cut a new <b>versioned release</b> — bumps the version, pushes it to <code>main</code>, and tags <code>vX.Y.Z</code> so CI builds the installer + Android APK and (when configured) deploys the PWA. Same as running <code>release.js</code>. <span id="settings-release-who" style="color:var(--text-muted)"></span></p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <select id="settings-release-bump" style="padding:7px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--input-bg,transparent);color:var(--text-primary);font-size:14px">
+            <option value="patch">Patch</option>
+            <option value="minor">Minor</option>
+            <option value="major">Major</option>
+          </select>
+          <span id="settings-release-target" style="font-size:13px;color:var(--text-muted)"></span>
+        </div>
+        <input id="settings-release-msg" type="text" placeholder="What changed in this release (optional notes)…" style="width:100%;max-width:520px;margin-top:10px;padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--input-bg,transparent);color:var(--text-primary);font-size:14px">
+        <div style="margin-top:12px">
+          <button id="settings-release-cut" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Cut release</button>
+          <span id="settings-release-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
+        </div>
+        <pre id="settings-release-log" style="display:none;margin-top:12px;max-height:200px;overflow:auto;padding:10px;border-radius:8px;background:var(--input-bg,rgba(0,0,0,.15));border:1px solid var(--border-color);font-size:12px;white-space:pre-wrap;color:var(--text-muted)"></pre>
+      </div>
       <div class="settings-section">
         <h3 class="settings-section-title">Tour &amp; Tips</h3>
         <p class="settings-toggle-desc" style="margin-bottom:12px">New here, or want a refresher? Replay the guided tour, or see the highlights from the latest update. The daily briefing pops once a day with your agenda and key stats (plus the week ahead on Monday and the week wrapped on Friday) — show it any time here.</p>
@@ -1311,6 +1330,8 @@ function renderSettings() {
 
   // Version (local + GitHub-synced)
   refreshVersionInfo();
+  // Publish a Release (owner-only; reveals itself when the linked GitHub account owns the repo)
+  refreshReleasePanel();
 
   // ── Calendar feeds (Brightspace / ICS) ──
   (function bindCalendarFeeds() {
@@ -2363,6 +2384,77 @@ async function refreshVersionInfo() {
   };
   btn.addEventListener('click', runCheck);
   runCheck();
+}
+
+// ── Publish a Release (owner-only) ──────────────────────────────────────────
+// Reveals a bump selector + "Cut release" button only when the linked GitHub
+// account is the repository owner (checked in the main process). Cutting runs the
+// same release.js pipeline as the terminal: bump version → push to main → tag
+// vX.Y.Z → CI builds the installer/APK (+ PWA when configured). Desktop/dev-only.
+async function refreshReleasePanel() {
+  const section = document.getElementById('settings-release-section');
+  if (!section || !window.api || !window.api.release) return;
+  let info;
+  try { info = await window.api.release.info(); } catch { section.style.display = 'none'; return; }
+  if (!info || !info.canRelease) { section.style.display = 'none'; return; }
+  section.style.display = '';
+
+  const cur = info.currentVersion || '0.0.0';
+  const who = document.getElementById('settings-release-who');
+  if (who) who.textContent = `Signed in as ${info.username} (repository owner).`;
+  const bumpSel = document.getElementById('settings-release-bump');
+  const target = document.getElementById('settings-release-target');
+  const msg = document.getElementById('settings-release-msg');
+  const btn = document.getElementById('settings-release-cut');
+  const status = document.getElementById('settings-release-status');
+  const log = document.getElementById('settings-release-log');
+  if (!bumpSel || !btn) return;
+
+  const nextVer = (bump) => {
+    const [a, b, c] = String(cur).split('.').map(n => parseInt(n, 10) || 0);
+    return bump === 'major' ? `${a + 1}.0.0` : bump === 'minor' ? `${a}.${b + 1}.0` : `${a}.${b}.${c + 1}`;
+  };
+  const syncTarget = () => { target.textContent = `Current v${cur} → new v${nextVer(bumpSel.value)}`; };
+  bumpSel.onchange = syncTarget;
+  syncTarget();
+
+  btn.onclick = async () => {
+    const bump = bumpSel.value;
+    const ver = nextVer(bump);
+    const confirmMsg = `This bumps the version to v${ver}, pushes it to main, and tags v${ver} — CI then builds the installer + Android APK and (if configured) deploys the PWA. This publishes to everyone.`;
+    const ok = window._showConfirm
+      ? await window._showConfirm({ title: `Publish v${ver}?`, message: confirmMsg, confirmText: `Cut v${ver}` })
+      : confirm(`Publish v${ver}?\n\n${confirmMsg}`);
+    if (!ok) return;
+
+    btn.disabled = true; bumpSel.disabled = true;
+    status.textContent = `Releasing v${ver}… (bumping, pushing, tagging)`;
+    status.style.color = 'var(--text-muted)';
+    if (log) { log.style.display = 'none'; log.textContent = ''; }
+    try {
+      const res = await window.api.release.cut(bump, (msg.value || '').trim());
+      if (res && res.success) {
+        status.innerHTML = `✅ Published <strong>${escapeHtmlS(res.tag)}</strong> — CI is building the installer + APK. `;
+        const a = document.createElement('a');
+        a.href = '#'; a.textContent = 'View release'; a.style.color = 'var(--accent)';
+        a.addEventListener('click', (e) => { e.preventDefault(); window.api.openExternal(res.url); });
+        status.appendChild(a);
+        status.style.color = 'var(--success)';
+        if (msg) msg.value = '';
+        if (log && res.output) { log.style.display = ''; log.textContent = res.output; }
+        refreshVersionInfo();                 // reflect the new version in the box above
+        setTimeout(refreshReleasePanel, 500); // re-read current version → next target
+      } else {
+        status.textContent = `Error: ${(res && res.error) || 'release failed'}`;
+        status.style.color = 'var(--danger)';
+        if (log && res && res.output) { log.style.display = ''; log.textContent = res.output; }
+      }
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.style.color = 'var(--danger)';
+    }
+    btn.disabled = false; bumpSel.disabled = false;
+  };
 }
 
 // Apply saved theme on load

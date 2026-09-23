@@ -33,6 +33,11 @@ const __api = {
   installer: {
     build: () => ipcRenderer.invoke('installer:build')
   },
+  // Owner-only: cut a versioned release from the UI (Settings → About).
+  release: {
+    info: () => ipcRenderer.invoke('release:info'),
+    cut: (bump, message) => ipcRenderer.invoke('release:cut', bump, message)
+  },
   // 3D print history — archive STL+gcode of tracked prints
   printHistory: {
     archive: (opts) => ipcRenderer.invoke('printHistory:archive', opts),

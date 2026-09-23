@@ -16,7 +16,7 @@ class ViewRenderer {
     // Calendar state
     this.calendarYear = new Date().getFullYear();
     this.calendarMonth = new Date().getMonth();
-    this.calendarView = 'month'; // 'month' | 'week' | 'agenda'
+    this.calendarView = 'month'; // 'day' | 'week' | 'month' | 'agenda'
     this.calendarWeekStart = this._getWeekStart(new Date());
     this.calSelectedDate = null; // YYYY-MM-DD shown in the persistent day panel (right side)
     this.calShowCompleted = false; // day panel: reveal the collapsed "completed" section
@@ -931,8 +931,9 @@ class ViewRenderer {
         <button class="cal-today-btn" id="cal-today">Today</button>
       </div>
       <div class="calendar-view-toggle">
-        <button class="cal-view-btn ${this.calendarView==='month'?'active':''}" data-view="month">Month</button>
+        <button class="cal-view-btn ${this.calendarView==='day'?'active':''}"   data-view="day">Day</button>
         <button class="cal-view-btn ${this.calendarView==='week'?'active':''}"  data-view="week">Week</button>
+        <button class="cal-view-btn ${this.calendarView==='month'?'active':''}" data-view="month">Month</button>
         <button class="cal-view-btn ${this.calendarView==='agenda'?'active':''}" data-view="agenda">Agenda</button>
       </div>
       <button class="cal-import-btn" id="cal-import-syllabus" title="Import a syllabus with Claude → calendar events">&#128196; Import syllabus</button>
@@ -946,8 +947,10 @@ class ViewRenderer {
       btn.addEventListener('click', () => {
         this.calendarView = btn.dataset.view;
         if (this.calendarView === 'week') {
-          // Sync week to current month/day context
-          this.calendarWeekStart = this._getWeekStart(new Date(this.calendarYear, this.calendarMonth, 1));
+          // Sync week to the selected day's week so switching keeps context.
+          this.calendarWeekStart = this._getWeekStart(new Date((this.calSelectedDate || this._dateStr(new Date())) + 'T00:00:00'));
+        } else if (this.calendarView === 'day' && !this.calSelectedDate) {
+          this.calSelectedDate = this._dateStr(new Date());
         }
         this._renderCalendarView();
       });
@@ -960,15 +963,21 @@ class ViewRenderer {
       this.calendarYear  = today.getFullYear();
       this.calendarMonth = today.getMonth();
       this.calendarWeekStart = this._getWeekStart(today);
+      this.calSelectedDate = this._dateStr(today);
       this._renderCalendarView();
     });
 
+    const stepDay = (dir) => {
+      const d = new Date((this.calSelectedDate || this._dateStr(new Date())) + 'T00:00:00');
+      d.setDate(d.getDate() + dir);
+      this.calSelectedDate = this._dateStr(d);
+    };
+
     container.querySelector('#cal-prev').addEventListener('click', () => {
-      if (this.calendarView === 'week') {
+      if (this.calendarView === 'day') {
+        stepDay(-1);
+      } else if (this.calendarView === 'week') {
         this.calendarWeekStart = new Date(this.calendarWeekStart.getTime() - 7 * 86400000);
-      } else if (this.calendarView === 'agenda') {
-        this.calendarMonth--;
-        if (this.calendarMonth < 0) { this.calendarMonth = 11; this.calendarYear--; }
       } else {
         this.calendarMonth--;
         if (this.calendarMonth < 0) { this.calendarMonth = 11; this.calendarYear--; }
@@ -977,11 +986,10 @@ class ViewRenderer {
     });
 
     container.querySelector('#cal-next').addEventListener('click', () => {
-      if (this.calendarView === 'week') {
+      if (this.calendarView === 'day') {
+        stepDay(1);
+      } else if (this.calendarView === 'week') {
         this.calendarWeekStart = new Date(this.calendarWeekStart.getTime() + 7 * 86400000);
-      } else if (this.calendarView === 'agenda') {
-        this.calendarMonth++;
-        if (this.calendarMonth > 11) { this.calendarMonth = 0; this.calendarYear++; }
       } else {
         this.calendarMonth++;
         if (this.calendarMonth > 11) { this.calendarMonth = 0; this.calendarYear++; }
@@ -1001,7 +1009,8 @@ class ViewRenderer {
     container.classList.add('cal-split-view');
     container.innerHTML = `<div class="cal-view-area"></div><aside class="cal-side" id="cal-side"></aside>`;
     const area = container.querySelector('.cal-view-area');
-    if (this.calendarView === 'week')        this._renderWeekView(area);
+    if (this.calendarView === 'day')         this._renderDayView(area);
+    else if (this.calendarView === 'week')   this._renderWeekView(area);
     else if (this.calendarView === 'agenda') this._renderAgendaView(area);
     else                                     this._renderMonthView(area);
     this._renderDaySide();
@@ -1145,25 +1154,40 @@ class ViewRenderer {
   }
 
   // ── WEEK VIEW ────────────────────────────────────────────────────
+  // Week view = a 7-day time grid; Day view = the same grid with a single column.
+  // Both delegate to _renderTimeGrid so the layout, bindings, and scroll behavior
+  // live in one place.
   _renderWeekView(container) {
+    const weekStart = this.calendarWeekStart;
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekStart.getTime() + i * 86400000);
+      return { date: d, dateStr: this._dateStr(d), dayName: DAYS[i] };
+    });
+    const weekEnd = days[6].date;
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const rangeTitle = days[0].date.getMonth() === weekEnd.getMonth()
+      ? `${monthNames[days[0].date.getMonth()]} ${days[0].date.getDate()}–${weekEnd.getDate()}, ${weekEnd.getFullYear()}`
+      : `${monthNames[days[0].date.getMonth()]} ${days[0].date.getDate()} – ${monthNames[weekEnd.getMonth()]} ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
+    this._renderTimeGrid(container, days, rangeTitle);
+  }
+
+  _renderDayView(container) {
+    if (!this.calSelectedDate) this.calSelectedDate = this._dateStr(new Date());
+    const d = new Date(this.calSelectedDate + 'T00:00:00');
+    const dayName = DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
+    const title = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    this._renderTimeGrid(container, [{ date: d, dateStr: this._dateStr(d), dayName }], title);
+  }
+
+  _renderTimeGrid(container, days, rangeTitle) {
     const today      = new Date();
-    const weekStart  = this.calendarWeekStart;
     const HOUR_H     = 56; // px per hour
     const START_HOUR = 0;  // full 24-hour grid so work blocks at any hour are visible
     const END_HOUR   = 24;
     const HOURS      = END_HOUR - START_HOUR;
-
-    // Build 7-day array
-    const weekDays = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(weekStart.getTime() + i * 86400000);
-      return { date: d, dateStr: this._dateStr(d), dayName: DAYS[i] };
-    });
-
-    const weekEnd   = weekDays[6].date;
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const rangeTitle = weekDays[0].date.getMonth() === weekEnd.getMonth()
-      ? `${monthNames[weekDays[0].date.getMonth()]} ${weekDays[0].date.getDate()}–${weekEnd.getDate()}, ${weekEnd.getFullYear()}`
-      : `${monthNames[weekDays[0].date.getMonth()]} ${weekDays[0].date.getDate()} – ${monthNames[weekEnd.getMonth()]} ${weekEnd.getDate()}, ${weekEnd.getFullYear()}`;
+    const weekDays   = days;                                   // 7 (week) or 1 (day)
+    const gridCols   = `52px repeat(${weekDays.length}, 1fr)`; // inline → day view collapses to one column
+    const WD         = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
     // Collect all-day items and timed items per day
     const dayData = weekDays.map(({ dateStr, dayName }) => this._getDayItems(dateStr, dayName));
@@ -1172,12 +1196,12 @@ class ViewRenderer {
     html += this._buildCalHeader(rangeTitle);
 
     // Column headers
-    html += `<div class="cal-week-header">
+    html += `<div class="cal-week-header" style="grid-template-columns:${gridCols}">
       <div class="cal-week-gutter"></div>`;
-    weekDays.forEach(({ date, dateStr }, i) => {
+    weekDays.forEach(({ date, dateStr }) => {
       const isToday = date.toDateString() === today.toDateString();
       html += `<div class="cal-week-col-head ${isToday ? 'cal-week-today-head' : ''}" data-date="${dateStr}">
-        <div class="cal-week-dow">${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</div>
+        <div class="cal-week-dow">${WD[date.getDay()]}</div>
         <div class="cal-week-date-num ${isToday ? 'cal-week-date-today' : ''}">${date.getDate()}</div>
       </div>`;
     });
@@ -1189,7 +1213,7 @@ class ViewRenderer {
     // deadline visible and the grid reserved for real time blocks.
     const hasDeadlines = dayData.some(d => d.notes.length > 0);
     if (hasDeadlines) {
-      html += `<div class="cal-week-allday-row">
+      html += `<div class="cal-week-allday-row" style="grid-template-columns:${gridCols}">
         <div class="cal-week-gutter cal-week-allday-label">Due</div>`;
       dayData.forEach(({ notes }, i) => {
         const { dateStr } = weekDays[i];
@@ -1210,7 +1234,7 @@ class ViewRenderer {
     }
 
     // Scrollable time grid
-    html += `<div class="cal-week-body-wrap"><div class="cal-week-body">`;
+    html += `<div class="cal-week-body-wrap"><div class="cal-week-body" style="grid-template-columns:${gridCols}">`;
 
     // Time gutter
     html += `<div class="cal-week-gutter cal-week-time-col">`;
