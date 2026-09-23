@@ -3051,27 +3051,18 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   border-left: 3px solid rgba(255,255,255,0.6);
 }
 
-/* Project work-schedule block — a hatched, translucent "blocked-out time" look so it
-   reads distinctly from solid one-off events and sits behind them. */
+/* Project work-schedule block — a recurring "I work on this project" time block.
+   Rendered as a solid, opaque project-colored tile like a one-off event (no more
+   translucent hatch), kept distinct only by its briefcase glyph + a darker left bar. */
 .cal-week-workblock {
   z-index: 1;
-  background:
-    repeating-linear-gradient(45deg,
-      transparent, transparent 5px,
-      color-mix(in srgb, var(--wb-color) 14%, transparent) 5px,
-      color-mix(in srgb, var(--wb-color) 14%, transparent) 10px),
-    color-mix(in srgb, var(--wb-color) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--wb-color) 40%, transparent);
-  border-left: 3px solid var(--wb-color);
+  background: var(--wb-color);
+  border: 1px solid var(--wb-color);
+  border-left: 3px solid color-mix(in srgb, var(--wb-color) 60%, #000);
 }
-.cal-week-workblock:hover { filter: none; background:
-    repeating-linear-gradient(45deg,
-      transparent, transparent 5px,
-      color-mix(in srgb, var(--wb-color) 22%, transparent) 5px,
-      color-mix(in srgb, var(--wb-color) 22%, transparent) 10px),
-    color-mix(in srgb, var(--wb-color) 20%, transparent); }
-.cal-week-workblock .cal-week-event-title { color: var(--wb-color); }
-.cal-week-workblock .cal-week-event-time  { color: color-mix(in srgb, var(--wb-color) 75%, var(--text-muted, #64748B)); }
+.cal-week-workblock:hover { filter: brightness(0.9); }
+.cal-week-workblock .cal-week-event-title { color: #fff; }
+.cal-week-workblock .cal-week-event-time  { color: rgba(255,255,255,0.8); }
 /* A completed occurrence reads as done. */
 .cal-week-workblock-done { opacity: 0.45; }
 .cal-week-workblock-done .cal-week-event-title { text-decoration: line-through; }
