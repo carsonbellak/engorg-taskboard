@@ -68,6 +68,34 @@ object InkUpdater {
         }.start()
     }
 
+    /**
+     * Manual "check for updates" — always hits the network (ignores the interval + the "Later"
+     * suppression) and gives visible feedback: prompts on a newer build, otherwise confirms the
+     * user is current. Wire this to a button so the auto-updater is verifiable and can be pulled
+     * on demand (the native counterpart to the desktop's Settings → About "Check for updates").
+     */
+    fun checkNow(activity: Activity) {
+        Toast.makeText(activity, "Checking for updates…", Toast.LENGTH_SHORT).show()
+        Thread {
+            val rel = try { fetchNewestRelease() } catch (_: Exception) { null }
+            if (activity.isFinishing || activity.isDestroyed) return@Thread
+            activity.runOnUiThread {
+                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                when {
+                    rel == null ->
+                        Toast.makeText(activity, "Couldn't check for updates — check your connection.", Toast.LENGTH_LONG).show()
+                    isNewer(rel.version) -> {
+                        // A forced check should re-offer even a build the user previously tapped "Later" on.
+                        activity.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit().remove("skipVersion").apply()
+                        promptUpdate(activity, rel)
+                    }
+                    else ->
+                        Toast.makeText(activity, "You're on the latest version (${BuildConfig.VERSION_NAME}).", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
+    }
+
     /** The newest published `vX.Y.Z` release that has an EngOrg-Ink APK attached, or null. */
     private fun fetchNewestRelease(): Release? {
         val conn = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
