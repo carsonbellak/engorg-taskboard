@@ -1,6 +1,8 @@
 package com.engorg.inkpad
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -8,8 +10,12 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
+import kotlin.math.hypot
 
 /**
  * Continuous multi-page document (8.5x11 pages stacked vertically with a gap) drawn on a backdrop.
@@ -29,6 +35,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         val widthPx: Float,         // page units
         val highlighter: Boolean,
         val shape: ShapeSpec?,
+        val brush: Brush = Brush.PEN, // ink style (freehand only; shapes always draw pen-style)
     )
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
@@ -65,6 +72,102 @@ class FinishedStrokesView(context: Context) : View(context) {
             p.moveTo(pts[0].x, pts[0].y)
             for (i in 1 until pts.size) p.lineTo(pts[i].x, pts[i].y)
             return p
+        }
+
+        // A small tiling grain texture (white RGB, noisy alpha) so PENCIL reads as graphite instead
+        // of a thin flat line. Tinted to the stroke color at draw time via a SRC_IN color filter.
+        private val grainBmp: Bitmap by lazy {
+            val s = 128
+            val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+            val rnd = java.util.Random(0x51EED)
+            val px = IntArray(s * s)
+            for (i in px.indices) {
+                val n = rnd.nextInt(256)
+                // Bias toward sparse, low-alpha specks with occasional darker grains.
+                val a = if (n > 176) n else n / 4
+                px[i] = Color.argb(a, 255, 255, 255)
+            }
+            bmp.setPixels(px, 0, s, 0, 0, s, s)
+            bmp
+        }
+        private val grainShader: BitmapShader by lazy {
+            BitmapShader(grainBmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        }
+
+        /**
+         * Draw one freehand stroke in the canvas's current coordinate space (page-local under the
+         * finished view's matrix, or raw screen space in the wet overlay), honoring its [brush].
+         * [prebuilt] is the Catmull-Rom path when the caller already has it (finished recs); pass
+         * null to build one. [paint] is a reusable STROKE paint owned by the caller — this mutates
+         * it and restores shader/colorFilter/alpha afterward.
+         */
+        fun drawInk(
+            canvas: Canvas,
+            pts: List<PointF>,
+            prebuilt: Path?,
+            color: Int,
+            width: Float,
+            brush: Brush,
+            highlighter: Boolean,
+            paint: Paint,
+        ) {
+            if (width <= 0f || pts.isEmpty()) return
+            val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
+            // The fountain nib varies width along the stroke — draw it segment-by-segment.
+            if (brush == Brush.FOUNTAIN && !highlighter) {
+                drawFountain(canvas, pts, color, width, paint); return
+            }
+            paint.shader = null; paint.colorFilter = null
+            paint.strokeJoin = Paint.Join.ROUND
+            paint.strokeCap = if (brush == Brush.MARKER && !highlighter) Paint.Cap.SQUARE else Paint.Cap.ROUND
+            val path = prebuilt ?: buildPath(pts)
+            if (brush == Brush.PENCIL && !highlighter) {
+                paint.shader = grainShader
+                paint.colorFilter = PorterDuffColorFilter(Color.rgb(r, g, b), PorterDuff.Mode.SRC_IN)
+                paint.alpha = 0xC0
+                paint.strokeWidth = width
+                canvas.drawPath(path, paint)
+                paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
+                paint.strokeCap = Paint.Cap.ROUND
+                return
+            }
+            val alpha = if (highlighter) 0x66 else if (brush == Brush.MARKER) 0xE6 else 0xFF
+            paint.color = Color.argb(alpha, r, g, b)
+            paint.strokeWidth = width
+            canvas.drawPath(path, paint)
+            paint.strokeCap = Paint.Cap.ROUND
+        }
+
+        /** Calligraphic (fountain) stroke: width tracks pen speed — thin when fast, swelling when
+         *  slow — with tapered ends, rendered as round-capped segments that overlap seamlessly. */
+        private fun drawFountain(canvas: Canvas, pts: List<PointF>, color: Int, baseW: Float, paint: Paint) {
+            paint.shader = null; paint.colorFilter = null
+            paint.color = Color.argb(0xFF, Color.red(color), Color.green(color), Color.blue(color))
+            paint.strokeCap = Paint.Cap.ROUND; paint.strokeJoin = Paint.Join.ROUND
+            val n = pts.size
+            if (n == 1) { paint.strokeWidth = baseW; canvas.drawPoint(pts[0].x, pts[0].y, paint); return }
+            val ref = baseW * 2.2f + 5f
+            val w = FloatArray(n)
+            for (i in 0 until n) {
+                val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
+                val span = if (i in 1 until n - 1) 2f else 1f
+                val d = hypot(c.x - a.x, c.y - a.y) / span
+                val f = (1.45f - d / ref).coerceIn(0.32f, 1.45f)
+                w[i] = baseW * f
+            }
+            // One-pass box smoothing so widths don't jitter segment to segment.
+            val sm = FloatArray(n)
+            for (i in 0 until n) {
+                val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
+                sm[i] = (w[lo] + w[i] + w[hi]) / ((hi - lo) + 1)
+            }
+            // Taper the very ends toward a point.
+            sm[0] *= 0.45f; sm[n - 1] *= 0.45f
+            if (n > 2) { sm[1] *= 0.75f; sm[n - 2] *= 0.75f }
+            for (i in 0 until n - 1) {
+                paint.strokeWidth = ((sm[i] + sm[i + 1]) / 2f).coerceAtLeast(0.4f)
+                canvas.drawLine(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, paint)
+            }
         }
     }
 
@@ -130,11 +233,17 @@ class FinishedStrokesView(context: Context) : View(context) {
 
     private fun drawRecs(canvas: Canvas, page: Page) {
         for (rec in page.recs) {
-            strokePaint.color = if (rec.highlighter)
-                Color.argb(0x66, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
-            else Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
-            strokePaint.strokeWidth = rec.widthPx
-            for (p in rec.paths) canvas.drawPath(p, strokePaint)
+            if (rec.shape != null) {
+                // Parametric shapes always draw as a crisp solid pen line.
+                strokePaint.shader = null; strokePaint.colorFilter = null; strokePaint.strokeCap = Paint.Cap.ROUND
+                strokePaint.color = if (rec.highlighter)
+                    Color.argb(0x66, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+                else Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+                strokePaint.strokeWidth = rec.widthPx
+                for (p in rec.paths) canvas.drawPath(p, strokePaint)
+            } else {
+                drawInk(canvas, rec.points, rec.paths.firstOrNull(), rec.color, rec.widthPx, rec.brush, rec.highlighter, strokePaint)
+            }
         }
     }
 

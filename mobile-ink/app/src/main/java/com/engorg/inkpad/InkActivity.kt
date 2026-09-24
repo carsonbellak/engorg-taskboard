@@ -55,10 +55,13 @@ class InkActivity : ComponentActivity() {
     private var tool = Tool.PEN
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
     private var brushSize = 2f
+    private var brush = Brush.PEN
+    private var smoothing = 0.35f   // 0 = off, 1 = maximum stabilizer lag
     private var pendingShape: ShapeType? = null
 
     private lateinit var colorButton: Button
     private var shapeButton: ImageButton? = null
+    private var brushButton: ImageButton? = null
     private var pageLabel: TextView? = null
     private var mirrorButton: ImageButton? = null
     private val toolButtons = HashMap<Tool, ImageButton>()
@@ -89,6 +92,8 @@ class InkActivity : ComponentActivity() {
         override val tool get() = this@InkActivity.tool
         override val brushColor get() = this@InkActivity.brushColor
         override val brushSize get() = this@InkActivity.brushSize
+        override val brush get() = this@InkActivity.brush
+        override val smoothing get() = this@InkActivity.smoothing
         override val pendingShape get() = this@InkActivity.pendingShape
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
         override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
@@ -100,10 +105,12 @@ class InkActivity : ComponentActivity() {
         AppTheme.load(this)
         SystemBars.setup(this, lightBackground = !AppTheme.dark)
 
-        // Restore the last-used pen so the stroke weight + color you settled on stick between sessions.
+        // Restore the last-used pen so the stroke weight + color + brush you settled on stick between sessions.
         val ip = getSharedPreferences(INK_PREFS, MODE_PRIVATE)
         brushSize = ip.getFloat("brushSize", brushSize).coerceIn(minBrush, maxBrush)
         brushColor = ip.getInt("brushColor", brushColor)
+        smoothing = ip.getFloat("smoothing", smoothing).coerceIn(0f, 1f)
+        brush = runCatching { Brush.valueOf(ip.getString("brush", "PEN") ?: "PEN") }.getOrDefault(Brush.PEN)
 
         store = NotebookStore(filesDir)
 
@@ -135,6 +142,15 @@ class InkActivity : ComponentActivity() {
         // Reflect the mirror's connection state on the cast button (survives library <-> notebook).
         MirrorManager.onState = { on, _ -> runOnUiThread { updateMirrorButton(on) } }
         updateMirrorButton(MirrorManager.connected)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!::store.isInitialized) return
+        // Remember where each pane was left (page + the split composition) so reopening restores it.
+        panes.forEach { it.syncLastPage() }
+        store.save()
+        InkSettings.saveLastSession(this, panes.mapNotNull { it.notebookId() })
     }
 
     override fun onDestroy() {
@@ -354,6 +370,81 @@ class InkActivity : ComponentActivity() {
             btn.background = pill(if (active) accent else light)
             btn.setColorFilter(if (active) AppTheme.onAccent() else onSurface)
         }
+        updateBrushButton()
+    }
+
+    /** Highlight the brush button while the pen tool (which uses the brush) is active. */
+    private fun updateBrushButton() {
+        val b = brushButton ?: return
+        val active = tool == Tool.PEN && pendingShape == null
+        b.background = pill(if (active) accent else light)
+        b.setColorFilter(if (active) AppTheme.onAccent() else onSurface)
+    }
+
+    private fun brushLabel(b: Brush) = when (b) {
+        Brush.PEN -> "Pen"; Brush.FOUNTAIN -> "Fountain"; Brush.MARKER -> "Marker"; Brush.PENCIL -> "Pencil"
+    }
+
+    /** A short squiggle rendered with [b] so each brush's character is visible in the picker. */
+    private fun brushPreview(b: Brush, w: Int, h: Int, tint: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val pts = ArrayList<android.graphics.PointF>()
+        val n = 26
+        for (i in 0..n) {
+            val t = i / n.toFloat()
+            val x = w * 0.12f + t * w * 0.76f
+            val y = h / 2f + Math.sin(t * Math.PI * 2.0).toFloat() * h * 0.24f
+            pts.add(android.graphics.PointF(x, y))
+        }
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true; style = android.graphics.Paint.Style.STROKE
+            strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+        }
+        FinishedStrokesView.drawInk(c, pts, null, tint, dp(3).toFloat(), b, false, paint)
+        return bmp
+    }
+
+    private fun showBrushMenu(anchor: View) {
+        val brushes = listOf(Brush.PEN, Brush.FOUNTAIN, Brush.MARKER, Brush.PENCIL)
+        val grid = GridLayout(this).apply {
+            columnCount = 4
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
+        for (bt in brushes) {
+            val on = bt == brush
+            val fg = if (on) AppTheme.onAccent() else onSurface
+            grid.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                background = pill(if (on) accent else light); stateListAnimator = null
+                setPadding(dp(6), dp(8), dp(6), dp(6))
+                layoutParams = GridLayout.LayoutParams().apply { width = dp(66); height = dp(66); setMargins(dp(4), dp(4), dp(4), dp(4)) }
+                addView(ImageView(this@InkActivity).apply {
+                    setImageBitmap(brushPreview(bt, dp(46), dp(26), fg))
+                    layoutParams = LinearLayout.LayoutParams(dp(46), dp(26))
+                })
+                addView(TextView(this@InkActivity).apply {
+                    text = brushLabel(bt); textSize = 10.5f; setTextColor(fg); gravity = Gravity.CENTER; setPadding(0, dp(3), 0, 0)
+                })
+                setOnClickListener { popup.dismiss(); selectBrush(bt) }
+            })
+        }
+        popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    private fun selectBrush(b: Brush) {
+        brush = b
+        clearPendingShape()
+        tool = Tool.PEN
+        panes.forEach { it.onToolChanged() }
+        updateTools()
+        saveBrushPref()
+        Toast.makeText(this, brushLabel(b), Toast.LENGTH_SHORT).show()
     }
 
     private fun buildToolbar(): View {
@@ -383,7 +474,9 @@ class InkActivity : ComponentActivity() {
             addView(sep())
             addView(iconBtn(Icons.UNDO) { focused?.undo() }); addView(iconBtn(Icons.REDO) { focused?.redo() })
             addView(sep())
-            addView(iconTool(Icons.PEN, Tool.PEN)); addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
+            addView(iconTool(Icons.PEN, Tool.PEN))
+            addView(iconBtn(Icons.BRUSH) { showBrushMenu(it) }.also { brushButton = it })
+            addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
             addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
             addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
             addView(sep())
@@ -446,19 +539,31 @@ class InkActivity : ComponentActivity() {
 
     private fun showSizePopup(anchor: View) {
         val pad = dp(16)
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
         val preview = object : View(this) {
-            private val pv = android.graphics.Paint().apply { isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; strokeCap = android.graphics.Paint.Cap.ROUND }
-            override fun onDraw(c: android.graphics.Canvas) {
-                pv.color = Color.argb(0xFF, Color.red(brushColor), Color.green(brushColor), Color.blue(brushColor))
-                pv.strokeWidth = brushSize
-                c.drawLine(dp(14).toFloat(), height / 2f, (width - dp(14)).toFloat(), height / 2f, pv)
+            private val pv = android.graphics.Paint().apply {
+                isAntiAlias = true; style = android.graphics.Paint.Style.STROKE
+                strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
             }
-        }.apply { layoutParams = LinearLayout.LayoutParams(dp(220), dp(52)) }
-        val sizeLabel = TextView(this).apply {
-            text = "%.1f".format(brushSize); textSize = 12f
-            setTextColor(Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
-            gravity = Gravity.CENTER
+            override fun onDraw(c: android.graphics.Canvas) {
+                val pts = ArrayList<android.graphics.PointF>()
+                val n = 40
+                for (i in 0..n) {
+                    val t = i / n.toFloat()
+                    val x = dp(16) + t * (width - dp(32))
+                    val y = height / 2f + Math.sin(t * Math.PI * 2.0).toFloat() * height * 0.26f
+                    pts.add(android.graphics.PointF(x, y.toFloat()))
+                }
+                FinishedStrokesView.drawInk(c, pts, null, brushColor, brushSize, brush, tool == Tool.HIGHLIGHTER, pv)
+            }
+        }.apply { layoutParams = LinearLayout.LayoutParams(dp(230), dp(56)) }
+
+        fun sectionLabel(text: String) = TextView(this).apply {
+            this.text = text; textSize = 11f; setTextColor(muted)
+            setTypeface(null, android.graphics.Typeface.BOLD); letterSpacing = 0.04f
         }
+
+        val sizeLabel = TextView(this).apply { text = "%.1f".format(brushSize); textSize = 12f; setTextColor(muted); gravity = Gravity.CENTER }
         val seek = SeekBar(this).apply {
             max = brushSteps; progress = progressForBrush(brushSize)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -469,6 +574,19 @@ class InkActivity : ComponentActivity() {
                 override fun onStopTrackingTouch(sb: SeekBar?) { saveBrushPref() }
             })
         }
+
+        val smLabel = TextView(this).apply { text = smoothingText(); textSize = 12f; setTextColor(muted); gravity = Gravity.CENTER }
+        val smSeek = SeekBar(this).apply {
+            max = 100; progress = (smoothing * 100f).roundToInt().coerceIn(0, 100)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                    smoothing = p / 100f; smLabel.text = smoothingText()
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) { saveBrushPref() }
+            })
+        }
+
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -477,10 +595,21 @@ class InkActivity : ComponentActivity() {
             }
             setPadding(pad, pad, pad, pad)
             addView(preview)
-            addView(seek, LinearLayout.LayoutParams(dp(230), WRAP_CONTENT).apply { topMargin = dp(6) })
-            addView(sizeLabel, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(2) })
+            addView(sectionLabel("SIZE"), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(10) })
+            addView(seek, LinearLayout.LayoutParams(dp(240), WRAP_CONTENT).apply { topMargin = dp(2) })
+            addView(sizeLabel, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(sectionLabel("SMOOTHING"), LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+            addView(smSeek, LinearLayout.LayoutParams(dp(240), WRAP_CONTENT).apply { topMargin = dp(2) })
+            addView(smLabel, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         }
         PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    private fun smoothingText(): String = when {
+        smoothing < 0.03f -> "Off"
+        smoothing < 0.35f -> "Light · ${(smoothing * 100).roundToInt()}%"
+        smoothing < 0.7f -> "Medium · ${(smoothing * 100).roundToInt()}%"
+        else -> "Strong · ${(smoothing * 100).roundToInt()}%"
     }
 
     private fun showColorPicker(anchor: View, onPick: (Int) -> Unit) {
@@ -505,7 +634,8 @@ class InkActivity : ComponentActivity() {
 
     private fun saveBrushPref() {
         getSharedPreferences(INK_PREFS, MODE_PRIVATE).edit()
-            .putFloat("brushSize", brushSize).putInt("brushColor", brushColor).apply()
+            .putFloat("brushSize", brushSize).putInt("brushColor", brushColor)
+            .putFloat("smoothing", smoothing).putString("brush", brush.name).apply()
     }
 
     // ---------- PDF export + email ----------

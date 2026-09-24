@@ -27,6 +27,10 @@ import kotlin.math.min
 /** The active tool. Shared across every open pane via [PageCanvas.Host]. */
 enum class Tool { PEN, HIGHLIGHTER, ERASER, SELECT }
 
+/** Ink style for the pen tool. PEN = solid round; FOUNTAIN = speed-varied calligraphy nib;
+ *  MARKER = broad flat opaque; PENCIL = grainy graphite. (Highlighter is its own tool.) */
+enum class Brush { PEN, FOUNTAIN, MARKER, PENCIL }
+
 /**
  * One notebook's editing surface: the FinishedStrokesView + wet/eraser overlays + touch handler +
  * this notebook's viewport (scale/tx/ty), selection, undo-redo and page persistence — everything that
@@ -43,6 +47,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val tool: Tool
         val brushColor: Int
         val brushSize: Float
+        val brush: Brush
+        val smoothing: Float   // 0f (off) .. 1f (max lag/leash)
         val pendingShape: ShapeType?
         fun onPaneFocused(pane: PageCanvas)
         fun onPageChanged(pane: PageCanvas)
@@ -81,12 +87,17 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     private class Sample(val x: Float, val y: Float)
     private val samples = ArrayList<Sample>()
+    private var currentBrush = Brush.PEN
 
-    // Light low-pass (EMA) smoothing of raw touch points — shaves hand jitter while staying under the pen.
-    private val strokeSmoothing = 0.6f
-    private var smX = 0f
-    private var smY = 0f
+    // Stroke stabilizer ("pulled string"): the raw pen position is the ball; the committed line's
+    // head chases it, staying [leashPx] behind, so the line lags and smooths. leash grows with the
+    // smoothing setting. At leash ~0 we fall back to a light low-pass that only shaves hand jitter.
     private var smInit = false
+    private var headX = 0f   // committed line head (last emitted sample), screen space
+    private var headY = 0f
+    private var ballX = 0f   // raw pen position, screen space
+    private var ballY = 0f
+    private fun leashPx(): Float = host.smoothing.coerceIn(0f, 1f) * 40f * resources.displayMetrics.density
 
     var scale = 1f; private set
     var tx = 0f; private set
@@ -155,6 +166,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     // ---------- open / focus ----------
     /** Point this pane at a notebook (null = the first/quick-notes notebook) and fit it to view. */
     fun open(notebookId: String?) {
+        if (::notebook.isInitialized) syncLastPage()   // remember where the outgoing notebook was
         notebook = (notebookId?.let { store.notebook(it) }) ?: store.notebooks.firstOrNull()
             ?: store.createNotebook("Quick notes", null, AppTheme.accent)
         if (notebook.pageIds.isEmpty()) store.addPage(notebook)
@@ -163,17 +175,32 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         loadAllPages()
         undoStack.clear(); redoStack.clear()
         clearSelection()
-        if (finishedView.width > 0) { fitVertical = false; fitPage() }
+        // Reopen on the page this notebook was last left on (so a split view restores both pages).
+        val target = notebook.lastPage
+        if (finishedView.width > 0) { fitVertical = false; fitPage(); goToPage(target) }
         else finishedView.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 if (finishedView.width > 0) {
                     finishedView.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                    fitVertical = false; fitPage()
+                    fitVertical = false; fitPage(); goToPage(target)
                 }
             }
         })
         mirror?.paneOpened(this)
     }
+
+    /** Jump the viewport so page [p]'s top aligns near the top of the pane. */
+    private fun goToPage(p: Int) {
+        val target = p.coerceIn(0, finishedView.pages.size - 1)
+        ty = dp(16).toFloat() - scale * finishedView.pageTop(target)
+        clampTransform(); applyTransform()
+    }
+
+    /** Snapshot the current page onto the notebook so it persists (saved by the store / on pause). */
+    fun syncLastPage() { if (::notebook.isInitialized && finishedView.height > 0) notebook.lastPage = currentPage() }
+
+    /** The notebook currently shown in this pane (for session persistence). */
+    fun notebookId(): String? = if (::notebook.isInitialized) notebook.id else null
 
     /** Ring the pane with an accent border when it's the focused (toolbar-targeted) pane. */
     fun setFocusedVisual(on: Boolean) {
@@ -195,7 +222,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     fun pageCount(): Int = finishedView.pages.size
 
     // ---------- transform ----------
-    private fun applyTransform() { finishedView.setTransform(scale, tx, ty); host.onPageChanged(this); mirror?.transformed(this) }
+    private fun applyTransform() {
+        if (::notebook.isInitialized && finishedView.height > 0) notebook.lastPage = currentPage()
+        finishedView.setTransform(scale, tx, ty); host.onPageChanged(this); mirror?.transformed(this)
+    }
 
     private fun clampTransform() {
         val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
@@ -257,8 +287,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     private fun pageUnitSize(hl: Boolean) = if (hl) host.brushSize * 3.2f else host.brushSize
 
-    private fun freehandRec(points: List<PointF>, color: Int, width: Float, hl: Boolean): FinishedStrokesView.Rec =
-        FinishedStrokesView.Rec(listOf(FinishedStrokesView.buildPath(points)), points, color, width, hl, null)
+    private fun freehandRec(points: List<PointF>, color: Int, width: Float, hl: Boolean, brush: Brush): FinishedStrokesView.Rec =
+        FinishedStrokesView.Rec(listOf(FinishedStrokesView.buildPath(points)), points, color, width, hl, null, brush)
 
     private fun buildShapeRec(spec: ShapeSpec, color: Int, width: Float, hl: Boolean): FinishedStrokesView.Rec {
         val polys = spec.polylines()
@@ -283,8 +313,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     private fun commitSamples() {
+        // With a leash, the head trails the pen — snap the final point to where the pen lifted so
+        // the stroke ends exactly under the nib instead of short of it.
+        if (leashPx() > 0.75f && smInit && (samples.isEmpty() || samples.last().x != ballX || samples.last().y != ballY))
+            samples.add(Sample(ballX, ballY))
         val (page, pts) = samplesToPage() ?: return
-        finishedView.pages[page].recs.add(freehandRec(pts, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter))
+        finishedView.pages[page].recs.add(freehandRec(pts, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter, currentBrush))
         finishedView.invalidate()
         savePage(page)
         mirror?.pageEdited(this, page)
@@ -334,13 +368,29 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     private fun addSmoothed(rx: Float, ry: Float) {
-        if (!smInit) { smX = rx; smY = ry; smInit = true }
-        else { smX += strokeSmoothing * (rx - smX); smY += strokeSmoothing * (ry - smY) }
-        samples.add(Sample(smX, smY))
+        ballX = rx; ballY = ry
+        if (!smInit) { headX = rx; headY = ry; smInit = true; samples.add(Sample(rx, ry)); return }
+        val leash = leashPx()
+        if (leash <= 0.75f) {
+            // Smoothing off: light low-pass to shave hand jitter, still under the pen.
+            headX += 0.6f * (rx - headX); headY += 0.6f * (ry - headY)
+            samples.add(Sample(headX, headY)); return
+        }
+        // Pull the head toward the ball, stopping [leash] short of it.
+        val dx = ballX - headX; val dy = ballY - headY
+        val dist = hypot(dx, dy)
+        if (dist > leash) {
+            val t = (dist - leash) / dist
+            headX += dx * t; headY += dy * t
+            samples.add(Sample(headX, headY))
+        }
     }
 
     private fun updateWet() {
-        wetOverlay.setStroke(samples.map { PointF(it.x, it.y) }, host.brushColor, pageUnitSize(currentHighlighter) * scale, currentHighlighter)
+        val wPx = pageUnitSize(currentHighlighter) * scale
+        wetOverlay.setStroke(samples.map { PointF(it.x, it.y) }, host.brushColor, wPx, currentHighlighter, currentBrush)
+        val showBall = leashPx() > 1f && samples.isNotEmpty()
+        wetOverlay.setBall(ballX, ballY, headX, headY, (wPx / 2f).coerceAtLeast(dp(7).toFloat()), showBall)
         mirror?.let { m ->
             val conv = samplesToPage() ?: return@let
             m.wetStroke(this, conv.first, conv.second, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter)
@@ -411,6 +461,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         clearSelection()
         pushUndo()
         currentHighlighter = host.tool == Tool.HIGHLIGHTER
+        currentBrush = if (currentHighlighter) Brush.PEN else host.brush
         samples.clear(); smInit = false; captureSamples(event, idx); updateWet()
     }
 
@@ -509,16 +560,42 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     private fun finishLasso() {
         finishedView.setLasso(null)
-        if (lassoScreen.size < 3) { clearSelection(); return }
+        if (lassoScreen.size < 3) { tapSelectAt(lassoScreen.firstOrNull()); return }
         val page = hitTest(lassoScreen[0].x, lassoScreen[0].y).page
-        val localPoly = lassoScreen.map { toLocalOn(it.x, it.y, page) }
+        val poly = ArrayList(lassoScreen.map { toLocalOn(it.x, it.y, page) })
+        poly.add(PointF(poly[0].x, poly[0].y))   // close the loop so the ray-cast is watertight
         selRecs.clear()
-        for (rec in finishedView.pages[page].recs) {
-            val inside = rec.points.count { pointInPoly(it, localPoly) }
-            if (inside >= max(1, rec.points.size / 2)) selRecs.add(rec)
-        }
+        for (rec in finishedView.pages[page].recs) if (recInLasso(rec, poly)) selRecs.add(rec)
         if (selRecs.isEmpty()) { clearSelection(); return }
         selPage = page; selBox = recBounds(selRecs); refreshSelectionOverlay()
+    }
+
+    /**
+     * A stroke is caught if it's fully enclosed, or ≥40% of its points are inside, or its centroid
+     * is inside. The old rule ("more than half the points inside") routinely failed to grab long
+     * handwriting strokes unless you drew a very generous loop — which is why the lasso felt broken.
+     */
+    private fun recInLasso(rec: FinishedStrokesView.Rec, poly: List<PointF>): Boolean {
+        if (rec.points.isEmpty()) return false
+        var inside = 0; var cx = 0f; var cy = 0f
+        for (p in rec.points) { if (pointInPoly(p, poly)) inside++; cx += p.x; cy += p.y }
+        val n = rec.points.size
+        if (inside == n) return true
+        if (inside.toFloat() / n >= 0.4f) return true
+        return pointInPoly(PointF(cx / n, cy / n), poly)
+    }
+
+    /** A tap (not a drag) with the select tool grabs the single nearest stroke under the finger. */
+    private fun tapSelectAt(pt: PointF?) {
+        if (pt == null) { clearSelection(); return }
+        val h = hitTest(pt.x, pt.y)
+        if (!h.onPage) { clearSelection(); return }
+        var best: FinishedStrokesView.Rec? = null; var bestD = 18f
+        for (rec in finishedView.pages[h.page].recs) for (p in rec.points) {
+            val d = hypot(p.x - h.x, p.y - h.y); if (d < bestD) { bestD = d; best = rec }
+        }
+        val picked = best ?: run { clearSelection(); return }
+        selRecs.clear(); selRecs.add(picked); selPage = h.page; selBox = recBounds(selRecs); refreshSelectionOverlay()
     }
 
     private fun toLocalOn(sx: Float, sy: Float, page: Int): PointF {
@@ -545,7 +622,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
             } else {
                 val np = base.points.map { f[0] = it.x; f[1] = it.y; m.mapPoints(f); PointF(f[0], f[1]) }
-                freehandRec(np, base.color, base.widthPx, base.highlighter)
+                freehandRec(np, base.color, base.widthPx, base.highlighter, base.brush)
             }
             replaceRec(selRecs[k], newRec); selRecs[k] = newRec
         }
@@ -598,6 +675,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     o.put("v", va)
                 } else {
                     o.put("k", "f")
+                    if (rec.brush != Brush.PEN) o.put("b", rec.brush.name)
                     val pa = JSONArray(); for (p in rec.points) pa.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
                     o.put("p", pa)
                 }
@@ -637,7 +715,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]
                     val pts = ArrayList<PointF>()
                     if (pa != null) for (j in 0 until pa.length()) { val p = pa.getJSONArray(j); pts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
-                    if (pts.isNotEmpty()) page.recs.add(freehandRec(pts, color, width, hl))
+                    val brush = runCatching { Brush.valueOf(o.optString("b", "PEN")) }.getOrDefault(Brush.PEN)
+                    if (pts.isNotEmpty()) page.recs.add(freehandRec(pts, color, width, hl, brush))
                 }
             }
         } catch (e: Exception) { Log.e("Ink", "load page failed", e) }

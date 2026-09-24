@@ -187,6 +187,11 @@ class LibraryActivity : ComponentActivity() {
         content.removeAllViews()
         val inFolder = currentFolder
         titleView.text = if (inFolder == null) "Notebooks" else (store.folders.find { it.id == inFolder }?.name ?: "Notebooks")
+        // At the top level, offer to reopen the last multi-notebook split exactly as it was left.
+        if (inFolder == null) {
+            val session = InkSettings.lastSession(this).filter { store.notebook(it) != null }
+            if (session.size >= 2) content.addView(resumeSplitCard(session))
+        }
         val subFolders = store.foldersIn(inFolder)
         val nbs = store.notebooksIn(inFolder)
         if (subFolders.isNotEmpty()) content.addView(folderGrid(subFolders))
@@ -373,6 +378,43 @@ class LibraryActivity : ComponentActivity() {
 
     private fun openNotebook(nb: NotebookStore.Notebook) {
         startActivity(Intent(this, InkActivity::class.java).putExtra(InkActivity.EXTRA_NOTEBOOK_ID, nb.id))
+    }
+
+    /** A banner that relaunches the last split-view session (2–4 notebooks) as it was left. */
+    private fun resumeSplitCard(ids: List<String>): View {
+        val names = ids.mapNotNull { store.notebook(it)?.title }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.elevated)
+                setStroke(dp(1), Color.argb(0x55, Color.red(AppTheme.accent), Color.green(AppTheme.accent), Color.blue(AppTheme.accent)))
+            }
+            foreground = rippleFg(14, Color.argb(0x28, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(12) }
+            setOnClickListener {
+                startActivity(Intent(this@LibraryActivity, InkActivity::class.java)
+                    .putStringArrayListExtra(InkActivity.EXTRA_NOTEBOOK_IDS, ArrayList(ids)))
+            }
+        }
+        row.addView(iconView(Icons.SPLIT, 22, AppTheme.accent).apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(12) })
+        row.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+            addView(TextView(this@LibraryActivity).apply { text = "Resume split view"; setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, Typeface.BOLD) })
+            addView(TextView(this@LibraryActivity).apply {
+                text = names.joinToString("  ·  "); setTextColor(muted()); textSize = 12f
+                maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+        })
+        row.addView(ImageButton(this).apply {
+            setImageBitmap(Icons.bitmap(Icons.CLOSE, dp(16))); setColorFilter(muted())
+            background = pill(AppTheme.elevated); scaleType = ImageView.ScaleType.FIT_CENTER; stateListAnimator = null
+            val pd = dp(5); setPadding(pd, pd, pd, pd)
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { leftMargin = dp(8) }
+            setOnClickListener { InkSettings.saveLastSession(this@LibraryActivity, emptyList()); rebuild() }
+        })
+        return row
     }
 
     // ---- Noteshelf import ----

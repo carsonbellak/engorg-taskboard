@@ -2,6 +2,7 @@ package com.engorg.inkpad
 
 import android.content.Context
 import android.graphics.Color
+import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 
@@ -33,6 +34,21 @@ object InkSettings {
         nb(ctx).edit().putString("nbPaper", paper).putInt("nbCover", cover).putInt("nbPageColor", pageColor).apply()
     }
 
+    // ---- last ink session (device-local: which notebooks were open side by side) ----
+    // Kept in ink_prefs but deliberately NOT part of the synced blob above — the split composition
+    // is per-device, and pages restore from each notebook's own lastPage.
+    private const val LAST_SESSION = "lastSessionIds"
+    fun saveLastSession(ctx: Context, ids: List<String>) {
+        val arr = JSONArray(); ids.forEach { arr.put(it) }
+        ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).edit().putString(LAST_SESSION, arr.toString()).apply()
+    }
+    fun lastSession(ctx: Context): List<String> = try {
+        val s = ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).getString(LAST_SESSION, null)
+        if (s.isNullOrBlank()) emptyList() else {
+            val arr = JSONArray(s); (0 until arr.length()).map { arr.getString(it) }
+        }
+    } catch (_: Exception) { emptyList() }
+
     // ---- aggregate for syncing ----
     /** Gather every synced pref into one JSON string (what the native side hands the PWA). */
     fun toJson(ctx: Context): String {
@@ -41,6 +57,8 @@ object InkSettings {
         try {
             if (ink.contains("brushSize")) o.put("brushSize", ink.getFloat("brushSize", 2f).toDouble())
             if (ink.contains("brushColor")) o.put("brushColor", ink.getInt("brushColor", 0))
+            if (ink.contains("smoothing")) o.put("smoothing", ink.getFloat("smoothing", 0.35f).toDouble())
+            if (ink.contains("brush")) o.put("brush", ink.getString("brush", "PEN"))
             EmailPrefs.savedEmail(ctx)?.let { o.put("savedEmail", it) }
             o.put("nbPaper", nbPaper(ctx))
             o.put("nbCover", nbCover(ctx))
@@ -62,6 +80,8 @@ object InkSettings {
             val inkE = ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).edit()
             if (o.has("brushSize")) inkE.putFloat("brushSize", o.getDouble("brushSize").toFloat())
             if (o.has("brushColor")) inkE.putInt("brushColor", o.getInt("brushColor"))
+            if (o.has("smoothing")) inkE.putFloat("smoothing", o.getDouble("smoothing").toFloat())
+            if (o.has("brush")) inkE.putString("brush", o.optString("brush", "PEN"))
             inkE.apply()
             if (o.has("savedEmail")) o.optString("savedEmail").takeIf { it.isNotBlank() }?.let { EmailPrefs.setSavedEmail(ctx, it) }
             val nbE = nb(ctx).edit()

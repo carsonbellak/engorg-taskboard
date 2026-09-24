@@ -22,6 +22,7 @@ class NotebookStore(private val dir: File) {
         val pageIds: MutableList<String>,
         var paper: String = "GRID",
         var pageColor: Int = Color.WHITE,
+        var lastPage: Int = 0,   // page this notebook was last viewed on (restored on reopen)
     )
 
     val folders = ArrayList<Folder>()
@@ -66,6 +67,7 @@ class NotebookStore(private val dir: File) {
                             pages,
                             o.optString("paper", "GRID"),
                             o.optInt("pageColor", Color.WHITE),
+                            o.optInt("lastPage", 0),
                         )
                     )
                 }
@@ -90,6 +92,7 @@ class NotebookStore(private val dir: File) {
                         .put("pages", pa)
                         .put("paper", nb.paper)
                         .put("pageColor", nb.pageColor)
+                        .put("lastPage", nb.lastPage)
                 )
             }
             libFile().writeText(JSONObject().put("folders", fa).put("notebooks", na).toString())
