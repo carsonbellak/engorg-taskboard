@@ -149,6 +149,7 @@ class InkActivity : ComponentActivity() {
         if (!::store.isInitialized) return
         // Remember where each pane was left (page + the split composition) so reopening restores it.
         panes.forEach { it.syncLastPage() }
+        panes.forEach { it.flushSaves() }   // ensure queued background page writes are durable before we background
         store.save()
         InkSettings.saveLastSession(this, panes.mapNotNull { it.notebookId() })
     }
@@ -156,6 +157,7 @@ class InkActivity : ComponentActivity() {
     override fun onDestroy() {
         MirrorManager.onState = null
         MirrorManager.bind(null)   // keep the socket alive but stop feeding a destroyed pane
+        panes.forEach { it.dispose() }   // flush + stop each pane's background writer
         super.onDestroy()
     }
 
@@ -216,6 +218,7 @@ class InkActivity : ComponentActivity() {
     private fun removePane(pane: PageCanvas) {
         if (panes.size <= 1) return
         panes.remove(pane); paneChips.remove(pane); paneTitles.remove(pane)
+        pane.dispose()   // flush + stop the closed pane's background writer
         rebuildPanesRow()
         setFocused(if (focused === pane) panes.first() else (focused ?: panes.first()))
     }

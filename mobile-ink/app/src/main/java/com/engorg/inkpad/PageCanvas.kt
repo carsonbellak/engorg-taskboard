@@ -18,6 +18,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -181,7 +185,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     // ---------- open / focus ----------
     /** Point this pane at a notebook (null = the first/quick-notes notebook) and fit it to view. */
     fun open(notebookId: String?) {
-        if (::notebook.isInitialized) syncLastPage()   // remember where the outgoing notebook was
+        if (::notebook.isInitialized) { syncLastPage(); flushSaves() }   // persist the outgoing notebook before switching
         notebook = (notebookId?.let { store.notebook(it) }) ?: store.notebooks.firstOrNull()
             ?: store.createNotebook("Quick notes", null, AppTheme.accent)
         if (notebook.pageIds.isEmpty()) store.addPage(notebook)
@@ -709,34 +713,69 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     fun redo() { if (redoStack.isEmpty()) return; undoStack.add(snapshot()); restore(redoStack.removeAt(redoStack.size - 1)) }
 
     // ---------- persistence ----------
+    // Page writes happen OFF the UI thread and coalesce. Serializing a whole page to JSON and
+    // writing it to disk on every pen-up used to block the UI thread, so each stroke appeared a
+    // beat late and quick consecutive strokes queued their delays up. Now a stroke just snapshots
+    // its page (cheap, on the UI thread) and hands it to a single background writer; a burst of
+    // strokes collapses into one write of the newest content (see the pending map below).
+    private val ioExecutor = Executors.newSingleThreadExecutor()
+    private val pendingPages = ConcurrentHashMap<String, List<FinishedStrokesView.Rec>>()
+
     private fun saveMeta() { notebook.paper = finishedView.paperStyle.name; notebook.pageColor = finishedView.pageColor; store.save() }
 
-    private fun savePage(index: Int) {
-        if (index < 0 || index >= notebook.pageIds.size) return
-        try {
-            val arr = JSONArray()
-            for (rec in finishedView.pages[index].recs) {
-                val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
-                if (rec.shape != null) {
-                    o.put("k", "s").put("t", rec.shape.type.name)
-                    val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
-                    o.put("v", va)
-                } else {
-                    o.put("k", "f")
-                    if (rec.brush != Brush.PEN) o.put("b", rec.brush.name)
-                    val pa = JSONArray(); for (p in rec.points) pa.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
-                    o.put("p", pa)
-                }
-                arr.put(o)
+    /** Serialize a page's recs to the on-disk JSON string. Pure — safe to run on the writer thread. */
+    private fun serializeRecs(recs: List<FinishedStrokesView.Rec>): String {
+        val arr = JSONArray()
+        for (rec in recs) {
+            val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
+            if (rec.shape != null) {
+                o.put("k", "s").put("t", rec.shape.type.name)
+                val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
+                o.put("v", va)
+            } else {
+                o.put("k", "f")
+                if (rec.brush != Brush.PEN) o.put("b", rec.brush.name)
+                val pa = JSONArray(); for (p in rec.points) pa.put(JSONArray().put(p.x.toDouble()).put(p.y.toDouble()))
+                o.put("p", pa)
             }
-            store.pageFile(notebook.pageIds[index]).writeText(JSONObject().put("strokes", arr).toString())
-        } catch (e: Exception) { Log.e("Ink", "save page failed", e) }
-        // NOTE: no saveMeta() here — a single stroke must not rewrite the whole library.json on the
-        // UI thread. Paper/color/page-order don't change while drawing; they're flushed by
-        // saveAllPages() on structural events and by InkActivity.onPause().
+            arr.put(o)
+        }
+        return JSONObject().put("strokes", arr).toString()
     }
 
-    private fun saveAllPages() { for (i in notebook.pageIds.indices) savePage(i); saveMeta() }
+    /** Queue a page write on the background writer, coalescing bursts to the newest snapshot. */
+    private fun savePage(index: Int) {
+        if (index < 0 || index >= notebook.pageIds.size) return
+        val pageId = notebook.pageIds[index]
+        // Snapshot the rec list on the UI thread (a reference copy — recs are immutable once made),
+        // so the writer thread never reads a list that a later stroke is mutating.
+        pendingPages[pageId] = ArrayList(finishedView.pages[index].recs)   // newest snapshot wins
+        if (ioExecutor.isShutdown) return
+        try {
+            ioExecutor.execute {
+                val recs = pendingPages.remove(pageId) ?: return@execute    // a newer save already handled it
+                try { store.pageFile(pageId).writeText(serializeRecs(recs)) }
+                catch (e: Exception) { Log.e("Ink", "save page failed", e) }
+            }
+        } catch (_: Exception) { }   // executor shutting down mid-save — flushSaves() will catch it
+    }
+
+    /** Block until every queued page write has hit disk (durability points: reload, pause, close). */
+    fun flushSaves() {
+        if (ioExecutor.isShutdown) return
+        val latch = CountDownLatch(1)
+        try { ioExecutor.execute { latch.countDown() } } catch (_: Exception) { return }
+        try { latch.await(3, TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+    }
+
+    /** Flush pending writes then stop the writer (call when the pane/activity goes away). */
+    fun dispose() { flushSaves(); ioExecutor.shutdown() }
+
+    private fun saveAllPages() {
+        for (i in notebook.pageIds.indices) savePage(i)
+        saveMeta()
+        flushSaves()   // structural checkpoint (add page / undo / export): make the batch durable now
+    }
 
     private fun loadAllPages() {
         val pages = ArrayList<FinishedStrokesView.Page>()
