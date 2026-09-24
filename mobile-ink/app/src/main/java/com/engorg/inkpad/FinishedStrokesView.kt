@@ -1,8 +1,6 @@
 package com.engorg.inkpad
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -10,10 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
-import android.graphics.Shader
 import android.view.View
 import kotlin.math.hypot
 
@@ -74,71 +69,65 @@ class FinishedStrokesView(context: Context) : View(context) {
             return p
         }
 
-        // A small tiling grain texture (white RGB, noisy alpha) so PENCIL reads as graphite instead
-        // of a thin flat line. Tinted to the stroke color at draw time via a SRC_IN color filter.
-        private val grainBmp: Bitmap by lazy {
-            val s = 128
-            val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
-            val rnd = java.util.Random(0x51EED)
-            val px = IntArray(s * s)
-            for (i in px.indices) {
-                val n = rnd.nextInt(256)
-                // Bias toward sparse, low-alpha specks with occasional darker grains.
-                val a = if (n > 176) n else n / 4
-                px[i] = Color.argb(a, 255, 255, 255)
-            }
-            bmp.setPixels(px, 0, s, 0, 0, s, s)
-            bmp
-        }
-        private val grainShader: BitmapShader by lazy {
-            BitmapShader(grainBmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        /** Only the fountain draws as a filled variable-width band. Pen/marker/pencil are clean
+         *  constant-width round-capped strokes (no speed-driven bulges), and the highlighter too. */
+        fun isRibbon(brush: Brush, highlighter: Boolean): Boolean = !highlighter && brush == Brush.FOUNTAIN
+
+        /** Per-brush render width multiplier (applied at draw time; the stored width is the base). */
+        fun widthScale(brush: Brush, highlighter: Boolean): Float = when {
+            highlighter -> 1f
+            brush == Brush.MARKER -> 1.5f
+            brush == Brush.PENCIL -> 0.8f
+            else -> 1f
         }
 
-        /** Ribbon brushes (pen/fountain/pencil) render as a filled variable-width band; marker and
-         *  the highlighter render as a plain constant-width stroke. */
-        fun isRibbon(brush: Brush, highlighter: Boolean): Boolean = !highlighter && brush != Brush.MARKER
-
-        /** Per-brush width character: (min factor, max factor, end-taper). Pen varies only subtly so
-         *  it reads as live ink rather than a dead uniform line; fountain swells hard and tapers. */
-        private fun ribbonParams(brush: Brush): Triple<Float, Float, Float> = when (brush) {
-            Brush.FOUNTAIN -> Triple(0.32f, 1.45f, 0.32f)
-            Brush.PENCIL -> Triple(0.80f, 1.12f, 0.74f)
-            else -> Triple(0.86f, 1.14f, 0.80f)   // PEN
+        /** Per-brush opacity: marker is a touch see-through, pencil lighter, highlighter translucent. */
+        private fun inkAlpha(brush: Brush, highlighter: Boolean): Int = when {
+            highlighter -> 0x66
+            brush == Brush.MARKER -> 0xD2
+            brush == Brush.PENCIL -> 0x9E
+            else -> 0xFF
         }
 
-        /** The ready-to-draw geometry for a stroke: a filled ribbon for ribbon brushes, else a
+        /** The ready-to-draw geometry for a stroke: a filled ribbon for the fountain, else a
          *  Catmull-Rom stroke path. Built once per committed stroke and reused every redraw. */
         fun buildInkGeometry(pts: List<PointF>, baseW: Float, brush: Brush, highlighter: Boolean): Path =
-            if (isRibbon(brush, highlighter)) buildRibbon(pts, baseW, brush) else buildPath(pts)
+            if (isRibbon(brush, highlighter)) buildFountainRibbon(pts, baseW) else buildPath(pts)
 
         /**
-         * A closed, fillable band around the centerline whose half-width tracks pen speed (fast =
-         * thin, slow = swelling) with tapered ends and round caps. Local spacing is the speed proxy;
-         * because the stabilizer keeps the leash small, spacing tracks real speed closely.
+         * Fountain nib: a closed, fillable band whose half-width swells where the pen moves slowly
+         * and thins where it moves fast (local spacing is the speed proxy). An arc-length taper at
+         * both ends forces thin tips, so the unavoidable start/stop slowness can't bulge into balls.
          */
-        private fun buildRibbon(pts: List<PointF>, baseW: Float, brush: Brush): Path {
+        private fun buildFountainRibbon(pts: List<PointF>, baseW: Float): Path {
             val p = Path()
             val n = pts.size
             if (n == 0) return p
-            if (n == 1) { p.addCircle(pts[0].x, pts[0].y, (baseW / 2f).coerceAtLeast(0.5f), Path.Direction.CW); return p }
-            val (minF, maxF, endTaper) = ribbonParams(brush)
-            val ref = baseW * 2.2f + 6f
+            val hHalf = (baseW / 2f).coerceAtLeast(0.4f)
+            if (n == 1) { p.addCircle(pts[0].x, pts[0].y, hHalf, Path.Direction.CW); return p }
+            val ref = baseW * 2.6f + 7f
             val h = FloatArray(n)
             for (i in 0 until n) {
                 val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
                 val span = if (i in 1 until n - 1) 2f else 1f
                 val d = hypot(c.x - a.x, c.y - a.y) / span
-                val f = (1.45f - d / ref).coerceIn(minF, maxF)
+                val f = (1.5f - d / ref).coerceIn(0.3f, 1.5f)
                 h[i] = baseW * f / 2f
             }
-            // Smooth the half-widths so the band doesn't ripple, then taper the ends toward a point.
             val sh = FloatArray(n)
             for (i in 0 until n) {
                 val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
                 sh[i] = (h[lo] + h[i] + h[hi]) / ((hi - lo) + 1)
             }
-            sh[0] *= endTaper; sh[n - 1] *= endTaper
-            if (n > 2) { sh[1] *= (endTaper + 1f) / 2f; sh[n - 2] *= (endTaper + 1f) / 2f }
+            // Taper both ends over a fixed arc length so tips come to a point regardless of speed.
+            val cum = FloatArray(n)
+            for (i in 1 until n) cum[i] = cum[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+            val total = cum[n - 1]
+            val taperLen = (baseW * 2.4f).coerceAtMost(total * 0.5f)
+            if (taperLen > 1e-3f) for (i in 0 until n) {
+                val edge = minOf(cum[i], total - cum[i])
+                if (edge < taperLen) sh[i] *= 0.18f + 0.82f * (edge / taperLen)
+            }
             val nx = FloatArray(n); val ny = FloatArray(n)
             for (i in 0 until n) {
                 val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
@@ -151,8 +140,6 @@ class FinishedStrokesView(context: Context) : View(context) {
             for (i in 1 until n) p.lineTo(pts[i].x + nx[i] * sh[i], pts[i].y + ny[i] * sh[i])
             for (i in n - 1 downTo 0) p.lineTo(pts[i].x - nx[i] * sh[i], pts[i].y - ny[i] * sh[i])
             p.close()
-            p.addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
-            p.addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
             p.fillType = Path.FillType.WINDING
             return p
         }
@@ -162,7 +149,7 @@ class FinishedStrokesView(context: Context) : View(context) {
          * finished view's matrix, or raw screen space in the wet overlay), honoring its [brush].
          * [prebuilt] is the geometry when the caller already has it (finished recs); pass null to
          * build it. [paint] is a reusable paint owned by the caller — this mutates it and restores
-         * style/shader/colorFilter/alpha afterward.
+         * style/alpha afterward.
          */
         fun drawInk(
             canvas: Canvas,
@@ -179,26 +166,16 @@ class FinishedStrokesView(context: Context) : View(context) {
             val geom = prebuilt ?: buildInkGeometry(pts, width, brush, highlighter)
             if (isRibbon(brush, highlighter)) {
                 paint.style = Paint.Style.FILL
-                if (brush == Brush.PENCIL) {
-                    paint.shader = grainShader
-                    paint.colorFilter = PorterDuffColorFilter(Color.rgb(r, g, b), PorterDuff.Mode.SRC_IN)
-                    paint.alpha = 0xCC
-                } else {
-                    paint.shader = null; paint.colorFilter = null
-                    paint.color = Color.rgb(r, g, b)
-                }
+                paint.color = Color.rgb(r, g, b)
                 canvas.drawPath(geom, paint)
-                paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
                 paint.style = Paint.Style.STROKE
             } else {
                 paint.style = Paint.Style.STROKE
-                paint.shader = null; paint.colorFilter = null; paint.strokeJoin = Paint.Join.ROUND
-                paint.strokeCap = if (brush == Brush.MARKER) Paint.Cap.SQUARE else Paint.Cap.ROUND
-                val alpha = if (highlighter) 0x66 else 0xE6
-                paint.color = Color.argb(alpha, r, g, b)
-                paint.strokeWidth = width
-                canvas.drawPath(geom, paint)
+                paint.strokeJoin = Paint.Join.ROUND
                 paint.strokeCap = Paint.Cap.ROUND
+                paint.color = Color.argb(inkAlpha(brush, highlighter), r, g, b)
+                paint.strokeWidth = width * widthScale(brush, highlighter)
+                canvas.drawPath(geom, paint)
             }
         }
     }
