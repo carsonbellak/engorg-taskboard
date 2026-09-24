@@ -157,4 +157,14 @@ class NotebookStore(private val dir: File) {
     /** Notebooks in a folder (null = top level), newest first. */
     fun notebooksIn(folderId: String?): List<Notebook> =
         notebooks.filter { it.folderId == folderId }.sortedByDescending { it.created }
+
+    /** Best-effort "last edited" time for sorting: newest page-file mtime, else creation time. */
+    fun lastModified(nb: Notebook): Long {
+        var t = 0L
+        for (pid in nb.pageIds) {
+            val f = pageFile(pid)
+            if (f.exists()) { val m = f.lastModified(); if (m > t) t = m }
+        }
+        return if (t > 0L) t else nb.created
+    }
 }

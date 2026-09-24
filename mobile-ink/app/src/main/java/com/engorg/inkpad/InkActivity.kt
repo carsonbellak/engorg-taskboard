@@ -266,7 +266,11 @@ class InkActivity : ComponentActivity() {
         notebookPickerPopup(anchor, null) { id -> addPane(id) }
     }
 
-    /** A compact dropdown of every notebook (newest cover dot + title). Reused for add + swap. */
+    /**
+     * A folder-navigable dropdown of notebooks. Sub-folders are browsable (drill in / step back up);
+     * within a folder, notebooks are listed **most-recently-edited first** (with a recency chip) so
+     * the one you're after is usually right at the top. Reused for add-pane + swap.
+     */
     private fun notebookPickerPopup(anchor: View, current: PageCanvas?, onPick: (String) -> Unit) {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         val container = android.widget.ScrollView(this).apply {
@@ -276,14 +280,89 @@ class InkActivity : ComponentActivity() {
             }
             addView(list)
         }
-        val h = (dp(50) * store.notebooks.size + dp(16)).coerceIn(dp(60), dp(380))
-        val popup = PopupWindow(container, dp(250), h, true).apply { elevation = dp(12).toFloat() }
+        val popup = PopupWindow(container, dp(264), dp(420), true).apply { elevation = dp(12).toFloat() }
         val curId = current?.notebook?.id
-        for (nb in store.notebooks) list.addView(pickRow(nb, nb.id == curId) { popup.dismiss(); onPick(nb.id) })
+        // Start where the swapped notebook lives (its folder) so its siblings are right there; the
+        // add-pane case (no current notebook) starts at the top level.
+        var browseFolder: String? = current?.notebook?.folderId
+
+        lateinit var rebuild: () -> Unit
+        rebuild = {
+            list.removeAllViews()
+            // Step-up row when we're inside a folder (shows the folder we're in; tap to leave it).
+            browseFolder?.let { id -> store.folders.find { it.id == id } }?.let { folder ->
+                list.addView(upPickRow(folder.name) { browseFolder = folder.parentId; rebuild() })
+            }
+            // Sub-folders (A→Z), then notebooks (most-recently-edited first).
+            for (fo in store.foldersIn(browseFolder).sortedBy { it.name.lowercase() })
+                list.addView(folderPickRow(fo) { browseFolder = fo.id; rebuild() })
+            for ((nb, mod) in store.notebooksIn(browseFolder).map { it to store.lastModified(it) }.sortedByDescending { it.second })
+                list.addView(pickRow(nb, mod, nb.id == curId) { popup.dismiss(); onPick(nb.id) })
+            popup.height = (dp(50) * list.childCount + dp(16)).coerceIn(dp(60), dp(420))
+            if (popup.isShowing) popup.update(dp(264), popup.height)
+        }
+        rebuild()
         popup.showAsDropDown(anchor, 0, dp(6))
     }
 
-    private fun pickRow(nb: NotebookStore.Notebook, selected: Boolean, onClick: () -> Unit): View =
+    /** "Leave this folder" row (back chevron + the current folder's name). */
+    private fun upPickRow(folderName: String, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(AppTheme.elevated) }
+            setPadding(dp(8), dp(9), dp(12), dp(9))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
+            addView(ImageView(this@InkActivity).apply {
+                setImageBitmap(Icons.bitmap(Icons.BACK, dp(16))); setColorFilter(onSurface)
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { rightMargin = dp(8) }
+            })
+            addView(TextView(this@InkActivity).apply {
+                text = folderName; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(AppTheme.text); setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+            setOnClickListener { onClick() }
+        }
+
+    /** A folder row (folder icon + name + child count + chevron); tap to drill in. */
+    private fun folderPickRow(fo: NotebookStore.Folder, onClick: () -> Unit): View =
+        LinearLayout(this).apply {
+            val muted = Color.argb(0xA0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(AppTheme.elevated) }
+            setPadding(dp(10), dp(9), dp(12), dp(9))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
+            addView(ImageView(this@InkActivity).apply {
+                setImageBitmap(Icons.bitmap(Icons.FOLDER, dp(16))); setColorFilter(AppTheme.accent)
+                layoutParams = LinearLayout.LayoutParams(dp(18), dp(18)).apply { rightMargin = dp(10) }
+            })
+            addView(TextView(this@InkActivity).apply {
+                text = fo.name; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(AppTheme.text)
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(TextView(this@InkActivity).apply {
+                text = (store.foldersIn(fo.id).size + store.notebooksIn(fo.id).size).toString()
+                textSize = 12f; setTextColor(muted)
+            })
+            addView(ImageView(this@InkActivity).apply {
+                setImageBitmap(Icons.bitmap(Icons.NEXT, dp(14))); setColorFilter(muted)
+                layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { leftMargin = dp(6) }
+            })
+            setOnClickListener { onClick() }
+        }
+
+    /** Compact relative age ("now", "5m", "3h", "2d", "4w") for the recency chip. */
+    private fun relTime(ts: Long): String {
+        val d = System.currentTimeMillis() - ts
+        return when {
+            d < 60_000L -> "now"
+            d < 3_600_000L -> "${d / 60_000L}m"
+            d < 86_400_000L -> "${d / 3_600_000L}h"
+            d < 604_800_000L -> "${d / 86_400_000L}d"
+            else -> "${d / 604_800_000L}w"
+        }
+    }
+
+    private fun pickRow(nb: NotebookStore.Notebook, modifiedTs: Long, selected: Boolean, onClick: () -> Unit): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (selected) AppTheme.accent else AppTheme.elevated) }
@@ -296,6 +375,10 @@ class InkActivity : ComponentActivity() {
             addView(TextView(this@InkActivity).apply {
                 text = nb.title; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 setTextColor(if (selected) AppTheme.onAccent() else AppTheme.text)
+            }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(TextView(this@InkActivity).apply {
+                text = relTime(modifiedTs); textSize = 11.5f; setPadding(dp(8), 0, 0, 0)
+                setTextColor(if (selected) AppTheme.onAccent() else Color.argb(0xA0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             })
             setOnClickListener { onClick() }
         }
