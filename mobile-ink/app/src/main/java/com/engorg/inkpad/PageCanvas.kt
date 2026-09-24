@@ -500,6 +500,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         if (box != null && selRecs.isNotEmpty()) {
             val dcx = screenX(box.right) + 20f; val dcy = screenY(selPage, box.top) - 20f
             if (hypot(sx - dcx, sy - dcy) <= 26f) { deleteSelection(); return }
+            val ncx = screenX(box.right) + 20f; val ncy = screenY(selPage, box.top) + 18f
+            if (hypot(sx - ncx, sy - ncy) <= 24f) { duplicateSelection(); return }
             if (selRecs.size == 1 && selRecs[0].shape != null) {
                 val hs = selRecs[0].shape!!.handles
                 for (i in hs.indices) if (hypot(sx - screenX(hs[i].x), sy - screenY(selPage, hs[i].y)) <= 30f) {
@@ -644,6 +646,37 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val page = selPage
         finishedView.pages[page].recs.removeAll(selRecs.toSet())
         clearSelection(); finishedView.invalidate(); savePage(page)
+        mirror?.pageEdited(this, page)
+    }
+
+    /**
+     * Copy the current selection: clone each selected rec, nudge the copies down-right by a small
+     * offset (flipped away from an edge so they stay on-page), append them to the page, then select
+     * the copies so they can be dragged straight away.
+     */
+    private fun duplicateSelection() {
+        val box = selBox ?: return
+        if (selRecs.isEmpty() || selPage < 0) return
+        pushUndo()
+        val page = selPage
+        val off = 24f
+        val dx = if (box.right + off <= FinishedStrokesView.PAGE_W) off else -off
+        val dy = if (box.bottom + off <= FinishedStrokesView.PAGE_H) off else -off
+        val copies = ArrayList<FinishedStrokesView.Rec>(selRecs.size)
+        for (base in selRecs) {
+            val copy = if (base.shape != null) {
+                val spec = base.shape.clone()
+                for (v in spec.verts) v.set(v.x + dx, v.y + dy)
+                buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
+            } else {
+                freehandRec(base.points.map { PointF(it.x + dx, it.y + dy) }, base.color, base.widthPx, base.highlighter, base.brush)
+            }
+            copies.add(copy)
+        }
+        finishedView.pages[page].recs.addAll(copies)
+        selRecs.clear(); selRecs.addAll(copies)
+        selBox = recBounds(selRecs); refreshSelectionOverlay()
+        finishedView.invalidate(); savePage(page)
         mirror?.pageEdited(this, page)
     }
 

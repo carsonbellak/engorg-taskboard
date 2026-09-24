@@ -268,6 +268,8 @@ class FinishedStrokesView(context: Context) : View(context) {
     private val lassoPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f) }
     private val delPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(0xE5, 0x3E, 0x3E) }
     private val delX = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.WHITE }
+    private val dupFill = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    private val dupGlyph = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2.2f; color = Color.WHITE; strokeJoin = Paint.Join.ROUND }
     private val addTilePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f) }
     private val addTileText = Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
@@ -424,6 +426,15 @@ class FinishedStrokesView(context: Context) : View(context) {
         canvas.drawCircle(dcx, dcy, 15f, delPaint)
         canvas.drawLine(dcx - 6, dcy - 6, dcx + 6, dcy + 6, delX)
         canvas.drawLine(dcx - 6, dcy + 6, dcx + 6, dcy - 6, delX)
+        // Duplicate handle (accent circle + copy glyph) stacked just below the delete handle.
+        val ncx = r + 20f; val ncy = t + 18f
+        dupFill.color = accent
+        canvas.drawCircle(ncx, ncy, 15f, dupFill)
+        // Back square (offset up-right), then the front square filled with the accent so it reads
+        // as sitting on top, both outlined in white → a standard "copy/duplicate" icon.
+        canvas.drawRect(ncx - 2f, ncy - 8f, ncx + 8f, ncy + 2f, dupGlyph)
+        canvas.drawRect(ncx - 8f, ncy - 2f, ncx + 2f, ncy + 8f, dupFill)
+        canvas.drawRect(ncx - 8f, ncy - 2f, ncx + 2f, ncy + 8f, dupGlyph)
         vertexHandles?.let { hs ->
             for (h in hs) {
                 val hx = sx(selPage, h.x); val hy = sy(selPage, h.y)
