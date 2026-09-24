@@ -181,9 +181,16 @@ class FinishedStrokesView(context: Context) : View(context) {
             for (i in 1 until n) p.lineTo(pts[i].x + nx[i] * sh[i], pts[i].y + ny[i] * sh[i])
             for (i in n - 1 downTo 0) p.lineTo(pts[i].x - nx[i] * sh[i], pts[i].y - ny[i] * sh[i])
             p.close()
-            p.addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
-            p.addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
             p.fillType = Path.FillType.WINDING
+            // Round the two ends with a boolean UNION instead of dropping cap circles straight into
+            // this path: added directly, a circle's winding cancels against the band where the two
+            // overlap, punching a half-filled ("half white, half ink") disc into the stroke end.
+            // A union can't cancel, so the cap always reads as a solid rounded nib tip.
+            val caps = Path().apply {
+                addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
+                addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
+            }
+            p.op(caps, Path.Op.UNION)
             return p
         }
 

@@ -101,6 +101,19 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     // of the previous (4–6× stronger) scale, so this keeps that feel across the middle of the range.
     private fun leashPx(): Float = host.smoothing.coerceIn(0f, 1f) * 7f * resources.displayMetrics.density
 
+    // Minimum on-screen spacing between captured stroke points. Stylus/touch panels report at
+    // 120–360 Hz, so a slow, deliberate stroke otherwise piles up hundreds of near-coincident
+    // points — and the wet stroke is rebuilt from ALL of them every single frame (they also bloat
+    // the saved path, undo snapshots and every later redraw). That makes even a nearly-empty page
+    // feel sluggish. Points closer than this add no visible detail, so we drop them on capture.
+    private val minSampleStepPx get() = 0.75f * resources.displayMetrics.density
+
+    /** Append a captured point only when it has moved a visible amount from the previous one. */
+    private fun pushSample(x: Float, y: Float) {
+        val last = samples.lastOrNull()
+        if (last == null || hypot(x - last.x, y - last.y) >= minSampleStepPx) samples.add(Sample(x, y))
+    }
+
     var scale = 1f; private set
     var tx = 0f; private set
     var ty = 0f; private set
@@ -134,7 +147,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             override fun onScale(d: ScaleGestureDetector): Boolean {
                 tx += d.focusX - lastFocusX; ty += d.focusY - lastFocusY
                 lastFocusX = d.focusX; lastFocusY = d.focusY
-                val ns = (scale * d.scaleFactor).coerceIn(0.2f, 6f)
+                val ns = (scale * d.scaleFactor).coerceIn(0.2f, 12f)
                 tx = d.focusX - (d.focusX - tx) * (ns / scale)
                 ty = d.focusY - (d.focusY - ty) * (ns / scale)
                 scale = ns
@@ -261,7 +274,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     fun zoomBy(factor: Float) {
         val fx = finishedView.width / 2f; val fy = finishedView.height / 2f
-        val ns = (scale * factor).coerceIn(0.2f, 6f)
+        val ns = (scale * factor).coerceIn(0.2f, 12f)
         tx = fx - (fx - tx) * (ns / scale)
         ty = fy - (fy - ty) * (ns / scale)
         scale = ns
@@ -376,7 +389,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         if (leash <= 0.75f) {
             // Smoothing off: light low-pass to shave hand jitter, still under the pen.
             headX += 0.6f * (rx - headX); headY += 0.6f * (ry - headY)
-            samples.add(Sample(headX, headY)); return
+            pushSample(headX, headY); return
         }
         // Pull the head toward the ball, stopping [leash] short of it.
         val dx = ballX - headX; val dy = ballY - headY
@@ -384,7 +397,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         if (dist > leash) {
             val t = (dist - leash) / dist
             headX += dx * t; headY += dy * t
-            samples.add(Sample(headX, headY))
+            pushSample(headX, headY)
         }
     }
 
@@ -718,10 +731,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             }
             store.pageFile(notebook.pageIds[index]).writeText(JSONObject().put("strokes", arr).toString())
         } catch (e: Exception) { Log.e("Ink", "save page failed", e) }
-        saveMeta()
+        // NOTE: no saveMeta() here — a single stroke must not rewrite the whole library.json on the
+        // UI thread. Paper/color/page-order don't change while drawing; they're flushed by
+        // saveAllPages() on structural events and by InkActivity.onPause().
     }
 
-    private fun saveAllPages() { for (i in notebook.pageIds.indices) savePage(i) }
+    private fun saveAllPages() { for (i in notebook.pageIds.indices) savePage(i); saveMeta() }
 
     private fun loadAllPages() {
         val pages = ArrayList<FinishedStrokesView.Page>()
