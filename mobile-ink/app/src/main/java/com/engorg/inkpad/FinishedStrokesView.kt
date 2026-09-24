@@ -94,12 +94,75 @@ class FinishedStrokesView(context: Context) : View(context) {
             BitmapShader(grainBmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
         }
 
+        /** Ribbon brushes (pen/fountain/pencil) render as a filled variable-width band; marker and
+         *  the highlighter render as a plain constant-width stroke. */
+        fun isRibbon(brush: Brush, highlighter: Boolean): Boolean = !highlighter && brush != Brush.MARKER
+
+        /** Per-brush width character: (min factor, max factor, end-taper). Pen varies only subtly so
+         *  it reads as live ink rather than a dead uniform line; fountain swells hard and tapers. */
+        private fun ribbonParams(brush: Brush): Triple<Float, Float, Float> = when (brush) {
+            Brush.FOUNTAIN -> Triple(0.32f, 1.45f, 0.32f)
+            Brush.PENCIL -> Triple(0.80f, 1.12f, 0.74f)
+            else -> Triple(0.86f, 1.14f, 0.80f)   // PEN
+        }
+
+        /** The ready-to-draw geometry for a stroke: a filled ribbon for ribbon brushes, else a
+         *  Catmull-Rom stroke path. Built once per committed stroke and reused every redraw. */
+        fun buildInkGeometry(pts: List<PointF>, baseW: Float, brush: Brush, highlighter: Boolean): Path =
+            if (isRibbon(brush, highlighter)) buildRibbon(pts, baseW, brush) else buildPath(pts)
+
+        /**
+         * A closed, fillable band around the centerline whose half-width tracks pen speed (fast =
+         * thin, slow = swelling) with tapered ends and round caps. Local spacing is the speed proxy;
+         * because the stabilizer keeps the leash small, spacing tracks real speed closely.
+         */
+        private fun buildRibbon(pts: List<PointF>, baseW: Float, brush: Brush): Path {
+            val p = Path()
+            val n = pts.size
+            if (n == 0) return p
+            if (n == 1) { p.addCircle(pts[0].x, pts[0].y, (baseW / 2f).coerceAtLeast(0.5f), Path.Direction.CW); return p }
+            val (minF, maxF, endTaper) = ribbonParams(brush)
+            val ref = baseW * 2.2f + 6f
+            val h = FloatArray(n)
+            for (i in 0 until n) {
+                val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
+                val span = if (i in 1 until n - 1) 2f else 1f
+                val d = hypot(c.x - a.x, c.y - a.y) / span
+                val f = (1.45f - d / ref).coerceIn(minF, maxF)
+                h[i] = baseW * f / 2f
+            }
+            // Smooth the half-widths so the band doesn't ripple, then taper the ends toward a point.
+            val sh = FloatArray(n)
+            for (i in 0 until n) {
+                val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
+                sh[i] = (h[lo] + h[i] + h[hi]) / ((hi - lo) + 1)
+            }
+            sh[0] *= endTaper; sh[n - 1] *= endTaper
+            if (n > 2) { sh[1] *= (endTaper + 1f) / 2f; sh[n - 2] *= (endTaper + 1f) / 2f }
+            val nx = FloatArray(n); val ny = FloatArray(n)
+            for (i in 0 until n) {
+                val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
+                var tx = c.x - a.x; var ty = c.y - a.y
+                val len = hypot(tx, ty)
+                if (len > 1e-4f) { tx /= len; ty /= len } else { tx = 1f; ty = 0f }
+                nx[i] = -ty; ny[i] = tx
+            }
+            p.moveTo(pts[0].x + nx[0] * sh[0], pts[0].y + ny[0] * sh[0])
+            for (i in 1 until n) p.lineTo(pts[i].x + nx[i] * sh[i], pts[i].y + ny[i] * sh[i])
+            for (i in n - 1 downTo 0) p.lineTo(pts[i].x - nx[i] * sh[i], pts[i].y - ny[i] * sh[i])
+            p.close()
+            p.addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
+            p.addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
+            p.fillType = Path.FillType.WINDING
+            return p
+        }
+
         /**
          * Draw one freehand stroke in the canvas's current coordinate space (page-local under the
          * finished view's matrix, or raw screen space in the wet overlay), honoring its [brush].
-         * [prebuilt] is the Catmull-Rom path when the caller already has it (finished recs); pass
-         * null to build one. [paint] is a reusable STROKE paint owned by the caller — this mutates
-         * it and restores shader/colorFilter/alpha afterward.
+         * [prebuilt] is the geometry when the caller already has it (finished recs); pass null to
+         * build it. [paint] is a reusable paint owned by the caller — this mutates it and restores
+         * style/shader/colorFilter/alpha afterward.
          */
         fun drawInk(
             canvas: Canvas,
@@ -111,62 +174,31 @@ class FinishedStrokesView(context: Context) : View(context) {
             highlighter: Boolean,
             paint: Paint,
         ) {
-            if (width <= 0f || pts.isEmpty()) return
+            if (width <= 0f || (prebuilt == null && pts.isEmpty())) return
             val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
-            // The fountain nib varies width along the stroke — draw it segment-by-segment.
-            if (brush == Brush.FOUNTAIN && !highlighter) {
-                drawFountain(canvas, pts, color, width, paint); return
-            }
-            paint.shader = null; paint.colorFilter = null
-            paint.strokeJoin = Paint.Join.ROUND
-            paint.strokeCap = if (brush == Brush.MARKER && !highlighter) Paint.Cap.SQUARE else Paint.Cap.ROUND
-            val path = prebuilt ?: buildPath(pts)
-            if (brush == Brush.PENCIL && !highlighter) {
-                paint.shader = grainShader
-                paint.colorFilter = PorterDuffColorFilter(Color.rgb(r, g, b), PorterDuff.Mode.SRC_IN)
-                paint.alpha = 0xC0
-                paint.strokeWidth = width
-                canvas.drawPath(path, paint)
+            val geom = prebuilt ?: buildInkGeometry(pts, width, brush, highlighter)
+            if (isRibbon(brush, highlighter)) {
+                paint.style = Paint.Style.FILL
+                if (brush == Brush.PENCIL) {
+                    paint.shader = grainShader
+                    paint.colorFilter = PorterDuffColorFilter(Color.rgb(r, g, b), PorterDuff.Mode.SRC_IN)
+                    paint.alpha = 0xCC
+                } else {
+                    paint.shader = null; paint.colorFilter = null
+                    paint.color = Color.rgb(r, g, b)
+                }
+                canvas.drawPath(geom, paint)
                 paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
+                paint.style = Paint.Style.STROKE
+            } else {
+                paint.style = Paint.Style.STROKE
+                paint.shader = null; paint.colorFilter = null; paint.strokeJoin = Paint.Join.ROUND
+                paint.strokeCap = if (brush == Brush.MARKER) Paint.Cap.SQUARE else Paint.Cap.ROUND
+                val alpha = if (highlighter) 0x66 else 0xE6
+                paint.color = Color.argb(alpha, r, g, b)
+                paint.strokeWidth = width
+                canvas.drawPath(geom, paint)
                 paint.strokeCap = Paint.Cap.ROUND
-                return
-            }
-            val alpha = if (highlighter) 0x66 else if (brush == Brush.MARKER) 0xE6 else 0xFF
-            paint.color = Color.argb(alpha, r, g, b)
-            paint.strokeWidth = width
-            canvas.drawPath(path, paint)
-            paint.strokeCap = Paint.Cap.ROUND
-        }
-
-        /** Calligraphic (fountain) stroke: width tracks pen speed — thin when fast, swelling when
-         *  slow — with tapered ends, rendered as round-capped segments that overlap seamlessly. */
-        private fun drawFountain(canvas: Canvas, pts: List<PointF>, color: Int, baseW: Float, paint: Paint) {
-            paint.shader = null; paint.colorFilter = null
-            paint.color = Color.argb(0xFF, Color.red(color), Color.green(color), Color.blue(color))
-            paint.strokeCap = Paint.Cap.ROUND; paint.strokeJoin = Paint.Join.ROUND
-            val n = pts.size
-            if (n == 1) { paint.strokeWidth = baseW; canvas.drawPoint(pts[0].x, pts[0].y, paint); return }
-            val ref = baseW * 2.2f + 5f
-            val w = FloatArray(n)
-            for (i in 0 until n) {
-                val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
-                val span = if (i in 1 until n - 1) 2f else 1f
-                val d = hypot(c.x - a.x, c.y - a.y) / span
-                val f = (1.45f - d / ref).coerceIn(0.32f, 1.45f)
-                w[i] = baseW * f
-            }
-            // One-pass box smoothing so widths don't jitter segment to segment.
-            val sm = FloatArray(n)
-            for (i in 0 until n) {
-                val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
-                sm[i] = (w[lo] + w[i] + w[hi]) / ((hi - lo) + 1)
-            }
-            // Taper the very ends toward a point.
-            sm[0] *= 0.45f; sm[n - 1] *= 0.45f
-            if (n > 2) { sm[1] *= 0.75f; sm[n - 2] *= 0.75f }
-            for (i in 0 until n - 1) {
-                paint.strokeWidth = ((sm[i] + sm[i + 1]) / 2f).coerceAtLeast(0.4f)
-                canvas.drawLine(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y, paint)
             }
         }
     }
@@ -235,7 +267,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         for (rec in page.recs) {
             if (rec.shape != null) {
                 // Parametric shapes always draw as a crisp solid pen line.
-                strokePaint.shader = null; strokePaint.colorFilter = null; strokePaint.strokeCap = Paint.Cap.ROUND
+                strokePaint.style = Paint.Style.STROKE
+                strokePaint.shader = null; strokePaint.colorFilter = null; strokePaint.strokeCap = Paint.Cap.ROUND; strokePaint.alpha = 0xFF
                 strokePaint.color = if (rec.highlighter)
                     Color.argb(0x66, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
                 else Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))

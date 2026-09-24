@@ -56,7 +56,7 @@ class InkActivity : ComponentActivity() {
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
     private var brushSize = 2f
     private var brush = Brush.PEN
-    private var smoothing = 0.35f   // 0 = off, 1 = maximum stabilizer lag
+    private var smoothing = 0.3f    // 0 = off, 1 = max; the slider spans a deliberately gentle range
     private var pendingShape: ShapeType? = null
 
     private lateinit var colorButton: Button

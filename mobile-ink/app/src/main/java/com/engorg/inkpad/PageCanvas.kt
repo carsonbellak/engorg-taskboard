@@ -97,7 +97,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private var headY = 0f
     private var ballX = 0f   // raw pen position, screen space
     private var ballY = 0f
-    private fun leashPx(): Float = host.smoothing.coerceIn(0f, 1f) * 40f * resources.displayMetrics.density
+    // Gentle stabilizer: the whole slider spans a small leash. The user's sweet spot sat at ~3–10%
+    // of the previous (4–6× stronger) scale, so this keeps that feel across the middle of the range.
+    private fun leashPx(): Float = host.smoothing.coerceIn(0f, 1f) * 7f * resources.displayMetrics.density
 
     var scale = 1f; private set
     var tx = 0f; private set
@@ -288,7 +290,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun pageUnitSize(hl: Boolean) = if (hl) host.brushSize * 3.2f else host.brushSize
 
     private fun freehandRec(points: List<PointF>, color: Int, width: Float, hl: Boolean, brush: Brush): FinishedStrokesView.Rec =
-        FinishedStrokesView.Rec(listOf(FinishedStrokesView.buildPath(points)), points, color, width, hl, null, brush)
+        FinishedStrokesView.Rec(listOf(FinishedStrokesView.buildInkGeometry(points, width, brush, hl)), points, color, width, hl, null, brush)
 
     private fun buildShapeRec(spec: ShapeSpec, color: Int, width: Float, hl: Boolean): FinishedStrokesView.Rec {
         val polys = spec.polylines()
