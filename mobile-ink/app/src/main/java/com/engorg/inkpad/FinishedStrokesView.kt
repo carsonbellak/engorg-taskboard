@@ -1,6 +1,8 @@
 package com.engorg.inkpad
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -8,7 +10,10 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
+import android.graphics.Shader
 import android.view.View
 import kotlin.math.hypot
 
@@ -77,16 +82,31 @@ class FinishedStrokesView(context: Context) : View(context) {
         fun widthScale(brush: Brush, highlighter: Boolean): Float = when {
             highlighter -> 1f
             brush == Brush.MARKER -> 1.5f
-            brush == Brush.PENCIL -> 0.8f
+            brush == Brush.PENCIL -> 0.9f
             else -> 1f
         }
 
-        /** Per-brush opacity: marker is a touch see-through, pencil lighter, highlighter translucent. */
+        /** Per-brush opacity: marker is near-solid but overlaps still build up; highlighter translucent. */
         private fun inkAlpha(brush: Brush, highlighter: Boolean): Int = when {
             highlighter -> 0x66
-            brush == Brush.MARKER -> 0xD2
-            brush == Brush.PENCIL -> 0x9E
+            brush == Brush.MARKER -> 0xF0
             else -> 0xFF
+        }
+
+        // Dense graphite tooth for the pencil: mostly-opaque noise with fine speckle + a few gaps,
+        // tinted to the stroke color at draw time. Tiles in the canvas's coordinate space.
+        private val pencilGrain: BitmapShader by lazy {
+            val s = 72
+            val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
+            val rnd = java.util.Random(0x9E77)
+            val px = IntArray(s * s)
+            for (i in px.indices) {
+                val n = rnd.nextInt(100)
+                val a = if (n < 7) 55 + rnd.nextInt(55) else 150 + rnd.nextInt(106)
+                px[i] = Color.argb(a, 255, 255, 255)
+            }
+            bmp.setPixels(px, 0, s, 0, 0, s, s)
+            BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
         }
 
         /** The ready-to-draw geometry for a stroke: a filled ribbon for the fountain, else a
@@ -95,9 +115,9 @@ class FinishedStrokesView(context: Context) : View(context) {
             if (isRibbon(brush, highlighter)) buildFountainRibbon(pts, baseW) else buildPath(pts)
 
         /**
-         * Fountain nib: a closed, fillable band whose half-width swells where the pen moves slowly
-         * and thins where it moves fast (local spacing is the speed proxy). An arc-length taper at
-         * both ends forces thin tips, so the unavoidable start/stop slowness can't bulge into balls.
+         * Fountain nib: a filled band whose half-width swells where the pen is slow and thins where
+         * it's fast, tapering to rounded tips. Short strokes ease back toward a uniform, blunt shape
+         * (a [lenFactor] ramp) so a quick tick doesn't render as a sharp diamond.
          */
         private fun buildFountainRibbon(pts: List<PointF>, baseW: Float): Path {
             val p = Path()
@@ -105,13 +125,20 @@ class FinishedStrokesView(context: Context) : View(context) {
             if (n == 0) return p
             val hHalf = (baseW / 2f).coerceAtLeast(0.4f)
             if (n == 1) { p.addCircle(pts[0].x, pts[0].y, hHalf, Path.Direction.CW); return p }
+            val cum = FloatArray(n)
+            for (i in 1 until n) cum[i] = cum[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
+            val total = cum[n - 1]
+            if (total < 1e-3f) { p.addCircle(pts[0].x, pts[0].y, hHalf, Path.Direction.CW); return p }
+            // 0 for a short mark (stay uniform/blunt) → 1 for a long stroke (full swell + pointy taper).
+            val lenFactor = (total / (baseW * 9f)).coerceIn(0f, 1f)
             val ref = baseW * 2.6f + 7f
             val h = FloatArray(n)
             for (i in 0 until n) {
                 val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
                 val span = if (i in 1 until n - 1) 2f else 1f
                 val d = hypot(c.x - a.x, c.y - a.y) / span
-                val f = (1.5f - d / ref).coerceIn(0.3f, 1.5f)
+                val rawF = (1.5f - d / ref).coerceIn(0.3f, 1.5f)
+                val f = 1f + (rawF - 1f) * lenFactor      // short → ~uniform width
                 h[i] = baseW * f / 2f
             }
             val sh = FloatArray(n)
@@ -119,14 +146,13 @@ class FinishedStrokesView(context: Context) : View(context) {
                 val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
                 sh[i] = (h[lo] + h[i] + h[hi]) / ((hi - lo) + 1)
             }
-            // Taper both ends over a fixed arc length so tips come to a point regardless of speed.
-            val cum = FloatArray(n)
-            for (i in 1 until n) cum[i] = cum[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
-            val total = cum[n - 1]
-            val taperLen = (baseW * 2.4f).coerceAtMost(total * 0.5f)
+            // End taper: shallow + blunt on short strokes, deep + pointy on long ones. Smoothstep so
+            // the tips round off instead of forming the two sharp corners of a diamond.
+            val endMin = 0.62f - 0.44f * lenFactor
+            val taperLen = (baseW * 2.4f).coerceAtMost(total * 0.45f)
             if (taperLen > 1e-3f) for (i in 0 until n) {
                 val edge = minOf(cum[i], total - cum[i])
-                if (edge < taperLen) sh[i] *= 0.18f + 0.82f * (edge / taperLen)
+                if (edge < taperLen) { val e = edge / taperLen; sh[i] *= endMin + (1f - endMin) * (e * e * (3f - 2f * e)) }
             }
             val nx = FloatArray(n); val ny = FloatArray(n)
             for (i in 0 until n) {
@@ -140,6 +166,9 @@ class FinishedStrokesView(context: Context) : View(context) {
             for (i in 1 until n) p.lineTo(pts[i].x + nx[i] * sh[i], pts[i].y + ny[i] * sh[i])
             for (i in n - 1 downTo 0) p.lineTo(pts[i].x - nx[i] * sh[i], pts[i].y - ny[i] * sh[i])
             p.close()
+            // Round tip caps so the ends read as a nib touch, not a diamond point.
+            p.addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
+            p.addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
             p.fillType = Path.FillType.WINDING
             return p
         }
@@ -149,7 +178,7 @@ class FinishedStrokesView(context: Context) : View(context) {
          * finished view's matrix, or raw screen space in the wet overlay), honoring its [brush].
          * [prebuilt] is the geometry when the caller already has it (finished recs); pass null to
          * build it. [paint] is a reusable paint owned by the caller — this mutates it and restores
-         * style/alpha afterward.
+         * style/shader/colorFilter/alpha afterward.
          */
         fun drawInk(
             canvas: Canvas,
@@ -164,18 +193,32 @@ class FinishedStrokesView(context: Context) : View(context) {
             if (width <= 0f || (prebuilt == null && pts.isEmpty())) return
             val r = Color.red(color); val g = Color.green(color); val b = Color.blue(color)
             val geom = prebuilt ?: buildInkGeometry(pts, width, brush, highlighter)
-            if (isRibbon(brush, highlighter)) {
-                paint.style = Paint.Style.FILL
-                paint.color = Color.rgb(r, g, b)
-                canvas.drawPath(geom, paint)
-                paint.style = Paint.Style.STROKE
-            } else {
-                paint.style = Paint.Style.STROKE
-                paint.strokeJoin = Paint.Join.ROUND
-                paint.strokeCap = Paint.Cap.ROUND
-                paint.color = Color.argb(inkAlpha(brush, highlighter), r, g, b)
-                paint.strokeWidth = width * widthScale(brush, highlighter)
-                canvas.drawPath(geom, paint)
+            when {
+                isRibbon(brush, highlighter) -> {
+                    paint.style = Paint.Style.FILL
+                    paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
+                    paint.color = Color.rgb(r, g, b)
+                    canvas.drawPath(geom, paint)
+                    paint.style = Paint.Style.STROKE
+                }
+                brush == Brush.PENCIL && !highlighter -> {
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeJoin = Paint.Join.ROUND; paint.strokeCap = Paint.Cap.ROUND
+                    paint.shader = pencilGrain
+                    paint.colorFilter = PorterDuffColorFilter(Color.rgb(r, g, b), PorterDuff.Mode.SRC_IN)
+                    paint.alpha = 0xF0
+                    paint.strokeWidth = width * widthScale(brush, highlighter)
+                    canvas.drawPath(geom, paint)
+                    paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
+                }
+                else -> {
+                    paint.style = Paint.Style.STROKE
+                    paint.shader = null; paint.colorFilter = null; paint.alpha = 0xFF
+                    paint.strokeJoin = Paint.Join.ROUND; paint.strokeCap = Paint.Cap.ROUND
+                    paint.color = Color.argb(inkAlpha(brush, highlighter), r, g, b)
+                    paint.strokeWidth = width * widthScale(brush, highlighter)
+                    canvas.drawPath(geom, paint)
+                }
             }
         }
     }
@@ -203,7 +246,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var vertexHandles: List<PointF>? = null
     private var lasso: List<PointF>? = null
 
-    private val strokePaint = Paint().apply { isAntiAlias = true; isDither = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val paperPaint = Paint().apply { isAntiAlias = true }
     private val pagePaint = Paint().apply { isAntiAlias = true }
     private val shadowPaint = Paint().apply { isAntiAlias = true; color = Color.argb(50, 0, 0, 0) }

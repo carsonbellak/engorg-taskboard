@@ -33,7 +33,7 @@ class WetOverlay(context: Context) : View(context) {
     private var ballRadius = 0f
 
     private val paint = Paint().apply {
-        isAntiAlias = true; isDither = true; style = Paint.Style.STROKE
+        isAntiAlias = true; style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
     }
     private val leashPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 1.5f }
