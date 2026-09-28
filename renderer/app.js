@@ -1031,14 +1031,14 @@
           // Brightspace: turn "… - Due" deadlines into assignment notes tied to their
           // class project (merged with the matching Gradescope project), and tag the
           // calendar entries with that project before they're imported.
-          let notesCreated = 0;
-          if ((feed.source || '').toLowerCase() === 'brightspace') notesCreated = await syncBrightspaceNotes(events);
+          let notesTouched = 0; // Brightspace assignment notes created or updated this pass
+          if ((feed.source || '').toLowerCase() === 'brightspace') notesTouched = await syncBrightspaceNotes(events);
           // Deadlines that became assignment notes drive the calendar via their due date,
           // so don't also import them as schedule events (prune drops any older duplicates).
           const toImport = events.filter(ev => !ev._noteBacked);
           const { changed } = await dataManager.importExternalEvents(toImport, { source: feed.source || 'feed', prune: true });
-          if (changed || notesCreated) window.dispatchEvent(new CustomEvent('schedule-changed'));
-          if (notesCreated) { window.dispatchEvent(new CustomEvent('tasks-changed')); window.dispatchEvent(new CustomEvent('projects-changed')); }
+          if (changed || notesTouched) window.dispatchEvent(new CustomEvent('schedule-changed'));
+          if (notesTouched) { window.dispatchEvent(new CustomEvent('tasks-changed')); window.dispatchEvent(new CustomEvent('projects-changed')); }
         } catch (e) { console.warn('Calendar feed sync failed (' + (feed.name || feed.url) + '):', e.message); }
       }
       try {
@@ -1139,7 +1139,7 @@
     // same course code). Content-release ("- Available") and other entries are ignored.
     async function syncBrightspaceNotes(events) {
       try { await dataManager.addCategory({ id: 'assignment', name: 'Assignment', label: 'ASGN', color: '#8B5CF6' }); } catch (e) {}
-      let notesCreated = 0;
+      let touched = 0; // notes created OR updated — the caller re-renders when > 0
       for (const ev of events) {
         const m = (ev.title || '').match(/^(.*?)\s*[-–]\s*Due\s*$/i);
         if (!m) continue;                       // only deadlines
@@ -1165,16 +1165,23 @@
         const title = (m[1] || '').trim() || ev.title;
         const dueISO = new Date(`${ev.date}T${ev.startTime || '23:59'}:00`).toISOString();
         const priority = gsPriority(dueISO);
-        const bid = ev.extId;                   // brightspace:uid:occurrence — stable per deadline
-        const existing = dataManager.tasks.find(t => t.brightspaceId === bid);
+        const weekday = gsWeekday(dueISO);
+        const bid = ev.extId;                   // brightspace:uid — stable per deadline (UID only, date-independent)
+        // Match by the stable base id, tolerating notes from older versions whose id
+        // still carries the (now-removed) ":<date>" suffix — so a moved deadline updates
+        // that same note (and migrates its id) instead of leaving a stale copy behind.
+        const existing = dataManager.tasks.find(t =>
+          t.brightspaceId === bid || (t.brightspaceId || '').startsWith(bid + ':'));
         if (existing) {
           const patch = {};
+          if (existing.brightspaceId !== bid) patch.brightspaceId = bid; // migrate old date-suffixed id
           if (existing.title !== title) patch.title = title;
           if (existing.projectId !== proj.id) patch.projectId = proj.id;
           if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
           if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.day !== weekday) patch.day = weekday; // keep the task board's day column in sync
           if (existing.priority !== priority) patch.priority = priority;
-          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+          if (Object.keys(patch).length) { await dataManager.updateTask(existing.id, patch); touched++; }
         } else {
           await dataManager.addTask({
             title,
@@ -1184,7 +1191,7 @@
             priority,
             dueDate: ev.date,
             dueTime: ev.startTime,
-            day: gsWeekday(dueISO),
+            day: weekday,
             status: 'backlog',
             completed: false,
             checklist: [],
@@ -1192,10 +1199,10 @@
             source: 'brightspace',
             brightspaceId: bid,
           });
-          notesCreated++;
+          touched++;
         }
       }
-      return notesCreated;
+      return touched;
     }
 
     async function syncGradescope(silent = true) {
@@ -1236,7 +1243,7 @@
       }
 
       // (2)+(3) Tag calendar events with their project; create/update assignment notes.
-      let notesCreated = 0;
+      let notesCreated = 0, notesChanged = 0;
       const activeGids = new Set();
       for (const ev of events) {
         // Excluded class → no project was created above, so skip its assignments entirely.
@@ -1246,6 +1253,7 @@
         const gid = ev.extId;     // gradescope:courseId:assignmentId — stable per assignment
         activeGids.add(gid);
         const priority = gsPriority(ev.dueISO);
+        const weekday = gsWeekday(ev.dueISO);
         const desc = `Gradescope · ${ev.course}`;
         const existing = dataManager.tasks.find(t => t.gradescopeId === gid);
         if (existing) {
@@ -1255,6 +1263,7 @@
           if (existing.projectId !== projectId) patch.projectId = projectId;
           if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
           if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.day !== weekday) patch.day = weekday; // keep the task board's day column in sync
           if (existing.priority !== priority) patch.priority = priority;
           // Migrate: keep the description clean and ensure the Gradescope link exists
           // as a real link entry (older notes had the URL dumped in the description).
@@ -1262,10 +1271,10 @@
             patch.links = (existing.links || []).concat([{ label: 'Open in Gradescope', url: ev.url }]);
           }
           if (existing.description && existing.description.includes(ev.url)) patch.description = desc;
-          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+          if (Object.keys(patch).length) { await dataManager.updateTask(existing.id, patch); notesChanged++; }
           // Gradescope is the source of truth for submission — mark done when submitted,
           // but never auto-un-complete (a note the user finished stays done).
-          if (ev.submitted && existing.status !== 'done') await dataManager.updateTaskStatus(existing.id, 'done');
+          if (ev.submitted && existing.status !== 'done') { await dataManager.updateTaskStatus(existing.id, 'done'); notesChanged++; }
         } else {
           await dataManager.addTask({
             title: ev.title,
@@ -1276,7 +1285,7 @@
             priority,
             dueDate: ev.date,
             dueTime: ev.startTime,
-            day: gsWeekday(ev.dueISO),
+            day: weekday,
             status: ev.submitted ? 'done' : 'backlog',
             completed: !!ev.submitted,
             checklist: [],
@@ -1301,7 +1310,7 @@
       if (silent) fetchGradescopeAttachments(activeGids).catch(() => {});
       else attach = await fetchGradescopeAttachments(activeGids).catch(() => null);
 
-      if (changed || notesCreated) {
+      if (changed || notesCreated || notesChanged) {
         window.dispatchEvent(new CustomEvent('schedule-changed'));
         window.dispatchEvent(new CustomEvent('tasks-changed'));
         window.dispatchEvent(new CustomEvent('projects-changed'));
@@ -1400,13 +1409,14 @@
       }
 
       // (2)+(3) Create/update assignment notes.
-      let notesCreated = 0;
+      let notesCreated = 0, notesChanged = 0;
       for (const ev of events) {
         if (excludedCourseIds.has(ev.courseId)) continue;
         const projectId = projByCourse[ev.courseId] || null;
         ev.projectId = projectId;
         const vid = ev.extId; // variate:groupId:groupAssessmentId — stable per assignment
         const priority = gsPriority(ev.dueISO);
+        const weekday = gsWeekday(ev.dueISO);
         const desc = `Variate · ${ev.course}`;
         const existing = dataManager.tasks.find(t => t.variateId === vid);
         if (existing) {
@@ -1415,14 +1425,15 @@
           if (existing.projectId !== projectId) patch.projectId = projectId;
           if (existing.dueDate !== ev.date) patch.dueDate = ev.date;
           if (existing.dueTime !== ev.startTime) patch.dueTime = ev.startTime;
+          if (existing.day !== weekday) patch.day = weekday; // keep the task board's day column in sync
           if (existing.priority !== priority) patch.priority = priority;
           if (ev.url && !(existing.links || []).some(l => l.url === ev.url)) {
             patch.links = (existing.links || []).concat([{ label: 'Open in Variate', url: ev.url }]);
           }
-          if (Object.keys(patch).length) await dataManager.updateTask(existing.id, patch);
+          if (Object.keys(patch).length) { await dataManager.updateTask(existing.id, patch); notesChanged++; }
           // Variate is the source of truth for submission — mark done when submitted,
           // but never auto-un-complete a note the user finished.
-          if (ev.submitted && existing.status !== 'done') await dataManager.updateTaskStatus(existing.id, 'done');
+          if (ev.submitted && existing.status !== 'done') { await dataManager.updateTaskStatus(existing.id, 'done'); notesChanged++; }
         } else {
           await dataManager.addTask({
             title: ev.title,
@@ -1433,7 +1444,7 @@
             priority,
             dueDate: ev.date,
             dueTime: ev.startTime,
-            day: gsWeekday(ev.dueISO),
+            day: weekday,
             status: ev.submitted ? 'done' : 'backlog',
             completed: !!ev.submitted,
             checklist: [],
@@ -1451,7 +1462,7 @@
       // duplicate schedule items earlier versions may have imported.
       const { changed } = await dataManager.importExternalEvents([], { source: 'variate', prune: true });
 
-      if (changed || notesCreated) {
+      if (changed || notesCreated || notesChanged) {
         window.dispatchEvent(new CustomEvent('schedule-changed'));
         window.dispatchEvent(new CustomEvent('tasks-changed'));
         window.dispatchEvent(new CustomEvent('projects-changed'));

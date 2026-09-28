@@ -17,8 +17,14 @@ const localDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 const localTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 // Build one normalized schedule-item from a start/end Date pair.
+// occurrenceKey distinguishes the instances of a *recurring* event; pass null for a
+// single event so its extId is keyed by UID alone (date-independent). Keying a single
+// event's extId by its date would change the id whenever the event moves, orphaning the
+// old copy (and, for Brightspace "- Due" deadlines, the assignment note built from it)
+// instead of updating it in place.
 function makeEvent(ev, startDt, endDt, source, occurrenceKey) {
   const allDay = ev.datetype === 'date';
+  const uid = ev.uid || 'nouid';
   return {
     title: (ev.summary || 'Event').toString().slice(0, 200),
     description: (ev.description || '').toString().replace(/\r?\n/g, ' ').slice(0, 300),
@@ -28,7 +34,7 @@ function makeEvent(ev, startDt, endDt, source, occurrenceKey) {
     startTime: allDay ? null : localTime(startDt),
     endTime: allDay || !endDt ? null : localTime(endDt),
     allDay,
-    extId: `${source}:${ev.uid || 'nouid'}:${occurrenceKey}`,
+    extId: occurrenceKey == null ? `${source}:${uid}` : `${source}:${uid}:${occurrenceKey}`,
     source,
   };
 }
@@ -58,9 +64,12 @@ function normalizeIcs(text, source) {
         events.push(makeEvent(override || ev, startDt, endDt, source, localDate(occ)));
       }
     } else {
-      // Single event: include if it falls within the window.
+      // Single event: include if it falls within the window. Key its extId by UID only
+      // (occurrenceKey null) so moving the event updates the same item instead of
+      // orphaning it. Fall back to a date key only when the feed omitted a UID, so
+      // distinct UID-less events don't collapse onto one id.
       if (ev.start >= windowStart && ev.start <= windowEnd) {
-        events.push(makeEvent(ev, ev.start, ev.end, source, localDate(ev.start)));
+        events.push(makeEvent(ev, ev.start, ev.end, source, ev.uid ? null : localDate(ev.start)));
       }
     }
     if (events.length >= 2000) break; // safety cap

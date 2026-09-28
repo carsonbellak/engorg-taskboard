@@ -15,7 +15,10 @@ import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
 import android.view.View
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.sin
 
 /**
  * Continuous multi-page document (8.5x11 pages stacked vertically with a gap) drawn on a backdrop.
@@ -126,48 +129,55 @@ class FinishedStrokesView(context: Context) : View(context) {
             else -> buildStrokeOutline(buildPath(pts), baseW * widthScale(brush))
         }
 
+        // Broad-edge "nib" for the fountain pen. A real fountain/italic nib is a flat broad edge held
+        // at a fixed angle: the line is thickest when you drag ACROSS the edge and thins to a hairline
+        // when you travel ALONG it. That direction-driven width — bold downstrokes, thin upstrokes, the
+        // weight sweeping as the stroke curves — is the fountain-pen signature. It's also inherently
+        // ball-proof: width comes from *heading*, not *speed*, so the slow touch-down / lift-off points
+        // are not fattened, and there are no round end caps to bulge into a bead.
+        private const val NIB_ANGLE_DEG = -40f     // edge tilt: "\" downstroke bold, "/" upstroke thin
+        private const val NIB_MIN_RATIO = 0.22f    // hairline width as a fraction of the broad width
+        private val NIB_EX = cos(Math.toRadians(NIB_ANGLE_DEG.toDouble())).toFloat()
+        private val NIB_EY = sin(Math.toRadians(NIB_ANGLE_DEG.toDouble())).toFloat()
+
         /**
-         * Fountain nib: a filled band whose half-width swells where the pen is slow and thins where
-         * it's fast. The swell is damped to nothing over an end zone (you're always slow at touch and
-         * lift, which otherwise bulged the ends into balls), and the tips taper to a rounded point.
-         * Short strokes ease toward a uniform blunt shape so a quick tick isn't a sharp diamond.
+         * Fountain nib: a filled band whose width is set by the stroke's direction against a fixed
+         * broad-nib edge (thick across the edge, hairline along it), not by speed. The width sweeps
+         * smoothly as the heading changes, tips end in a chisel (a slightly softened flat nib edge),
+         * and a lone tap stamps the nib's footprint — so no round end balls, on long or short strokes.
          */
         private fun buildFountainRibbon(pts: List<PointF>, baseW: Float): Path {
             val p = Path()
             val n = pts.size
             if (n == 0) return p
-            val hHalf = (baseW / 2f).coerceAtLeast(0.4f)
-            if (n == 1) { p.addCircle(pts[0].x, pts[0].y, hHalf, Path.Direction.CW); return p }
+            val half = (baseW / 2f).coerceAtLeast(0.4f)
+            if (n == 1) return nibStamp(pts[0].x, pts[0].y, half)
             val cum = FloatArray(n)
             for (i in 1 until n) cum[i] = cum[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)
             val total = cum[n - 1]
-            if (total < 1e-3f) { p.addCircle(pts[0].x, pts[0].y, hHalf, Path.Direction.CW); return p }
-            val lenFactor = (total / (baseW * 9f)).coerceIn(0f, 1f)   // short mark → stay uniform/blunt
-            val ref = baseW * 2.6f + 7f
-            val coreZone = baseW * 5f          // distance over which the slow-end swell is suppressed
+            if (total < 1e-3f) return nibStamp(pts[0].x, pts[0].y, half)
+            // Per-point half-width from heading vs. the nib edge: |T x e| = |sin(angle)| → 1 across, 0 along.
             val h = FloatArray(n)
             for (i in 0 until n) {
                 val a = pts[if (i > 0) i - 1 else i]; val c = pts[if (i < n - 1) i + 1 else i]
-                val span = if (i in 1 until n - 1) 2f else 1f
-                val d = hypot(c.x - a.x, c.y - a.y) / span
-                val rawF = (1.5f - d / ref).coerceIn(0.5f, 1.22f)    // thin when fast, only modest swell
-                val edge = minOf(cum[i], total - cum[i])
-                val e = (edge / coreZone).coerceIn(0f, 1f)
-                val core = e * e * (3f - 2f * e)                     // 0 at the ends → 1 in the body
-                val f = 1f + (rawF - 1f) * lenFactor * core
-                h[i] = baseW * f / 2f
+                var tx = c.x - a.x; var ty = c.y - a.y
+                val len = hypot(tx, ty)
+                if (len > 1e-4f) { tx /= len; ty /= len }
+                val across = abs(tx * NIB_EY - ty * NIB_EX)          // 1 when crossing the edge, 0 when along it
+                h[i] = half * (NIB_MIN_RATIO + (1f - NIB_MIN_RATIO) * across)
             }
+            // Smooth the weight so the thick↔thin transition glides as the stroke curves (ink can't jump).
             val sh = FloatArray(n)
             for (i in 0 until n) {
                 val lo = (i - 1).coerceAtLeast(0); val hi = (i + 1).coerceAtMost(n - 1)
                 sh[i] = (h[lo] + h[i] + h[hi]) / ((hi - lo) + 1)
             }
-            // Short tip taper (rounded via smoothstep) so ends read as a nib touch, not a point.
-            val endMin = 0.6f - 0.35f * lenFactor
-            val taperLen = (baseW * 1.6f).coerceAtMost(total * 0.4f)
-            if (taperLen > 1e-3f) for (i in 0 until n) {
+            // Soften just the last ~½-width at each tip so the flat chisel end isn't a hard block. This
+            // NARROWS the tip (never widens) and adds no cap, so it can't bring the end balls back.
+            val soft = (baseW * 0.5f).coerceAtMost(total * 0.25f)
+            if (soft > 1e-3f) for (i in 0 until n) {
                 val edge = minOf(cum[i], total - cum[i])
-                if (edge < taperLen) { val e = edge / taperLen; sh[i] *= endMin + (1f - endMin) * (e * e * (3f - 2f * e)) }
+                if (edge < soft) { val e = edge / soft; sh[i] *= 0.7f + 0.3f * (e * e * (3f - 2f * e)) }
             }
             val nx = FloatArray(n); val ny = FloatArray(n)
             for (i in 0 until n) {
@@ -177,21 +187,28 @@ class FinishedStrokesView(context: Context) : View(context) {
                 if (len > 1e-4f) { tx /= len; ty /= len } else { tx = 1f; ty = 0f }
                 nx[i] = -ty; ny[i] = tx
             }
+            // Perpendicular-offset band with plain flat caps. Because the width already collapses toward
+            // the nib direction, a bold stroke's flat cap lands along the nib edge (a true chisel end)
+            // and a hairline's cap is vanishingly small — either way, no bead.
             p.moveTo(pts[0].x + nx[0] * sh[0], pts[0].y + ny[0] * sh[0])
             for (i in 1 until n) p.lineTo(pts[i].x + nx[i] * sh[i], pts[i].y + ny[i] * sh[i])
             for (i in n - 1 downTo 0) p.lineTo(pts[i].x - nx[i] * sh[i], pts[i].y - ny[i] * sh[i])
             p.close()
             p.fillType = Path.FillType.WINDING
-            // Round the two ends with a boolean UNION instead of dropping cap circles straight into
-            // this path: added directly, a circle's winding cancels against the band where the two
-            // overlap, punching a half-filled ("half white, half ink") disc into the stroke end.
-            // A union can't cancel, so the cap always reads as a solid rounded nib tip.
-            val caps = Path().apply {
-                addCircle(pts[0].x, pts[0].y, sh[0].coerceAtLeast(0.4f), Path.Direction.CW)
-                addCircle(pts[n - 1].x, pts[n - 1].y, sh[n - 1].coerceAtLeast(0.4f), Path.Direction.CW)
-            }
-            p.op(caps, Path.Op.UNION)
             return p
+        }
+
+        /** A single nib dab (a tap): the broad edge stamped once — thin across, broad along the edge. */
+        private fun nibStamp(x: Float, y: Float, half: Float): Path {
+            val t = (half * NIB_MIN_RATIO).coerceAtLeast(0.4f)   // half-thickness across the edge
+            val nx = -NIB_EY; val ny = NIB_EX
+            return Path().apply {
+                moveTo(x + NIB_EX * half + nx * t, y + NIB_EY * half + ny * t)
+                lineTo(x - NIB_EX * half + nx * t, y - NIB_EY * half + ny * t)
+                lineTo(x - NIB_EX * half - nx * t, y - NIB_EY * half - ny * t)
+                lineTo(x + NIB_EX * half - nx * t, y + NIB_EY * half - ny * t)
+                close()
+            }
         }
 
         /**

@@ -1167,7 +1167,7 @@ function renderSettings() {
       <!-- Apple Calendar Sync -->
       <div class="settings-section">
         <h3 class="settings-section-title">Apple Calendar Sync</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">Scan the QR code with your iPhone camera to auto-subscribe. Events sync every 30 minutes with 15-minute reminders.</p>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Scan the QR code with your iPhone camera to auto-subscribe. Your events, assignment due dates, and project work blocks sync every 30 minutes with 15-minute reminders — perfect for a lockscreen schedule.</p>
         <button id="settings-calendar-link" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Generate QR Code</button>
         <span id="settings-calendar-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
         <div id="settings-calendar-url" style="display:none;margin-top:16px;padding:16px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px">
