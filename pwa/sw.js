@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v22';
+const CACHE_NAME = 'engorg-v23';
 // VAPID public key — must match the value set in Firebase secrets and app.js
 const VAPID_PUBLIC_KEY = 'BDmHi7C-yoOita_aL7JFADc18CiVCcn0Jw43XPIQZ_4Bu4J279M1PgRnktePqsJh_-UGkhikhwnnUOdUsBEeQhM';
 const ASSETS = [
@@ -10,11 +10,13 @@ const ASSETS = [
   '/ink.html'
 ];
 
-// Install: cache app shell
+// Install: cache app shell. Fetch each asset with {cache:'reload'} so the SW cache is
+// populated from the network, never from a stale HTTP cache entry — otherwise a fresh
+// deploy could still be cached over by the browser's 1-hour copy.
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(ASSETS))
+      .then(cache => cache.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
       .then(() => self.skipWaiting())
   );
 });

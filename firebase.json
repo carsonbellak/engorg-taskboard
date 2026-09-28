@@ -67,6 +67,25 @@
         ]
       },
       {
+        "comment": "App shell must revalidate every load (Firebase applies the LAST matching rule), so a hosting deploy reaches installed PWAs immediately instead of being trapped behind a 1-hour cache. ETags keep this cheap (304s).",
+        "source": "app.js",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
+        "source": "styles.css",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
+        "source": "index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
         "source": "sw.js",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache" }
