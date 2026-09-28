@@ -1696,12 +1696,16 @@ function renderCalWeek() {
   return renderCalTimeGrid(days, title);
 }
 
-// ── DAY VIEW — the week time-grid collapsed to the single selected day ──
+// ── DAY VIEW — a clean chronological agenda for the one selected day ──
+// The 24-hour time grid (renderCalTimeGrid) was cramped and clunky on a phone, so Day
+// view now IS the sectioned Schedule / Events / Notes list. renderCalDaySide() already
+// fills #cal-day-events for selectedCalDate on every render, so the view body is empty
+// and that interactive list is the whole day.
 function renderCalDay() {
   if (!selectedCalDate) selectedCalDate = calDateStr(new Date());
   const dt = new Date(selectedCalDate + 'T00:00:00');
-  const title = dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-  return renderCalTimeGrid([{ date: dt, dateStr: calDateStr(dt), dayName: calDayName(dt) }], title);
+  const title = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  return { title, body: '' };
 }
 
 // Shared 24-hour time grid — 7 columns for Week, 1 for Day. The grid-template-columns
@@ -1918,9 +1922,10 @@ function bindCalendarEvents() {
     });
   });
 
-  if (calView === 'day' || calView === 'week') bindCalWeek();
+  if (calView === 'week') bindCalWeek();
   else if (calView === 'agenda') bindCalAgenda();
-  else bindCalMonth();
+  else if (calView === 'month') bindCalMonth();
+  // Day view is just the agenda list (#cal-day-events), which renderCalDaySide binds itself.
 
   renderCalDaySide();
   highlightCalSelected();

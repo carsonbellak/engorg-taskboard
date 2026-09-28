@@ -167,10 +167,12 @@ body[data-style="glass"] .board-column {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  /* Clear the floating FAB (bottom:72px + safe + 56px tall) AND the home-indicator safe
-     area, so the last row never hides behind the FAB/home bar. The old flat 100px didn't
-     include the safe-area inset, so on notched iPhones the last item was clipped. */
-  padding-bottom: calc(140px + var(--safe-bottom));
+  /* Just a little breathing room at the end of the scroll. The bottom nav is a flex
+     sibling below this (so content already ends above it) and the nav owns the
+     home-indicator safe area — so this must NOT add var(--safe-bottom) again, or a
+     phantom "search-bar" gap appears at the bottom in standalone PWA mode. The floating
+     FAB is bottom-right only, so its slight overlap of the last row's right edge is fine. */
+  padding-bottom: 28px;
   -webkit-overflow-scrolling: touch;
 }
 
