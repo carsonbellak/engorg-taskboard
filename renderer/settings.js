@@ -1186,6 +1186,38 @@ function renderSettings() {
         </div>
       </div>
 
+      <!-- Lock Screen Wallpaper (daily schedule image) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Lock Screen Wallpaper</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Turn your iPhone lock screen into a daily-updating picture of your schedule (events, assignment due times, and work blocks). Generate the link below, then set up the one-time Shortcuts automation.</p>
+        <button id="settings-wallpaper-link" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Generate wallpaper link</button>
+        <span id="settings-wallpaper-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
+        <div id="settings-wallpaper-url" style="display:none;margin-top:16px;padding:16px;background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px">
+          <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">
+            <div id="settings-wallpaper-qr" style="background:#fff;padding:12px;border-radius:8px;display:inline-block"></div>
+            <div style="flex:1;min-width:220px">
+              <p style="font-size:14px;font-weight:600;color:var(--text-primary);margin-bottom:8px">Scan to preview today's image</p>
+              <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Scan with your iPhone camera to see today's schedule image, or copy this link — you'll paste it into the Shortcut below:</p>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input id="settings-wallpaper-url-input" type="text" readonly style="flex:1;padding:8px 12px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:12px;font-family:monospace">
+                <button id="settings-wallpaper-copy" class="settings-btn" style="padding:8px 16px;border-radius:6px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:13px;white-space:nowrap">Copy</button>
+              </div>
+              <details style="margin-top:14px">
+                <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-primary)">&#128241; iPhone setup (one time, ~2 min)</summary>
+                <ol style="margin:10px 0 0 18px;padding:0;font-size:12px;color:var(--text-muted);line-height:1.8">
+                  <li>Open <b>Shortcuts</b> &rarr; <b>Automation</b> tab &rarr; <b>+</b> &rarr; <b>Create Personal Automation</b>.</li>
+                  <li>Pick <b>Time of Day</b> &rarr; e.g. <b>5:30&nbsp;AM</b>, <b>Daily</b> &rarr; Next.</li>
+                  <li>Add action <b>Get Contents of URL</b> &rarr; paste the link above.</li>
+                  <li>Add action <b>Set Wallpaper</b> &rarr; set it to the <b>Lock Screen</b> and turn <b>off &ldquo;Show Preview&rdquo;</b>.</li>
+                  <li>Next &rarr; turn <b>off &ldquo;Ask Before Running&rdquo;</b> &rarr; Done.</li>
+                </ol>
+                <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">Tip: add a second automation at noon/6&nbsp;PM to refresh it through the day. If Set&nbsp;Wallpaper ever fails to apply (an iOS bug on some versions), add a 2-second Wait then a second Set&nbsp;Wallpaper action.</p>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Calendar Feeds (Brightspace / ICS) -->
       <div class="settings-section">
         <h3 class="settings-section-title">Calendar Feeds</h3>
@@ -1562,6 +1594,49 @@ function renderSettings() {
     const copyBtn = document.getElementById('settings-calendar-copy');
     copyBtn.textContent = 'Copied!';
     setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+  });
+
+  // Lock-screen wallpaper link — same token as the calendar, but points at the
+  // scheduleImage function (a daily PNG of the schedule) for the iOS Set-Wallpaper Shortcut.
+  const wpLinkBtn = document.getElementById('settings-wallpaper-link');
+  if (wpLinkBtn) wpLinkBtn.addEventListener('click', async () => {
+    const status = document.getElementById('settings-wallpaper-status');
+    const urlBox = document.getElementById('settings-wallpaper-url');
+    if (typeof firebase === 'undefined' || !firebase.auth().currentUser) {
+      status.textContent = 'Sign in first to generate a wallpaper link';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+    wpLinkBtn.disabled = true;
+    wpLinkBtn.textContent = 'Generating...';
+    status.textContent = '';
+    try {
+      const idToken = await firebase.auth().currentUser.getIdToken();
+      const resp = await fetch('https://generatecalendartoken-sf7sdunyuq-uc.a.run.app', {
+        headers: { 'Authorization': `Bearer ${idToken}` }
+      });
+      if (!resp.ok) throw new Error('Failed to generate token');
+      const { token } = await resp.json();
+      const wpUrl = `https://us-central1-assistant-taskboard.cloudfunctions.net/scheduleImage?token=${token}`;
+      document.getElementById('settings-wallpaper-url-input').value = wpUrl;
+      urlBox.style.display = 'block';
+      const qr = document.getElementById('settings-wallpaper-qr');
+      qr.innerHTML = '';
+      new QRCode(qr, { text: wpUrl, width: 180, height: 180, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+      wpLinkBtn.textContent = 'Regenerate wallpaper link';
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`;
+      status.style.color = 'var(--danger)';
+      wpLinkBtn.textContent = 'Generate wallpaper link';
+    }
+    wpLinkBtn.disabled = false;
+  });
+
+  const wpCopyBtn = document.getElementById('settings-wallpaper-copy');
+  if (wpCopyBtn) wpCopyBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(document.getElementById('settings-wallpaper-url-input').value);
+    wpCopyBtn.textContent = 'Copied!';
+    setTimeout(() => { wpCopyBtn.textContent = 'Copy'; }, 2000);
   });
 
   // Mobile Access QR handler — points to the PWA for home-screen install

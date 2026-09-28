@@ -167,7 +167,10 @@ body[data-style="glass"] .board-column {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
-  padding-bottom: 100px;
+  /* Clear the floating FAB (bottom:72px + safe + 56px tall) AND the home-indicator safe
+     area, so the last row never hides behind the FAB/home bar. The old flat 100px didn't
+     include the safe-area inset, so on notched iPhones the last item was clipped. */
+  padding-bottom: calc(140px + var(--safe-bottom));
   -webkit-overflow-scrolling: touch;
 }
 
