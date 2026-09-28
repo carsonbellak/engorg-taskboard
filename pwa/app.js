@@ -1,5 +1,15 @@
 // EngOrg PWA — Mobile Companion App
 
+// Tag <html> when running as an installed PWA (no browser chrome), so CSS can drop
+// browser-only spacing — e.g. the home-indicator safe-area strip under the bottom nav,
+// which is dead navy space in standalone mode but correct clearance in a browser tab.
+try {
+  if (window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)) {
+    document.documentElement.classList.add('standalone');
+  }
+} catch (e) { /* matchMedia unavailable — leave as browser mode */ }
+
 const firebaseConfig = {
   apiKey: "AIzaSyA0PSZdBoVrNUrDR384m8O5PcMcbDrGGSw",
   authDomain: "assistant-taskboard.firebaseapp.com",

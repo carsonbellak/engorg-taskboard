@@ -430,6 +430,14 @@ body[data-style="glass"] .board-column {
   flex-shrink: 0;
   z-index: 10;
 }
+/* Installed PWA: no browser toolbar occupies the bottom, so the home-indicator safe-area
+   clearance below the hot bar is just dead navy space — remove it so the bar sits at the
+   very bottom. Kept in a browser tab (where the bottom bar makes it correct). Both the
+   media query and the JS-set html.standalone class are used for reliability across iOS. */
+@media (display-mode: standalone) {
+  #bottom-nav { padding-bottom: 0; }
+}
+html.standalone #bottom-nav { padding-bottom: 0; }
 .nav-item {
   flex: 1;
   display: flex; flex-direction: column; align-items: center;
