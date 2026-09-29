@@ -2766,6 +2766,7 @@ let selectedProjColor = PROJECT_PALETTE[0];
 
 document.getElementById('btn-new-project').addEventListener('click', () => {
   document.getElementById('new-proj-name').value = '';
+  const locEl = document.getElementById('new-proj-location'); if (locEl) locEl.value = '';
   selectedProjColor = PROJECT_PALETTE[data.projects.length % PROJECT_PALETTE.length];
   const swatches = document.getElementById('new-proj-colors');
   swatches.innerHTML = PROJECT_PALETTE.map(c =>
@@ -2790,6 +2791,7 @@ document.getElementById('btn-save-new-proj').addEventListener('click', async () 
   const proj = {
     id: `proj_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
     name,
+    location: (document.getElementById('new-proj-location')?.value || '').trim(),
     color: selectedProjColor,
     categories: [],
     createdAt: new Date().toISOString()

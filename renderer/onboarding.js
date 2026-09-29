@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.3.48': {
+      title: "What's new",
+      intro: 'Your schedule on your iPhone lock screen — plus class rooms and a smoother mobile app.',
+      slides: [
+        { emoji: '📱', title: 'Lock screen schedule', body: 'Put a daily-updating picture of your schedule on your iPhone lock screen. On the phone, open the web app → ⚙️ → Wallpaper, generate your link, and follow the one-time Shortcut steps — it repaints every morning.' },
+        { emoji: '📅', title: 'Apple Calendar sync', body: 'Subscribe your iPhone calendar to your board — events, assignment due dates and work blocks — from Settings → Calendar → Generate QR Code, then scan it with your camera.' },
+        { emoji: '📍', title: 'Class rooms', body: 'Give a project a Location (like a class room) in its editor, and that room now shows next to the class on your lock-screen schedule.' },
+      ],
+    },
     '1.3.30': {
       title: "What's new",
       intro: 'Handwriting leveled up — split notebooks, and a live desktop mirror.',

@@ -629,12 +629,14 @@ class ModalManager {
       heading.innerHTML = '&#9998; Edit Project';
       saveBtn.textContent = 'Save Changes';
       document.getElementById('project-name-input').value = editProject.name || '';
+      document.getElementById('project-location-input').value = editProject.location || '';
       this._populateProjectCategories(editProject.categories || []);
       this._workingSchedule = (editProject.workSchedule || []).map(b => ({ ...b }));
     } else {
       heading.innerHTML = '&#128450; New Project';
       saveBtn.textContent = 'Create';
       document.getElementById('project-name-input').value = '';
+      document.getElementById('project-location-input').value = '';
       this._populateProjectCategories([]);
       this._workingSchedule = [];
     }
@@ -648,6 +650,7 @@ class ModalManager {
   async _saveProject() {
     const name = document.getElementById('project-name-input').value.trim();
     if (!name) return;
+    const location = (document.getElementById('project-location-input').value || '').trim();
     const categories = Array.from(document.querySelectorAll('.project-cat-checkbox:checked')).map(cb => cb.value);
     const workSchedule = this._workingSchedule || [];
 
@@ -656,12 +659,12 @@ class ModalManager {
         p.id !== this._editingProjectId && p.name.toLowerCase() === name.toLowerCase()
       );
       if (duplicate) { alert('A project with that name already exists.'); return; }
-      await this.data.updateProject(this._editingProjectId, { name, categories, workSchedule });
+      await this.data.updateProject(this._editingProjectId, { name, location, categories, workSchedule });
     } else {
       if (this.data.projects.some(p => p.name.toLowerCase() === name.toLowerCase())) {
         alert('Project already exists.'); return;
       }
-      await this.data.addProject({ name, categories, workSchedule });
+      await this.data.addProject({ name, location, categories, workSchedule });
     }
 
     // Re-assign rainbow colors to all projects
