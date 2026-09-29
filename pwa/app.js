@@ -2828,13 +2828,14 @@ function closePwaSettings() {
 function renderPwaSettings() {
   const body = document.getElementById('settings-body');
   if (!body) return;
-  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['about', 'About']];
+  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['wallpaper', 'Wallpaper'], ['about', 'About']];
   let html = `<div class="pset-tabs">` + tabs.map(([id, label]) =>
     `<button class="pset-tab${id === _psetTab ? ' active' : ''}" data-ptab="${id}">${label}</button>`).join('') + `</div>`;
   html += `<div class="pset-panel">`;
   if (_psetTab === 'appearance') html += psetAppearance();
   else if (_psetTab === 'hotbar') html += psetHotbar();
   else if (_psetTab === 'notes') html += psetNotes();
+  else if (_psetTab === 'wallpaper') html += psetWallpaper();
   else html += psetAbout();
   html += `</div>`;
   body.innerHTML = html;
@@ -2916,6 +2917,29 @@ function psetNotes() {
   </div>`;
 }
 
+function psetWallpaper() {
+  return `<div class="pset-section">
+    <h3 class="pset-h3">Lock Screen Wallpaper</h3>
+    <p class="pset-hint">Put a daily-updating picture of your schedule on your iPhone lock screen &mdash; events, assignment due times and work blocks. Generate your private link, copy it, then follow the one-time steps below (~2 min).</p>
+    <button class="btn-primary-full" id="pset-wp-gen">Generate my wallpaper link</button>
+    <div id="pset-wp-result" class="hidden" style="margin-top:14px">
+      <input id="pset-wp-url" class="form-input" readonly style="width:100%;font-family:ui-monospace,monospace;font-size:11px">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn-primary-full" id="pset-wp-copy" style="flex:1">Copy link</button>
+        <button class="btn-secondary-full" id="pset-wp-preview" style="flex:1">Preview today</button>
+      </div>
+      <ol class="pset-wp-steps">
+        <li>Open <b>Shortcuts</b> &rarr; <b>Automation</b> tab &rarr; <b>+</b> &rarr; <b>Create Personal Automation</b>.</li>
+        <li>Choose <b>Time of Day</b> &rarr; e.g. <b>6:00 AM</b>, <b>Daily</b> &rarr; Next.</li>
+        <li>Add action <b>Get Contents of URL</b> &rarr; tap the URL field and <b>Paste</b> your link.</li>
+        <li>Add action <b>Set Wallpaper</b> &rarr; choose <b>Lock Screen</b>, turn <b>off &ldquo;Show Preview&rdquo;</b>.</li>
+        <li>Tap Next &rarr; turn <b>off &ldquo;Ask Before Running&rdquo;</b> &rarr; <b>Done</b>.</li>
+      </ol>
+      <p class="pset-hint" style="margin-top:8px">Tip: add another automation at noon to refresh midday. If Set Wallpaper ever doesn't apply (an iOS quirk), add a 2-second <b>Wait</b> then a second <b>Set Wallpaper</b>.</p>
+    </div>
+  </div>`;
+}
+
 function psetAbout() {
   const email = auth.currentUser?.email || '';
   return `<div class="pset-section">
@@ -2983,6 +3007,43 @@ function bindPsetEvents() {
   const colorSel = body.querySelector('#pset-color');
   if (colorSel) colorSel.addEventListener('change', e => {
     noteColorMode = e.target.value; savePwaSettings({ noteColorMode: e.target.value }, { apply: false }); syncFilterBarSelects(); render();
+  });
+
+  // Lock-screen wallpaper — generate the schedule-image link (same token as the calendar),
+  // copy it, and preview it, all on the phone.
+  const wpGen = body.querySelector('#pset-wp-gen');
+  if (wpGen) wpGen.addEventListener('click', async () => {
+    if (!auth.currentUser) { wpGen.textContent = 'Sign in first'; return; }
+    const res = document.getElementById('pset-wp-result');
+    const urlInput = document.getElementById('pset-wp-url');
+    const orig = wpGen.textContent;
+    wpGen.disabled = true; wpGen.textContent = 'Generating…';
+    try {
+      const idToken = await auth.currentUser.getIdToken();
+      const r = await fetch('https://generatecalendartoken-sf7sdunyuq-uc.a.run.app', { headers: { Authorization: `Bearer ${idToken}` } });
+      if (!r.ok) throw new Error('token request failed');
+      const { token } = await r.json();
+      urlInput.value = `https://us-central1-assistant-taskboard.cloudfunctions.net/scheduleImage?token=${token}`;
+      res.classList.remove('hidden');
+      wpGen.textContent = 'Regenerate link';
+    } catch (e) {
+      wpGen.textContent = 'Error — tap to retry';
+      setTimeout(() => { wpGen.textContent = orig; }, 2500);
+    }
+    wpGen.disabled = false;
+  });
+  const wpCopy = body.querySelector('#pset-wp-copy');
+  if (wpCopy) wpCopy.addEventListener('click', async () => {
+    const input = document.getElementById('pset-wp-url');
+    try { await navigator.clipboard.writeText(input.value); }
+    catch (e) { input.focus(); input.select(); try { document.execCommand('copy'); } catch (_) {} }
+    wpCopy.textContent = 'Copied!';
+    setTimeout(() => { wpCopy.textContent = 'Copy link'; }, 1800);
+  });
+  const wpPrev = body.querySelector('#pset-wp-preview');
+  if (wpPrev) wpPrev.addEventListener('click', () => {
+    const v = document.getElementById('pset-wp-url').value;
+    if (v) window.open(v, '_blank');
   });
 
   // Account

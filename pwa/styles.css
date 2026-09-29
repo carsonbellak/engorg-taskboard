@@ -1993,12 +1993,23 @@ select.form-input option { background: var(--bg); color: var(--text); }
   display: flex; gap: 4px; padding: 4px; margin-bottom: 16px;
   background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 99px;
   position: sticky; top: 0; z-index: 2;
+  overflow-x: auto; scrollbar-width: none;
 }
+.pset-tabs::-webkit-scrollbar { display: none; }
 .pset-tab {
-  flex: 1; padding: 8px 4px; border: none; border-radius: 99px;
+  /* Fill the width when the tabs fit; if there are enough to overflow (5+), keep each
+     label intact and let the bar scroll instead of clipping the text. */
+  flex: 1 0 auto; min-width: fit-content; white-space: nowrap;
+  padding: 8px 12px; border: none; border-radius: 99px;
   background: transparent; color: var(--text-secondary);
   font-size: 13px; font-weight: 700; font-family: inherit; cursor: pointer; transition: .14s;
 }
+.pset-wp-steps {
+  margin: 14px 0 0; padding-left: 20px;
+  font-size: 13px; line-height: 1.9; color: var(--text-secondary);
+}
+.pset-wp-steps li { margin-bottom: 4px; }
+.pset-wp-steps b { color: var(--text); }
 .pset-tab.active { background: var(--bg-card); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 
 .pset-section { margin-bottom: 22px; }
