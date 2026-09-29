@@ -4,6 +4,8 @@ const { initializeApp } = require('firebase-admin/app');
 const { getFirestore, Timestamp } = require('firebase-admin/firestore');
 const crypto = require('crypto');
 const webpush = require('web-push');
+const { buildCalendarIcs } = require('./ics');
+const { renderScheduleWallpaper } = require('./scheduleimage');
 
 initializeApp();
 const db = getFirestore();
@@ -29,85 +31,79 @@ exports.calendarFeed = onRequest({ cors: true, invoker: 'public' }, async (req, 
     }
 
     const uid = tokenDoc.data().uid;
-    const scheduleDoc = await db.doc(`users/${uid}/data/schedule`).get();
-    if (!scheduleDoc.exists) {
-      res.status(404).send('No schedule data found');
-      return;
-    }
 
-    const data = scheduleDoc.data();
-    const events = data.items || [];
+    // Pull the same three sources the in-app calendar draws from: scheduled events,
+    // due-dated notes (assignments included), and recurring project work blocks — so the
+    // subscribed calendar on the phone shows the full schedule, not just events.
+    const [scheduleDoc, tasksDoc, projectsDoc] = await Promise.all([
+      db.doc(`users/${uid}/data/schedule`).get(),
+      db.doc(`users/${uid}/data/tasks`).get(),
+      db.doc(`users/${uid}/data/projects`).get(),
+    ]);
 
-    const lines = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//EngOrg//Engineering Task Board//EN',
-      'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH',
-      'X-WR-CALNAME:EngOrg',
-      'X-WR-TIMEZONE:America/New_York',
-      'REFRESH-INTERVAL;VALUE=DURATION:PT30M',
-      'X-PUBLISHED-TTL:PT30M',
-    ];
-
-    for (const evt of events) {
-      if (!evt.date || !evt.title) continue;
-
-      const dateStr = evt.date.replace(/-/g, '');
-      const eventUid = evt.id || `engorg-${dateStr}-${Math.random().toString(36).slice(2, 8)}`;
-
-      lines.push('BEGIN:VEVENT');
-
-      if (evt.startTime) {
-        const st = evt.startTime.replace(':', '') + '00';
-        lines.push(`DTSTART:${dateStr}T${st}`);
-        if (evt.endTime) {
-          const et = evt.endTime.replace(':', '') + '00';
-          lines.push(`DTEND:${dateStr}T${et}`);
-        } else {
-          const [h, m] = evt.startTime.split(':').map(Number);
-          const endH = String(h + 1).padStart(2, '0');
-          const endM = String(m).padStart(2, '0');
-          lines.push(`DTEND:${dateStr}T${endH}${endM}00`);
-        }
-      } else {
-        lines.push(`DTSTART;VALUE=DATE:${dateStr}`);
-        const d = new Date(evt.date);
-        d.setDate(d.getDate() + 1);
-        const nextDay = d.toISOString().slice(0, 10).replace(/-/g, '');
-        lines.push(`DTEND;VALUE=DATE:${nextDay}`);
-      }
-
-      const stamp = evt.createdAt
-        ? new Date(evt.createdAt).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z/, 'Z')
-        : new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z/, 'Z');
-      lines.push(`DTSTAMP:${stamp}`);
-      lines.push(`UID:${eventUid}@engorg`);
-      lines.push(`SUMMARY:${escapeICS(evt.title)}`);
-
-      if (evt.description) {
-        lines.push(`DESCRIPTION:${escapeICS(evt.description)}`);
-      }
-
-      lines.push(evt.completed ? 'STATUS:CANCELLED' : 'STATUS:CONFIRMED');
-
-      lines.push('BEGIN:VALARM');
-      lines.push('TRIGGER:-PT15M');
-      lines.push('ACTION:DISPLAY');
-      lines.push(`DESCRIPTION:${escapeICS(evt.title)}`);
-      lines.push('END:VALARM');
-
-      lines.push('END:VEVENT');
-    }
-
-    lines.push('END:VCALENDAR');
+    const ics = buildCalendarIcs({
+      events: scheduleDoc.exists ? (scheduleDoc.data().items || []) : [],
+      tasks: tasksDoc.exists ? (tasksDoc.data().tasks || []) : [],
+      projects: projectsDoc.exists ? (projectsDoc.data().projects || []) : [],
+    });
 
     res.set('Content-Type', 'text/calendar; charset=utf-8');
     res.set('Content-Disposition', 'inline; filename="engorg.ics"');
     res.set('Cache-Control', 'public, max-age=1800');
-    res.send(lines.join('\r\n'));
+    res.send(ics);
   } catch (err) {
     console.error('Calendar feed error:', err);
+    res.status(500).send('Internal error');
+  }
+});
+
+/**
+ * Daily schedule wallpaper (PNG) — reuses the SAME calendar token as calendarFeed.
+ * Renders one day's schedule as a phone-wallpaper image for the iOS "Set Wallpaper"
+ * Shortcuts automation. Query: token (required), date=YYYY-MM-DD (the phone's local day;
+ * defaults to Eastern "today"), optional w/h for exact screen size.
+ */
+exports.scheduleImage = onRequest({ cors: true, invoker: 'public' }, async (req, res) => {
+  const token = req.query.token;
+  if (!token) {
+    res.status(400).send('Missing token parameter');
+    return;
+  }
+
+  try {
+    const tokenDoc = await db.doc(`calendarTokens/${token}`).get();
+    if (!tokenDoc.exists) {
+      res.status(403).send('Invalid or expired token');
+      return;
+    }
+    const uid = tokenDoc.data().uid;
+
+    let date = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      date = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    }
+    const width = Math.min(2400, Math.max(600, parseInt(req.query.w, 10) || 1290));
+    const height = Math.min(3400, Math.max(800, parseInt(req.query.h, 10) || 2796));
+
+    const [scheduleDoc, tasksDoc, projectsDoc] = await Promise.all([
+      db.doc(`users/${uid}/data/schedule`).get(),
+      db.doc(`users/${uid}/data/tasks`).get(),
+      db.doc(`users/${uid}/data/projects`).get(),
+    ]);
+
+    const png = await renderScheduleWallpaper({
+      date, width, height,
+      events: scheduleDoc.exists ? (scheduleDoc.data().items || []) : [],
+      tasks: tasksDoc.exists ? (tasksDoc.data().tasks || []) : [],
+      projects: projectsDoc.exists ? (projectsDoc.data().projects || []) : [],
+    });
+
+    res.set('Content-Type', 'image/png');
+    res.set('Content-Disposition', 'inline; filename="engorg-schedule.png"');
+    res.set('Cache-Control', 'no-store');
+    res.send(png);
+  } catch (err) {
+    console.error('Schedule image error:', err);
     res.status(500).send('Internal error');
   }
 });
@@ -679,14 +675,6 @@ function buildShortcutPlist(apiToken, baseUrl) {
   </array>
 </dict>
 </plist>`;
-}
-
-function escapeICS(text) {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/;/g, '\\;')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
 }
 
 // ============================================================
