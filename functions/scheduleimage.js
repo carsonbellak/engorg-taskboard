@@ -26,19 +26,21 @@ function ensureFonts() {
 
 function pad(n) { return String(n).padStart(2, '0'); }
 
-// 'HH:MM' (24h) → '7:30 PM' style. null/'' → ''.
+// 'HH:MM' (24h) → compact '7:30p' style (lowercase, no space) so it stays inside the
+// narrow time column even for a cross-meridiem range. null/'' → ''.
 function time12(hhmm) {
   if (!hhmm) return '';
   const [h, m] = hhmm.split(':').map(Number);
-  const ap = h < 12 ? 'AM' : 'PM';
+  const ap = h < 12 ? 'a' : 'p';
   const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${pad(m)} ${ap}`;
+  return `${h12}:${pad(m)}${ap}`;
 }
 
-// Compact start–end label; drops the shared AM/PM on the start ('6:00–8:00 PM').
+// Compact start–end label; drops the shared meridiem on the start ('6:00–8:00p'), keeps
+// both when they differ ('11:30a–12:30p') — still short enough to fit the time column.
 function rangeLabel(start, end) {
   if (!end) return time12(start);
-  const ap = (t) => (Number(t.split(':')[0]) < 12 ? 'AM' : 'PM');
+  const ap = (t) => (Number(t.split(':')[0]) < 12 ? 'a' : 'p');
   const bare = (t) => { const [h, m] = t.split(':').map(Number); const x = h % 12 === 0 ? 12 : h % 12; return `${x}:${pad(m)}`; };
   return ap(start) === ap(end) ? `${bare(start)}–${time12(end)}` : `${time12(start)}–${time12(end)}`;
 }
