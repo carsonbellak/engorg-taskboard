@@ -85,14 +85,19 @@ exports.scheduleImage = onRequest({ cors: true, invoker: 'public' }, async (req,
     const width = Math.min(2400, Math.max(600, parseInt(req.query.w, 10) || 1290));
     const height = Math.min(3400, Math.max(800, parseInt(req.query.h, 10) || 2796));
 
-    const [scheduleDoc, tasksDoc, projectsDoc] = await Promise.all([
+    const [scheduleDoc, tasksDoc, projectsDoc, settingsDoc] = await Promise.all([
       db.doc(`users/${uid}/data/schedule`).get(),
       db.doc(`users/${uid}/data/tasks`).get(),
       db.doc(`users/${uid}/data/projects`).get(),
+      db.doc(`users/${uid}/data/settings`).get(),
     ]);
 
+    // The wallpaper colors follow the user's app theme; an explicit ?theme= wins (handy
+    // for previewing a theme).
+    const theme = String(req.query.theme || (settingsDoc.exists ? settingsDoc.data().theme : '') || 'default');
+
     const png = await renderScheduleWallpaper({
-      date, width, height,
+      date, width, height, theme,
       events: scheduleDoc.exists ? (scheduleDoc.data().items || []) : [],
       tasks: tasksDoc.exists ? (tasksDoc.data().tasks || []) : [],
       projects: projectsDoc.exists ? (projectsDoc.data().projects || []) : [],
