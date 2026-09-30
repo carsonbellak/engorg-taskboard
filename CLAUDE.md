@@ -51,6 +51,10 @@ node release.js 1.5.0         # explicit version
      `FIREBASE_SERVICE_ACCOUNT` Actions secret (otherwise that job warns and skips).
 5. **Deploy the PWA yourself if CI can't** (secret not configured) or when you changed only
    `pwa/` and want it live immediately — see "Deploying the PWA" below.
+6. **Did you change a Cloud Function (`functions/`)?** The release does **not** deploy it.
+   Commit the `functions/` file to `main` from the clone, then `node deploy-functions.js
+   <name>` — do this *before* the release (its clone reset wipes uncommitted function edits).
+   See "Deploying Cloud Functions" below.
 
 > **Never bypass the release for a normal change.** No `git commit`/`push` against the
 > `~/.engorg-submit/…` clone, no bare `submit-changes.js -m`, no manual tag/release surgery
@@ -80,11 +84,40 @@ cd ~/.engorg-submit/engorg-taskboard && npx firebase deploy --only hosting
 ```
 
 `firebase-tools` is a devDependency (run it via `npx firebase`; it isn't on PATH globally).
-**Auth is a one-time manual step for the user, not Claude:** `npx firebase login` opens a
-browser OAuth flow (a credential action). Once logged in (persists in
-`%APPDATA%\configstore\firebase-tools.json`), a non-interactive
-`firebase deploy --only hosting` works. Use `--only hosting` so the deploy never touches
-Functions / Firestore rules the install doesn't ship.
+**Auth: this machine is already logged in — deploys are non-interactive, no browser step.**
+The firebase-tools login persists in the `configstore`, which on this setup resolves to
+`%USERPROFILE%\.config\configstore\firebase-tools.json` (i.e. `~/.config/configstore/…` in
+Git Bash — **not** `%APPDATA%\Roaming\…`; the account is `carsonbellak124@gmail.com`).
+Verify anytime with `node node_modules/firebase-tools/lib/bin/firebase.js login:list`. Only
+if that ever reports *not* logged in does someone run `firebase login` once (a browser OAuth
+flow — a credential action, the user's step, never Claude's). For CI, set `FIREBASE_TOKEN` or
+`GOOGLE_APPLICATION_CREDENTIALS` instead. Use `--only hosting` so a hosting deploy never
+touches Functions / Firestore rules the install doesn't ship.
+
+### Deploying Cloud Functions (project `assistant-taskboard`) — `node deploy-functions.js`
+
+The Cloud Functions (`functions/` — the lock-screen wallpaper `scheduleImage`, the
+subscribable `calendarFeed`, the PWA `/api/*` endpoints) are the **one part of the app the
+release pipeline never ships**: `functions/` exists only in the repo / the submit clone
+(`~/.engorg-submit/engorg-taskboard/functions/`), never in the install dir, and `release.js`
+deploys only the installer, the APK, and (via CI) hosting. So a function change is deployed
+**separately**, with `deploy-functions.js` (at the repo root — it finds a checkout that has
+`functions/`, installs its deps on first run, and runs the non-interactive deploy):
+
+```bash
+node deploy-functions.js                 # deploy ALL functions
+node deploy-functions.js scheduleImage   # deploy only the named function(s)
+```
+
+**⚠️ Persist the source — the clone is volatile.** Deploying does *not* save the source;
+`submit-changes.js` / `release.js` run `git reset --hard` + `git clean -fd` on the clone,
+which **wipes uncommitted `functions/` edits**. So when you change a function you must, in
+this order: (1) edit `functions/…` in the clone, (2) **commit + push that `functions/` file
+straight to `main` from the clone** — this is the *one* push that bypasses `release.js`
+(everything else still goes through it, per the Shipping section above) — (3) `node deploy-functions.js
+<name>` to go live, (4) then run `release.js` for any install-dir changes. Do the commit
+*before* the release, or the release's clone reset reverts the function. (`deploy-functions.js`
+prints a reminder if it deploys source that isn't committed.)
 
 ### Contributors without push access
 

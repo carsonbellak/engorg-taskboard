@@ -168,14 +168,68 @@ function parseDue(value) {
   return isNaN(d) ? null : d;
 }
 
-// Does this assignment object look already-submitted / graded?
+// Normalized assignment name → the merge key between the props pass and the
+// server-rendered status table (case/space-insensitive).
+const normName = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Does a status string / cell read as "this was handed in"? Guards against the
+// several "not done" phrasings so "No Submission" never counts as submitted.
+function looksSubmittedText(s) {
+  const t = String(s || '');
+  if (/no submission|not submitted|unsubmitted|missing|past due|no active/i.test(t)) return false;
+  return /submitt|graded|complete|accepted/i.test(t);
+}
+
+// Does this assignment object (from React props) look already-submitted / graded?
+// Props often omit status entirely (the table pass fills it in), but when they DO
+// carry it, catch it across snake_case/camelCase keys and a nested submission object.
 function isSubmittedProps(node) {
   for (const k of Object.keys(node)) {
-    if (/^(status|submission_status|state)$/i.test(k) && /submitt|graded|complete/i.test(String(node[k]))) return true;
-    if (/^(submitted|is_submitted|has_submission)$/i.test(k) && node[k] === true) return true;
-    if (/^(grade|score|points_earned)$/i.test(k) && node[k] != null && node[k] !== '') return true;
+    const v = node[k];
+    if (/status|state/i.test(k) && typeof v === 'string' && looksSubmittedText(v)) return true;
+    if (/^(submitted|is_submitted|has_submission|isSubmitted|hasSubmission)$/i.test(k) && v === true) return true;
+    if (/^(grade|score|points_earned|pointsEarned)$/i.test(k) && v != null && v !== '') return true;
+    if (/^(submission_id|submissionId|active_submission_id|activeSubmissionId)$/i.test(k) && v != null && v !== '' && v !== false) return true;
+    if (/^(submission|active_submission|activeSubmission)$/i.test(k) && v && typeof v === 'object' && isSubmittedProps(v)) return true;
   }
   return false;
+}
+
+// Does one server-rendered table <tr> read as submitted? The status cell shows
+// "Submitted"/"Graded"/a score when done, "No Submission" when not; done rows also
+// carry the `submissionStatus-complete` class.
+function rowSubmitted(row, statusText) {
+  if (/submissionStatus-complete/i.test(row)) return true;
+  if (/no submission|not submitted|unsubmitted|missing/i.test(statusText)) return false;
+  if (/\bsubmitted\b|\bgraded\b/i.test(statusText)) return true;
+  if (/\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?/.test(statusText)) return true; // "8 / 10" score
+  return false;
+}
+
+// Authoritative submission status straight from the student assignment table,
+// keyed by assignment id AND normalized name. Runs regardless of whether the
+// React-props pass found the assignments, so a submitted assignment is detected
+// even when props omit status. Stores booleans; callers OR them in (never flip a
+// submitted item back to not-submitted).
+function statusFromTable(html) {
+  const byId = new Map(), byName = new Map();
+  const tableMatch = html.match(/<table[^>]*id="assignments-student-table"[\s\S]*?<\/table>/i);
+  const scope = tableMatch ? tableMatch[0] : html;
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+  let rm;
+  while ((rm = rowRe.exec(scope))) {
+    const row = rm[1];
+    const th = row.match(/<th[^>]*>([\s\S]*?)<\/th>/i);
+    if (!th) continue;
+    const name = stripTags(th[1]);
+    if (!name) continue;
+    const idM = row.match(/\/assignments\/(\d+)/);
+    const statusText = stripTags((row.match(/class="[^"]*submissionStatus[^"]*"[^>]*>([\s\S]*?)<\/td>/i) || [])[1] || '');
+    const submitted = rowSubmitted(row, statusText);
+    if (idM) byId.set(idM[1], submitted);
+    byName.set(normName(name), submitted);
+  }
+  return { byId, byName };
 }
 
 // Walk arbitrary React-props JSON collecting anything shaped like an assignment.
@@ -193,11 +247,14 @@ function collectFromProps(node, out) {
 }
 
 // Assignments for one course page. Tries React props first, then the classic
-// #assignments-student-table markup.
+// #assignments-student-table markup — but ALWAYS reads submission status from the
+// table and merges it in, since the props pass usually omits status (that omission
+// was why submitted assignments never got marked done).
 function parseAssignments(html) {
   const found = [];
+  const tableStatus = statusFromTable(html);
 
-  // Strategy A: React props blobs.
+  // Strategy A: React props blobs (assignment list; status frequently missing here).
   const propRe = /data-react-props="([^"]*)"/g;
   let pm;
   while ((pm = propRe.exec(html))) {
@@ -207,7 +264,7 @@ function parseAssignments(html) {
     } catch {}
   }
 
-  // Strategy B: server-rendered student table rows.
+  // Strategy B: server-rendered student table rows (only when props found nothing).
   if (!found.length) {
     const tableMatch = html.match(/<table[^>]*id="assignments-student-table"[\s\S]*?<\/table>/i);
     const scope = tableMatch ? tableMatch[0] : html;
@@ -224,14 +281,18 @@ function parseAssignments(html) {
       const dueM = row.match(/submissionTimeChart--dueDate[^>]*>([\s\S]*?)<\//i)
                 || row.match(/(?:Due|Late Due)[^<]*<[^>]*>([^<]*\bat\b[^<]*)</i);
       const due = parseDue(stripTags(dueM ? dueM[1] : ''));
-      // Submission status: the status cell reads "Submitted"/"Graded"/a score when
-      // done, "No Submission" when not. (Note "No Submission" must not match.)
       const statusText = stripTags((row.match(/class="[^"]*submissionStatus[^"]*"[^>]*>([\s\S]*?)<\/td>/i) || [])[1] || '');
-      const submitted = /submissionStatus-complete/i.test(row)
-        || /\bsubmitted\b|\bgraded\b/i.test(statusText)
-        || /\d+(\.\d+)?\s*\/\s*\d+(\.\d+)?/.test(statusText);
-      if (due) found.push({ name, due, id: idM ? idM[1] : null, submitted });
+      if (due) found.push({ name, due, id: idM ? idM[1] : null, submitted: rowSubmitted(row, statusText) });
     }
+  }
+
+  // Merge the authoritative table status into every assignment, whichever strategy
+  // produced it. OR-only — a submission signal from props or the table wins, and a
+  // "not submitted" row never flips an already-submitted assignment back.
+  for (const a of found) {
+    const byId = a.id != null && tableStatus.byId.get(String(a.id));
+    const byName = tableStatus.byName.get(normName(a.name));
+    if (byId === true || byName === true) a.submitted = true;
   }
 
   // De-dupe within the course by name+time.
