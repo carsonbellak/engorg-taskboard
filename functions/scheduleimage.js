@@ -52,6 +52,26 @@ function rangeLabel(start, end) {
 function itemsForDate({ date, events = [], tasks = [], projects = [] }) {
   const d = new Date(date + 'T00:00:00');
   const weekday = DAYS_FULL[d.getDay()];
+
+  // "Now" in the app's timezone (Eastern — the same one the handler uses to pick today),
+  // so a class / work block whose end time has passed reads as completed, mirroring the
+  // in-app auto-complete of past work-block occurrences.
+  const now = (() => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date());
+    const g = (t) => parts.find((p) => p.type === t).value;
+    return { date: `${g('year')}-${g('month')}-${g('day')}`, minutes: (+g('hour')) * 60 + (+g('minute')) };
+  })();
+  const blockDone = (endHHMM) => {
+    if (date < now.date) return true;    // a past day is fully over
+    if (date > now.date) return false;   // a future day hasn't happened yet
+    if (!endHHMM) return false;          // today with no end time → still ongoing
+    const [eh, em] = endHHMM.split(':').map(Number);
+    return (eh * 60 + em) <= now.minutes; // today → done once the end time has passed
+  };
+
   const projName = {}, projColor = {}, projLoc = {};
   for (const p of projects) if (p && p.id) { projName[p.id] = p.name; projColor[p.id] = p.color; projLoc[p.id] = p.location; }
 
@@ -98,7 +118,7 @@ function itemsForDate({ date, events = [], tasks = [], projects = [] }) {
         title: loc ? (p.name || 'Class') : `${p.name || 'Work'} — work block`,
         subtitle: loc,
         color: p.color || '#6366F1',
-        completed: false,
+        completed: blockDone(wb.end),
       });
     }
   }
@@ -215,11 +235,6 @@ function drawDoneScreen(ctx, { width, height, d, weekday, count }) {
   ctx.fillStyle = '#5E6A7D';
   ctx.font = `${Math.round(width * 0.033)}px RobotoBold`;
   centerText(ctx, `${count} item${count === 1 ? '' : 's'} complete · ${weekday}, ${MONTHS[d.getMonth()]} ${d.getDate()}`, cx, ty);
-
-  // Footer tag (matches the schedule view).
-  ctx.fillStyle = '#3A4657';
-  ctx.font = `${Math.round(width * 0.030)}px Roboto`;
-  ctx.fillText('EngOrg schedule', Math.round(width * 0.09), height - Math.round(height * 0.025));
 }
 
 async function renderScheduleWallpaper({ date, events, tasks, projects, width = 1290, height = 2796 }) {
@@ -248,7 +263,10 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, width = 
   }
 
   const M = Math.round(width * 0.09);            // side margin
-  let y = Math.round(height * 0.44);             // content top — below clock/widgets
+  // Content sits higher than before so the list clears the home-screen dock/hotbar at
+  // the bottom; BOTTOM_SAFE reserves ~1" of dock space so the last rows aren't cut off.
+  let y = Math.round(height * 0.38);             // content top — below clock/widgets
+  const BOTTOM_SAFE = Math.round(height * 0.14); // keep rows above the dock
 
   // Header: weekday + date + completion count.
   ctx.fillStyle = '#F2F5FA';
@@ -292,7 +310,7 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, width = 
   const timeX = M + Math.round(width * 0.03);
   const textX = M + Math.round(width * 0.275);
   const textMaxW = width - textX - M;
-  const maxRows = Math.floor((height - y - Math.round(height * 0.05)) / rowH);
+  const maxRows = Math.floor((height - y - BOTTOM_SAFE) / rowH);
 
   items.slice(0, maxRows).forEach((it) => {
     const primary = it.completed ? '#5A6373' : '#EDF1F7';
@@ -329,11 +347,6 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, width = 
     ctx.font = `${Math.round(width * 0.036)}px Roboto`;
     ctx.fillText(`+ ${items.length - maxRows} more`, textX, y);
   }
-
-  // Footer tag.
-  ctx.fillStyle = '#4A5364';
-  ctx.font = `${Math.round(width * 0.030)}px Roboto`;
-  ctx.fillText('EngOrg schedule', M, height - Math.round(height * 0.025));
 
   return encodePng(img);
 }
