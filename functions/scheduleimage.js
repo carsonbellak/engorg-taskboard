@@ -120,35 +120,166 @@ function fitText(ctx, text, maxW) {
   return s + '…';
 }
 
+// Linearly blend two {r,g,b} colors (t in [0,1]) → CSS hex. Used to shade the
+// background from navy toward green as the day's items get completed.
+function mix(a, b, t) {
+  const c = (x, y) => Math.round(x + (y - x) * Math.max(0, Math.min(1, t)));
+  return `#${[c(a.r, b.r), c(a.g, b.g), c(a.b, b.b)].map((n) => n.toString(16).padStart(2, '0')).join('')}`;
+}
+
+// Draw text horizontally centered on cx (pureimage has no textAlign).
+function centerText(ctx, text, cx, y) {
+  ctx.fillText(text, Math.round(cx - ctx.measureText(text).width / 2), y);
+}
+
+// Greedy word-wrap to a max pixel width → array of lines.
+function wrapText(ctx, text, maxW) {
+  const lines = [];
+  let cur = '';
+  for (const w of String(text).split(' ')) {
+    const t = cur ? `${cur} ${w}` : w;
+    if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = w; }
+    else cur = t;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function dayOfYear(d) {
+  return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000);
+}
+
+// Encode the finished image to a PNG buffer.
+async function encodePng(img) {
+  const out = new PassThrough();
+  const chunks = [];
+  out.on('data', (c) => chunks.push(c));
+  const done = new Promise((res, rej) => { out.on('end', res); out.on('error', rej); });
+  await PImage.encodePNGToStream(img, out);
+  await done;
+  return Buffer.concat(chunks);
+}
+
+// Rotating end-of-day messages (stable within a day, varies day to day). No emoji —
+// the bundled Roboto fonts have no color glyphs, so an emoji would render as tofu.
+const DONE_MESSAGES = [
+  "Everything's cleared. Enjoy the rest of your day.",
+  "That's the whole day done. Go relax.",
+  "Nice work — you finished it all.",
+  "All wrapped up. Time to unwind.",
+  "Done and dusted. Rest easy.",
+  "You cleared the board today. Well done.",
+  "Every item complete. Take a breather.",
+  "That's a wrap on today. Great job.",
+];
+
+// The "you're done for the day" screen: no list, a green check, and a kind note.
+// Shown once every item for the day is complete.
+function drawDoneScreen(ctx, { width, height, d, weekday, count }) {
+  const cx = width / 2;
+  const GREEN = '#34C778';
+
+  // Green check disc, centered below the clock zone.
+  const R = Math.round(width * 0.12);
+  const cy = Math.round(height * 0.46);
+  ctx.fillStyle = GREEN;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.fill();
+  // White checkmark.
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.round(R * 0.16);
+  ctx.beginPath();
+  ctx.moveTo(cx - R * 0.42, cy + R * 0.02);
+  ctx.lineTo(cx - R * 0.10, cy + R * 0.34);
+  ctx.lineTo(cx + R * 0.46, cy - R * 0.34);
+  ctx.stroke();
+
+  let ty = cy + R + Math.round(height * 0.060);
+  ctx.fillStyle = '#F2F5FA';
+  ctx.font = `${Math.round(width * 0.066)}px RobotoBold`;
+  centerText(ctx, 'All done for today', cx, ty);
+  ty += Math.round(height * 0.030);
+
+  ctx.fillStyle = '#AEB7C7';
+  ctx.font = `${Math.round(width * 0.040)}px Roboto`;
+  const msg = DONE_MESSAGES[dayOfYear(d) % DONE_MESSAGES.length];
+  for (const line of wrapText(ctx, msg, Math.round(width * 0.80))) {
+    centerText(ctx, line, cx, ty);
+    ty += Math.round(width * 0.056);
+  }
+
+  ty += Math.round(height * 0.012);
+  ctx.fillStyle = '#5E6A7D';
+  ctx.font = `${Math.round(width * 0.033)}px RobotoBold`;
+  centerText(ctx, `${count} item${count === 1 ? '' : 's'} complete · ${weekday}, ${MONTHS[d.getMonth()]} ${d.getDate()}`, cx, ty);
+
+  // Footer tag (matches the schedule view).
+  ctx.fillStyle = '#3A4657';
+  ctx.font = `${Math.round(width * 0.030)}px Roboto`;
+  ctx.fillText('EngOrg schedule', Math.round(width * 0.09), height - Math.round(height * 0.025));
+}
+
 async function renderScheduleWallpaper({ date, events, tasks, projects, width = 1290, height = 2796 }) {
   ensureFonts();
   const { weekday, items } = itemsForDate({ date, events, tasks, projects });
+  const d = new Date(date + 'T00:00:00');
+
+  // How much of the day is done → the background shades from navy toward green, and
+  // once everything's complete we switch to a calm "done for the day" screen.
+  const total = items.length;
+  const doneCount = items.filter((it) => it.completed).length;
+  const ratio = total ? doneCount / total : 0;
+  const allDone = total > 0 && doneCount === total;
 
   const img = PImage.make(width, height);
   const ctx = img.getContext('2d');
 
-  // Background — deep navy-charcoal (not pure black; gentle on OLED).
-  ctx.fillStyle = '#0E1420';
+  // Background — deep navy-charcoal (not pure black; gentle on OLED), blended toward a
+  // deep forest green in proportion to the day's completion.
+  ctx.fillStyle = mix({ r: 14, g: 20, b: 32 }, { r: 15, g: 46, b: 28 }, ratio);
   ctx.fillRect(0, 0, width, height);
+
+  if (allDone) {
+    drawDoneScreen(ctx, { width, height, d, weekday, count: total });
+    return encodePng(img);
+  }
 
   const M = Math.round(width * 0.09);            // side margin
   let y = Math.round(height * 0.44);             // content top — below clock/widgets
 
-  // Header: weekday + date.
-  const d = new Date(date + 'T00:00:00');
+  // Header: weekday + date + completion count.
   ctx.fillStyle = '#F2F5FA';
   ctx.font = `${Math.round(width * 0.072)}px RobotoBold`;
   ctx.fillText(weekday, M, y);
   y += Math.round(width * 0.052);
   ctx.fillStyle = '#7C8698';
   ctx.font = `${Math.round(width * 0.040)}px Roboto`;
-  ctx.fillText(`${MONTHS[d.getMonth()]} ${d.getDate()} · ${items.length} item${items.length === 1 ? '' : 's'}`, M, y);
+  const sub = total ? `${doneCount} of ${total} done` : `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  ctx.fillText(total ? `${MONTHS[d.getMonth()]} ${d.getDate()} · ${sub}` : sub, M, y);
   y += Math.round(width * 0.055);
 
-  // Divider.
-  ctx.fillStyle = '#232C3B';
-  ctx.fillRect(M, y, width - 2 * M, 3);
-  y += Math.round(width * 0.045);
+  const trackW = width - 2 * M;
+  if (total) {
+    // Progress bar — a slim track that fills green as items are checked off. The
+    // generous advance clears the first row, whose content sits ~0.62·rowH above
+    // its baseline anchor.
+    const barH = Math.round(width * 0.013);
+    ctx.fillStyle = '#232C3B';
+    ctx.fillRect(M, y, trackW, barH);
+    if (ratio > 0) {
+      ctx.fillStyle = '#34C778';
+      ctx.fillRect(M, y, Math.max(barH, Math.round(trackW * ratio)), barH);
+    }
+    y += Math.round(width * 0.105);
+  } else {
+    // Empty day — a plain divider, no progress track.
+    ctx.fillStyle = '#232C3B';
+    ctx.fillRect(M, y, trackW, 3);
+    y += Math.round(width * 0.045);
+  }
 
   if (!items.length) {
     ctx.fillStyle = '#9AA4B6';
@@ -204,14 +335,7 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, width = 
   ctx.font = `${Math.round(width * 0.030)}px Roboto`;
   ctx.fillText('EngOrg schedule', M, height - Math.round(height * 0.025));
 
-  // Encode to PNG buffer.
-  const out = new PassThrough();
-  const chunks = [];
-  out.on('data', (c) => chunks.push(c));
-  const done = new Promise((res, rej) => { out.on('end', res); out.on('error', rej); });
-  await PImage.encodePNGToStream(img, out);
-  await done;
-  return Buffer.concat(chunks);
+  return encodePng(img);
 }
 
 module.exports = { renderScheduleWallpaper, itemsForDate, time12 };
