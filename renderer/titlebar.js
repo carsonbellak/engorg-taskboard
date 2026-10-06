@@ -194,4 +194,14 @@
 
   api.win.onMaximized((isMax) => setMaxIcon(isMax));
   api.win.isMaximized().then(setMaxIcon).catch(() => {});
+
+  // ── Desktop mode ─────────────────────────────────────────────────────────────
+  // While the window is acting as the Windows desktop there's no sense in minimize /
+  // restore / close, so hide the window controls (CSS keys off this body class — it also
+  // covers the Split Window shell's floating #split-winctrls, since this runs there too).
+  const applyDesktopMode = (on) => document.body.classList.toggle('desktop-mode-active', !!on);
+  if (api.desktop) {
+    api.desktop.onChanged(applyDesktopMode);
+    api.desktop.status().then((s) => applyDesktopMode(s && s.active)).catch(() => {});
+  }
 })();

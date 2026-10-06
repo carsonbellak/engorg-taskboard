@@ -76,6 +76,10 @@ body {
 }
 .tb-btn:hover { background: var(--bg-hover, #F1F5F9); color: var(--text-primary, #1E293B); }
 .tb-close:hover { background: #E81123; color: #FFFFFF; }
+/* Desktop mode: no minimize/maximize/close on a window that IS the desktop — neither the
+   normal titlebar controls nor the Split Window shell's floating cluster. */
+body.desktop-mode-active .titlebar-controls,
+body.desktop-mode-active #split-winctrls { display: none; }
 
 .tb-dropdown {
   position: absolute; top: 28px;

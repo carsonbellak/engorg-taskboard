@@ -32,11 +32,16 @@ class ModalManager {
     }
   }
 
-  _populateDaySelect(selectId) {
-    const sel = document.getElementById(selectId);
-    sel.innerHTML = DAYS.map(d =>
-      `<option value="${d}" ${d === this.viewRenderer.selectedDay ? 'selected' : ''}>${d}</option>`
-    ).join('');
+  // Today's local date as YYYY-MM-DD (events default to today).
+  _todayISO() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  // Weekday name for a YYYY-MM-DD date — the schedule `day` field is derived, not picked.
+  _dayFromISO(iso) {
+    const d = new Date(iso + 'T00:00:00');
+    return DAYS[d.getDay() === 0 ? 6 : d.getDay() - 1];
   }
 
   // Populate note category dropdown dynamically
@@ -356,16 +361,11 @@ class ModalManager {
 
   openScheduleModal(opts = {}) {
     this._populateProjectSelect('schedule-project');
-    this._populateDaySelect('schedule-day');
     document.getElementById('schedule-title').value = '';
     document.getElementById('schedule-desc').value = '';
 
-    // Pre-fill date/time when launched from week-view click
-    if (opts.date) {
-      document.getElementById('schedule-date').value = opts.date;
-    } else {
-      document.getElementById('schedule-date').value = '';
-    }
+    // Pre-fill the date from a week-view click, otherwise default to today
+    document.getElementById('schedule-date').value = opts.date || this._todayISO();
     if (opts.hour !== undefined) {
       const h = String(opts.hour).padStart(2, '0');
       document.getElementById('schedule-start').value = `${h}:00`;
@@ -391,12 +391,13 @@ class ModalManager {
     const projectId = document.getElementById('schedule-project').value;
     if (!projectId) { alert('Create a project first.'); return; }
 
+    const date = document.getElementById('schedule-date').value || this._todayISO();
     await this.data.addScheduleItem({
       title,
       description: document.getElementById('schedule-desc').value.trim(),
       projectId,
-      day: document.getElementById('schedule-day').value,
-      date: document.getElementById('schedule-date').value || null,
+      day: this._dayFromISO(date),
+      date,
       startTime: document.getElementById('schedule-start').value,
       endTime: document.getElementById('schedule-end').value
     });

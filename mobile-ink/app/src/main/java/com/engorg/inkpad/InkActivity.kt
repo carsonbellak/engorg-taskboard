@@ -58,6 +58,7 @@ class InkActivity : ComponentActivity() {
     private var brush = Brush.PEN
     private var smoothing = 0.3f    // 0 = off, 1 = max; the slider spans a deliberately gentle range
     private var pendingShape: ShapeType? = null
+    private var pendingShapeDashed = false   // arm shapes with a dashed outline (e.g. system boundaries)
 
     private lateinit var colorButton: Button
     private var shapeButton: ImageButton? = null
@@ -95,6 +96,7 @@ class InkActivity : ComponentActivity() {
         override val brush get() = this@InkActivity.brush
         override val smoothing get() = this@InkActivity.smoothing
         override val pendingShape get() = this@InkActivity.pendingShape
+        override val pendingShapeDashed get() = this@InkActivity.pendingShapeDashed
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
         override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
         override fun onShapeCommitted() { clearPendingShape(); this@InkActivity.tool = Tool.SELECT; updateTools() }
@@ -111,6 +113,7 @@ class InkActivity : ComponentActivity() {
         brushColor = ip.getInt("brushColor", brushColor)
         smoothing = ip.getFloat("smoothing", smoothing).coerceIn(0f, 1f)
         brush = runCatching { Brush.valueOf(ip.getString("brush", "PEN") ?: "PEN") }.getOrDefault(Brush.PEN)
+        pendingShapeDashed = ip.getBoolean("shapeDashed", false)
 
         store = NotebookStore(filesDir)
 
@@ -438,13 +441,17 @@ class InkActivity : ComponentActivity() {
         setOnClickListener { onClick(this) }
     }
 
-    private fun shapePreview(type: ShapeType, px: Int): Bitmap {
+    private fun shapePreview(type: ShapeType, px: Int, dashed: Boolean = false): Bitmap {
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
         val spec = ShapeSpec.make(type, px / 2f, px / 2f, px * 0.30f)
         val paint = android.graphics.Paint().apply {
             isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; color = Color.WHITE
-            strokeWidth = px * 0.055f; strokeCap = android.graphics.Paint.Cap.ROUND; strokeJoin = android.graphics.Paint.Join.ROUND
+            strokeWidth = px * 0.055f; strokeJoin = android.graphics.Paint.Join.ROUND
+            if (dashed) {
+                strokeCap = android.graphics.Paint.Cap.BUTT
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(px * 0.11f, px * 0.08f), 0f)
+            } else strokeCap = android.graphics.Paint.Cap.ROUND
         }
         for (poly in spec.polylines()) c.drawPath(FinishedStrokesView.buildStraightPath(poly), paint)
         return bmp
@@ -590,23 +597,66 @@ class InkActivity : ComponentActivity() {
 
     private fun showShapeMenu(anchor: View) {
         val types = listOf(ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE, ShapeType.AXES2D, ShapeType.AXES3D)
-        val grid = GridLayout(this).apply {
-            columnCount = 4
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
                 cornerRadius = dp(14).toFloat(); setColor(AppTheme.surface)
                 setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             }
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
-        val popup = PopupWindow(grid, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
-        for (type in types) grid.addView(ImageButton(this).apply {
-            setImageBitmap(shapePreview(type, dp(30))); setColorFilter(onSurface); scaleType = ImageView.ScaleType.FIT_CENTER
-            background = pill(light); stateListAnimator = null
-            val pd = dp(8); setPadding(pd, pd, pd, pd)
-            layoutParams = GridLayout.LayoutParams().apply { width = dp(54); height = dp(50); setMargins(dp(4), dp(4), dp(4), dp(4)) }
-            setOnClickListener { popup.dismiss(); armShape(type) }
-        })
+        val grid = GridLayout(this).apply { columnCount = 4 }
+        val popup = PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
+
+        // "Dashed" toggle — flips the armed-shape style and re-renders every preview so the grid shows
+        // exactly what you'll draw. Lets you lay down dashed outlines (system boundaries, hidden edges…).
+        val shapeButtons = HashMap<ShapeType, ImageButton>()
+        val dashIcon = ImageView(this).apply { layoutParams = LinearLayout.LayoutParams(dp(30), dp(14)) }
+        val dashLabel = TextView(this).apply { text = "Dashed"; textSize = 12f; setPadding(dp(8), 0, 0, 0) }
+        val dashToggle = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; stateListAnimator = null
+            setPadding(dp(10), dp(7), dp(10), dp(7))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(4), dp(4), dp(4), dp(6)) }
+            addView(dashIcon); addView(dashLabel)
+        }
+        fun refreshDash() {
+            val on = pendingShapeDashed
+            val fg = if (on) AppTheme.onAccent() else onSurface
+            dashToggle.background = pill(if (on) accent else light)
+            dashIcon.setImageBitmap(dashLineIcon(dp(30), dp(14), fg, on))
+            dashLabel.setTextColor(fg)
+            for ((t, b) in shapeButtons) { b.setImageBitmap(shapePreview(t, dp(30), on)); b.setColorFilter(onSurface) }
+        }
+        dashToggle.setOnClickListener { pendingShapeDashed = !pendingShapeDashed; saveBrushPref(); refreshDash() }
+        col.addView(dashToggle)
+
+        for (type in types) {
+            val btn = ImageButton(this).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                background = pill(light); stateListAnimator = null
+                val pd = dp(8); setPadding(pd, pd, pd, pd)
+                layoutParams = GridLayout.LayoutParams().apply { width = dp(54); height = dp(50); setMargins(dp(4), dp(4), dp(4), dp(4)) }
+                setOnClickListener { popup.dismiss(); armShape(type) }
+            }
+            shapeButtons[type] = btn
+            grid.addView(btn)
+        }
+        col.addView(grid)
+        refreshDash()
         popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
+    /** A short horizontal line (dashed or solid) for the shape menu's Dashed toggle. */
+    private fun dashLineIcon(w: Int, h: Int, tint: Int, dashed: Boolean): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bmp)
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; color = tint
+            strokeWidth = h * 0.22f; strokeCap = if (dashed) android.graphics.Paint.Cap.BUTT else android.graphics.Paint.Cap.ROUND
+            if (dashed) pathEffect = android.graphics.DashPathEffect(floatArrayOf(w * 0.17f, w * 0.12f), 0f)
+        }
+        c.drawLine(w * 0.08f, h / 2f, w * 0.92f, h / 2f, paint)
+        return bmp
     }
 
     /** Arm a shape so the next stroke you draw becomes it (fitted to your stroke) instead of spawning. */
@@ -615,7 +665,8 @@ class InkActivity : ComponentActivity() {
         tool = Tool.PEN; panes.forEach { it.onToolChanged() }; updateTools()
         shapeButton?.background = pill(accent); shapeButton?.setColorFilter(AppTheme.onAccent())
         val name = type.name.lowercase().replaceFirstChar { it.uppercase() }
-        Toast.makeText(this, "Draw a $name", Toast.LENGTH_SHORT).show()
+        val prefix = if (pendingShapeDashed) "dashed " else ""
+        Toast.makeText(this, "Draw a $prefix$name", Toast.LENGTH_SHORT).show()
     }
     private fun clearPendingShape() {
         if (pendingShape == null) return
@@ -721,7 +772,8 @@ class InkActivity : ComponentActivity() {
     private fun saveBrushPref() {
         getSharedPreferences(INK_PREFS, MODE_PRIVATE).edit()
             .putFloat("brushSize", brushSize).putInt("brushColor", brushColor)
-            .putFloat("smoothing", smoothing).putString("brush", brush.name).apply()
+            .putFloat("smoothing", smoothing).putString("brush", brush.name)
+            .putBoolean("shapeDashed", pendingShapeDashed).apply()
     }
 
     // ---------- PDF export + email ----------

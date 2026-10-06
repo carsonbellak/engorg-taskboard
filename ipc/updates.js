@@ -308,5 +308,10 @@ module.exports = function registerUpdates() {
     } catch (err) { return { error: err.message }; }
   });
 
-  ipcMain.handle('updates:restart', async () => { app.relaunch(); app.exit(0); });
+  // --relaunched lets the new instance wait for this one to release the single-instance
+  // lock (main.js acquireSingleInstance) instead of quitting as a duplicate.
+  ipcMain.handle('updates:restart', async () => {
+    app.relaunch({ args: process.argv.slice(1).filter((a) => a !== '--relaunched').concat('--relaunched') });
+    app.exit(0);
+  });
 };

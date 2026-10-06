@@ -1,6 +1,6 @@
 {
   "name": "engineering-task-board",
-  "version": "1.3.49",
+  "version": "1.3.50",
   "description": "Engineering Design Organization Task Board",
   "main": "main.js",
   "scripts": {
@@ -11,6 +11,7 @@
     "docx": "^9.6.1",
     "engineering-task-board": "file:",
     "imapflow": "^1.4.1",
+    "koffi": "^3.3.2",
     "mailparser": "^3.9.10",
     "node-ical": "^0.26.1",
     "nodemailer": "^9.0.1",

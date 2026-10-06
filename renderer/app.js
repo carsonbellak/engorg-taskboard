@@ -1212,9 +1212,22 @@
       const res = await window.api.gradescope.fetchAssignments();
       if (res.error) { if (!silent) alert('Gradescope sync failed: ' + res.error); else console.warn('Gradescope sync failed:', res.error); return { error: res.error }; }
       const events = res.events || [];
+      if (res.diag) console.info('[Gradescope] sync per course:', res.diag);
 
       // Make sure the "assignment" category exists (idempotent — no-ops if present).
       try { await dataManager.addCategory({ id: 'assignment', name: 'Assignment', label: 'ASGN', color: '#8B5CF6' }); } catch (e) {}
+
+      // An assignment's extId falls back to a name slug when its numeric id wasn't
+      // scraped, so the SAME assignment can arrive under a different gid than its
+      // note has. Match those by course + exact title (only notes no current event
+      // claims) and migrate the gid — instead of creating a duplicate and leaving the
+      // old note stranded on a stale date.
+      const allGids = new Set(events.map(ev => ev.extId));
+      const gsTitleKey = (s) => (s || '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const findByTitle = (ev) => dataManager.tasks.find(t =>
+        t.source === 'gradescope' && !allGids.has(t.gradescopeId) &&
+        String(t.gradescopeCourseId || (t.gradescopeId || '').split(':')[1]) === String(ev.courseId) &&
+        gsTitleKey(t.title) === gsTitleKey(ev.title));
 
       // (1) Find-or-create a project per course, linked by gradescopeCourseId (fall
       // back to a name match so we adopt an existing project instead of duplicating it).
@@ -1255,10 +1268,13 @@
         const priority = gsPriority(ev.dueISO);
         const weekday = gsWeekday(ev.dueISO);
         const desc = `Gradescope · ${ev.course}`;
-        const existing = dataManager.tasks.find(t => t.gradescopeId === gid);
+        const existing = dataManager.tasks.find(t => t.gradescopeId === gid) || findByTitle(ev);
         if (existing) {
           // Auto-managed fields only — never clobber the user's status/checklist/attachments.
           const patch = {};
+          if (existing.gradescopeId !== gid) { patch.gradescopeId = gid; allGids.add(gid); }
+          if (ev.assignmentId && existing.gradescopeAssignmentId !== ev.assignmentId) patch.gradescopeAssignmentId = ev.assignmentId;
+          if (!existing.gradescopeCourseId) patch.gradescopeCourseId = ev.courseId;
           if (existing.title !== ev.title) patch.title = ev.title;
           if (existing.projectId !== projectId) patch.projectId = projectId;
           if (existing.dueDate !== ev.date) patch.dueDate = ev.date;

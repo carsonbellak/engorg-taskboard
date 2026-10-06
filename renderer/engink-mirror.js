@@ -11,7 +11,7 @@
 //   { t:'server', running, error? }                         server up/down
 //   { t:'client', connected, device, version? }             a tablet paired / dropped
 //   { t:'open', id, title, paper, pageColor, pageCount }     notebook opened (resets model)
-//   { t:'page', index, recs:[{ c,w,h,k,segs:[[[x,y]...]] }] }  a page's committed strokes
+//   { t:'page', index, recs:[{ c,w,h,k,d?,segs:[[[x,y]...]] }] } a page's committed strokes (d=dashed shape)
 //   { t:'wet', page, pts:[[x,y]...], c, w, h }               in-progress stroke
 //   { t:'wetClear' }                                         pen lifted
 //   { t:'view', scale, tx, ty, page }                        tablet viewport (page-follow)
@@ -140,12 +140,18 @@ const enginkMirror = (() => {
       ctx.strokeStyle = rec.h ? rgba(rec.c, 0.4) : rgb(rec.c);
       ctx.lineWidth = Math.max(rec.w * s, 0.4);
       const smooth = rec.k !== 's';
+      // Dashed shapes (rec.d): same width-scaled dash/gap as the tablet, butt caps for clean gaps.
+      if (rec.d) {
+        ctx.setLineDash([Math.max(rec.w * 3, 9) * s, Math.max(rec.w * 2.2, 6) * s]);
+        ctx.lineCap = 'butt';
+      }
       for (const seg of (rec.segs || [])) {
         ctx.beginPath();
         if (smooth) traceSmooth(seg.map(p => [p[0] * s, p[1] * s]));
         else traceStraight(seg.map(p => [p[0] * s, p[1] * s]));
         ctx.stroke();
       }
+      if (rec.d) { ctx.setLineDash([]); ctx.lineCap = 'round'; }
     }
   }
 

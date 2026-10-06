@@ -145,8 +145,12 @@ function parseCourses(html) {
 function parseDue(value) {
   if (value == null) return null;
   if (typeof value === 'number') { const d = new Date(value < 1e12 ? value * 1000 : value); return isNaN(d) ? null : d; }
-  const s = String(value).trim();
+  let s = String(value).trim();
   if (!s) return null;
+  // Gradescope's <time datetime="2026-10-06 23:59:00 -0400"> → strict ISO so the
+  // parse never depends on V8's lenient legacy date parser.
+  const dt = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)\s*([+-]\d{2}):?(\d{2})$/);
+  if (dt) s = `${dt[1]}T${dt[2]}${dt[3]}:${dt[4]}`;
   const iso = new Date(s);
   if (!isNaN(iso) && /\d{4}-\d{2}-\d{2}|T\d{2}:/.test(s)) return iso;
 
@@ -206,13 +210,13 @@ function rowSubmitted(row, statusText) {
   return false;
 }
 
-// Authoritative submission status straight from the student assignment table,
-// keyed by assignment id AND normalized name. Runs regardless of whether the
-// React-props pass found the assignments, so a submitted assignment is detected
-// even when props omit status. Stores booleans; callers OR them in (never flip a
-// submitted item back to not-submitted).
-function statusFromTable(html) {
-  const byId = new Map(), byName = new Map();
+// Every row of the server-rendered student assignment table — exactly what the
+// student sees on the course page — as { name, id, due, submitted }. `due` may be
+// null for a row with no deadline. The id comes from a link (/assignments/<id>,
+// submitted rows) OR the submit button's data-assignment-id (unsubmitted rows render
+// the name as a <button>, not a link — missing that made the id flip between syncs).
+function parseTableRows(html) {
+  const out = [];
   const tableMatch = html.match(/<table[^>]*id="assignments-student-table"[\s\S]*?<\/table>/i);
   const scope = tableMatch ? tableMatch[0] : html;
   const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
@@ -223,13 +227,23 @@ function statusFromTable(html) {
     if (!th) continue;
     const name = stripTags(th[1]);
     if (!name) continue;
-    const idM = row.match(/\/assignments\/(\d+)/);
+    const idM = row.match(/\/assignments\/(\d+)/) || row.match(/data-assignment-id="(\d+)"/i);
+    // First due-date element in the row is the real deadline (a later one is the
+    // late due date). Prefer its machine-readable datetime attr (has year + tz).
+    const dueEl = row.match(/<[^>]*submissionTimeChart--dueDate[^>]*>([\s\S]*?)<\//i);
+    let due = null;
+    if (dueEl) {
+      const attr = dueEl[0].match(/datetime="([^"]+)"/i);
+      due = (attr && parseDue(attr[1])) || parseDue(stripTags(dueEl[1]));
+    }
+    if (!due) {
+      const txt = row.match(/(?<!Late )\bDue[^<]*<[^>]*>([^<]*\bat\b[^<]*)</i);
+      due = parseDue(stripTags(txt ? txt[1] : ''));
+    }
     const statusText = stripTags((row.match(/class="[^"]*submissionStatus[^"]*"[^>]*>([\s\S]*?)<\/td>/i) || [])[1] || '');
-    const submitted = rowSubmitted(row, statusText);
-    if (idM) byId.set(idM[1], submitted);
-    byName.set(normName(name), submitted);
+    out.push({ name, id: idM ? idM[1] : null, due, submitted: rowSubmitted(row, statusText) });
   }
-  return { byId, byName };
+  return out;
 }
 
 // Walk arbitrary React-props JSON collecting anything shaped like an assignment.
@@ -238,7 +252,11 @@ function collectFromProps(node, out) {
   if (!node || typeof node !== 'object') return;
   const keys = Object.keys(node);
   const nameKey = keys.find(k => /^(title|name|assignment_name)$/i.test(k));
-  const dueKey = keys.find(k => /(due_?date|due_?at|hard_?due_?date|hard_?due_?at)/i.test(k));
+  // The regular deadline wins over the late ("hard") due date — picking whichever key
+  // came first sometimes filed an assignment under its late due date.
+  const dueKey = keys.find(k => /^(due_?date|due_?at)$/i.test(k))
+              || keys.find(k => /due_?(date|at)/i.test(k) && !/hard|late/i.test(k))
+              || keys.find(k => /(hard|late)_?due_?(date|at)/i.test(k));
   if (nameKey && dueKey && node[dueKey] != null && node[nameKey]) {
     const due = parseDue(typeof node[dueKey] === 'object' ? (node[dueKey].date || node[dueKey].due_date) : node[dueKey]);
     if (due) out.push({ name: String(node[nameKey]), due, id: node.id || node.assignment_id || null, submitted: isSubmittedProps(node) });
@@ -246,59 +264,38 @@ function collectFromProps(node, out) {
   for (const k of keys) collectFromProps(node[k], out);
 }
 
-// Assignments for one course page. Tries React props first, then the classic
-// #assignments-student-table markup — but ALWAYS reads submission status from the
-// table and merges it in, since the props pass usually omits status (that omission
-// was why submitted assignments never got marked done).
+// Assignments for one course page: the UNION of the server-rendered student table
+// and any React-props blobs. Previously the table was only read when props found
+// nothing, so a page with a partial props blob silently dropped every table-only
+// assignment (e.g. a newly released lab). The table is what the student actually
+// sees, so its due date wins; props only fill gaps (missing id / due / status).
+// Submission status is OR-merged — never flips a submitted item back.
 function parseAssignments(html) {
-  const found = [];
-  const tableStatus = statusFromTable(html);
-
-  // Strategy A: React props blobs (assignment list; status frequently missing here).
+  const rows = parseTableRows(html);
+  const props = [];
   const propRe = /data-react-props="([^"]*)"/g;
   let pm;
   while ((pm = propRe.exec(html))) {
-    try {
-      const json = JSON.parse(htmlDecode(pm[1]));
-      collectFromProps(json, found);
-    } catch {}
+    try { collectFromProps(JSON.parse(htmlDecode(pm[1])), props); } catch {}
   }
 
-  // Strategy B: server-rendered student table rows (only when props found nothing).
-  if (!found.length) {
-    const tableMatch = html.match(/<table[^>]*id="assignments-student-table"[\s\S]*?<\/table>/i);
-    const scope = tableMatch ? tableMatch[0] : html;
-    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
-    let rm;
-    while ((rm = rowRe.exec(scope))) {
-      const row = rm[1];
-      const th = row.match(/<th[^>]*>([\s\S]*?)<\/th>/i);
-      if (!th) continue;
-      const name = stripTags(th[1]);
-      if (!name) continue;
-      const idM = row.match(/\/assignments\/(\d+)/);
-      // First due-date span in the row is the real deadline (a later one is the late-due).
-      const dueM = row.match(/submissionTimeChart--dueDate[^>]*>([\s\S]*?)<\//i)
-                || row.match(/(?:Due|Late Due)[^<]*<[^>]*>([^<]*\bat\b[^<]*)</i);
-      const due = parseDue(stripTags(dueM ? dueM[1] : ''));
-      const statusText = stripTags((row.match(/class="[^"]*submissionStatus[^"]*"[^>]*>([\s\S]*?)<\/td>/i) || [])[1] || '');
-      if (due) found.push({ name, due, id: idM ? idM[1] : null, submitted: rowSubmitted(row, statusText) });
-    }
+  const merged = rows.map(r => ({ ...r }));
+  const findMatch = (a) =>
+    (a.id != null && merged.find(m => m.id != null && String(m.id) === String(a.id))) ||
+    merged.find(m => normName(m.name) === normName(a.name));
+  for (const p of props) {
+    const m = findMatch(p);
+    if (!m) { merged.push({ ...p }); continue; }
+    if (m.id == null && p.id != null) m.id = p.id;
+    if (!m.due && p.due) m.due = p.due;
+    if (p.submitted) m.submitted = true;
   }
 
-  // Merge the authoritative table status into every assignment, whichever strategy
-  // produced it. OR-only — a submission signal from props or the table wins, and a
-  // "not submitted" row never flips an already-submitted assignment back.
-  for (const a of found) {
-    const byId = a.id != null && tableStatus.byId.get(String(a.id));
-    const byName = tableStatus.byName.get(normName(a.name));
-    if (byId === true || byName === true) a.submitted = true;
-  }
-
-  // De-dupe within the course by name+time.
+  // De-dupe within the course by id (else name+time); drop rows with no deadline.
   const seen = new Set();
-  return found.filter(a => {
-    const k = a.name + '|' + a.due.getTime();
+  return merged.filter(a => {
+    if (!a.due) return false;
+    const k = a.id != null ? 'id:' + a.id : a.name + '|' + a.due.getTime();
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -425,6 +422,7 @@ module.exports = function register() {
 
       const events = [];
       const courseSummary = [];
+      const diag = []; // per-course found/kept counts → logged by the renderer
       const cutoff = Date.now() - PAST_GRACE_DAYS * 86400000;
 
       for (const c of courses) {
@@ -432,7 +430,8 @@ module.exports = function register() {
         try {
           const res = await gsFetch(`${BASE}/courses/${c.id}`);
           if (res.ok) assignments = parseAssignments(await res.text());
-        } catch (e) { /* skip a course that fails to load */ }
+          else diag.push({ course: c.short || c.name, id: c.id, status: res.status });
+        } catch (e) { diag.push({ course: c.short || c.name, id: c.id, error: e.message }); }
 
         let kept = 0;
         for (const a of assignments) {
@@ -459,9 +458,10 @@ module.exports = function register() {
           });
         }
         if (kept) courseSummary.push({ id: c.id, name: c.name, short: c.short || c.name, count: kept });
+        diag.push({ course: c.short || c.name, id: c.id, found: assignments.length, kept });
       }
 
-      return { events, courses: courseSummary, coursesScanned: courses.length };
+      return { events, courses: courseSummary, coursesScanned: courses.length, diag };
     } catch (err) {
       return { error: err.message, events: [] };
     }

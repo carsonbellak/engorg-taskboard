@@ -68,6 +68,13 @@ class FinishedStrokesView(context: Context) : View(context) {
             return p
         }
 
+        /** Dash pattern for a dashed shape, sized (in page units) to the pen width so it reads at any weight. */
+        fun dashEffect(widthPx: Float): DashPathEffect {
+            val dash = (widthPx * 3f).coerceAtLeast(9f)
+            val gap = (widthPx * 2.2f).coerceAtLeast(6f)
+            return DashPathEffect(floatArrayOf(dash, gap), 0f)
+        }
+
         /** Straight-segment path (for shapes, so corners stay sharp). */
         fun buildStraightPath(pts: List<PointF>): Path {
             val p = Path()
@@ -323,15 +330,26 @@ class FinishedStrokesView(context: Context) : View(context) {
     private fun drawRecs(canvas: Canvas, page: Page) {
         for (rec in page.recs) {
             if (rec.shape != null) {
-                // Parametric shapes always draw as a crisp solid pen line.
+                // Parametric shapes draw as a crisp solid pen line — or a dashed one when flagged.
                 strokePaint.style = Paint.Style.STROKE
-                strokePaint.shader = null; strokePaint.colorFilter = null; strokePaint.strokeCap = Paint.Cap.ROUND; strokePaint.alpha = 0xFF
+                strokePaint.shader = null; strokePaint.colorFilter = null; strokePaint.alpha = 0xFF
                 strokePaint.color = if (rec.highlighter)
                     Color.argb(0x66, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
                 else Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
                 strokePaint.strokeWidth = rec.widthPx
+                if (rec.shape.dashed) {
+                    // Dash/gap are page-local (so they scale with zoom like the stroke) and grow with the
+                    // pen so the pattern reads at any weight. Butt caps keep the gaps clean on thick lines.
+                    strokePaint.pathEffect = dashEffect(rec.widthPx)
+                    strokePaint.strokeCap = Paint.Cap.BUTT
+                } else {
+                    strokePaint.pathEffect = null
+                    strokePaint.strokeCap = Paint.Cap.ROUND
+                }
                 for (p in rec.paths) canvas.drawPath(p, strokePaint)
+                strokePaint.pathEffect = null   // never leak the dash onto the next rec / freehand ink
             } else {
+                strokePaint.pathEffect = null
                 drawInk(canvas, rec.points, rec.paths.firstOrNull(), rec.color, rec.widthPx, rec.brush, rec.highlighter, strokePaint)
             }
         }

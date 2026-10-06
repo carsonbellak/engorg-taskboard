@@ -108,6 +108,13 @@ const __api = {
   menu: {
     action: (name) => ipcRenderer.invoke('appmenu:action', name)
   },
+  // Desktop mode — the window acts as the Windows desktop (fills the primary monitor behind
+  // other windows, Win+D brings it forward). Windows-only; status().supported is false elsewhere.
+  desktop: {
+    status: () => ipcRenderer.invoke('desktop:status'),
+    setEnabled: (on) => ipcRenderer.invoke('desktop:setEnabled', on),
+    onChanged: (cb) => ipcRenderer.on('desktop:changed', (e, v) => cb(v))
+  },
   // App updates — check the canonical repo for newer commits on startup
   updates: {
     check: () => ipcRenderer.invoke('updates:check'),
@@ -188,6 +195,11 @@ const __api = {
     sendMessage: (payload) => ipcRenderer.invoke('email:sendMessage', payload),
     scanInvites: () => ipcRenderer.invoke('email:scanInvites'),
     saveAttachment: (accountId, folder, uid, index, open) => ipcRenderer.invoke('email:saveAttachment', accountId, folder, uid, index, open),
+    // IMAP IDLE push: start/stop the new-mail watchers, and subscribe to the near-instant
+    // `email:new` events they emit when the server reports new mail in an account's INBOX.
+    watch: (enable) => ipcRenderer.invoke('email:watch', enable),
+    onNewMail: (cb) => ipcRenderer.on('email:new', (e, info) => cb(info)),
+    removeNewMailListener: () => ipcRenderer.removeAllListeners('email:new'),
   },
   // External calendar feeds (ICS): Brightspace, Google, iCloud, Outlook, etc.
   calendar: {
@@ -320,6 +332,17 @@ const __api = {
     onMessage: (cb) => ipcRenderer.on('engink:message', (e, msg) => cb(msg)),
     onStatus: (cb) => ipcRenderer.on('engink:status', (e, s) => cb(s)),
     removeListeners: () => { ipcRenderer.removeAllListeners('engink:message'); ipcRenderer.removeAllListeners('engink:status'); },
+  },
+  // OS theming — match Windows to the app theme. `apply` = accent mode
+  // ({ r, g, b, dark }: accent on title bars/taskbar + dark/light). `applyContrast`
+  // = full contrast theme from the whole palette ({ bg, bg2, text, muted, accent,
+  // accentText, border, dark }, each an { r,g,b }). Both snapshot the previous
+  // Windows state on first use; `restore` puts it all back. Windows-only.
+  osTheme: {
+    apply: (payload) => ipcRenderer.invoke('osTheme:apply', payload),
+    applyContrast: (payload) => ipcRenderer.invoke('osTheme:applyContrast', payload),
+    restore: () => ipcRenderer.invoke('osTheme:restore'),
+    status: () => ipcRenderer.invoke('osTheme:status'),
   }
 };
 

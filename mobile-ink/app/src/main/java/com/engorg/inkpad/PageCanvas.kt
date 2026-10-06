@@ -54,6 +54,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val brush: Brush
         val smoothing: Float   // 0f (off) .. 1f (max lag/leash)
         val pendingShape: ShapeType?
+        val pendingShapeDashed: Boolean   // draw the armed shape with a dashed outline
         fun onPaneFocused(pane: PageCanvas)
         fun onPageChanged(pane: PageCanvas)
         fun onShapeCommitted()
@@ -358,7 +359,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             ShapeType.TRIANGLE -> arrayListOf(PointF((minX + maxX) / 2f, minY), PointF(maxX, maxY), PointF(minX, maxY))
             ShapeType.AXES2D, ShapeType.AXES3D -> arrayListOf(PointF(a.x, a.y), PointF(b.x, b.y))
         }
-        val rec = buildShapeRec(ShapeSpec(type, verts), host.brushColor, host.brushSize, false)
+        val rec = buildShapeRec(ShapeSpec(type, verts, host.pendingShapeDashed), host.brushColor, host.brushSize, false)
         finishedView.pages[page].recs.add(rec)
         host.onShapeCommitted()
         selPage = page; selRecs.clear(); selRecs.add(rec); selBox = recBounds(selRecs)
@@ -730,6 +731,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
             if (rec.shape != null) {
                 o.put("k", "s").put("t", rec.shape.type.name)
+                if (rec.shape.dashed) o.put("d", true)
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
             } else {
@@ -797,9 +799,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 val hl = o.optBoolean("h", false)
                 if (o.optString("k", "f") == "s") {
                     val type = runCatching { ShapeType.valueOf(o.getString("t")) }.getOrNull() ?: continue
+                    val dashed = o.optBoolean("d", false)
                     val va = o.getJSONArray("v"); val verts = ArrayList<PointF>()
                     for (j in 0 until va.length()) { val p = va.getJSONArray(j); verts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
-                    if (verts.isNotEmpty()) page.recs.add(buildShapeRec(ShapeSpec(type, verts), color, width, hl))
+                    if (verts.isNotEmpty()) page.recs.add(buildShapeRec(ShapeSpec(type, verts, dashed), color, width, hl))
                 } else {
                     val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]
                     val pts = ArrayList<PointF>()

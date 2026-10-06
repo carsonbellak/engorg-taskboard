@@ -181,6 +181,7 @@ instead of doing it all inline; always mirror desktop↔PWA in the same task; "p
 | `ipc/utility-store.js` | All `store:*` handlers — Utility Store. Fetches catalog JSON from GitHub (`UTILITY_STORE_CATALOG_URL`); downloads remote utility HTML to `appdata/utilities/<id>/`. Remote utilities render in a sandboxed iframe (no Node/IPC) — never run with app privileges. |
 | `ipc/engink-mirror.js` | `engink:*` — **EngInk live mirror** server. Runs a LAN WebSocket server (`ws`, `ENGINK_MIRROR_PORT` 8770) the native EngInk (Android) app streams strokes to, plus a UDP discovery responder (`dgram`, `ENGINK_DISCOVERY_PORT` 8771) that answers the tablet's broadcast probe with `{name,port,code}`. A 6-digit pairing code gates connections. Parsed client messages are forwarded to the renderer via `engink:message`; the renderer draws them (view-only mirror). Lives on `state.enginkMirror`; started on demand by the utility, stopped on quit. Desktop-only (no cloud — direct tablet↔PC LAN). |
 | `ipc/file-merger.js` | `fileMerger:*` — File Merger utility helpers. `fileMerger:selectFiles` opens the native open dialog (PDF+image filters, multi-select) → `[{name,path,ext,size}]`; `fileMerger:save(bytes, defaultName)` shows a save dialog and writes the assembled PDF bytes → `{path}`/`{canceled}`/`{error}`. The PDF assembly itself runs in the **renderer** (`renderer/file-merger.js` with the bundled `PDFLib` global) because it needs a `<canvas>` to normalize arbitrary image formats; input bytes are read via the existing `files:readBinary`. Desktop-only. |
+| `ipc/desktop-mode.js` | `desktop:*` — **Desktop mode**: the main window acts as the Windows desktop (Settings → General). It stays a normal **top-level** window (input/DPI/acrylic intact) whose **owner** is set to `Progman`, parked at `HWND_BOTTOM` (just above the wallpaper), sized to the primary **work area**; a `hookWindowMessage(WM_WINDOWPOSCHANGING)` z-lock ORs in `SWP_NOZORDER` (validated against the WINDOWPOS's own hwnd) so clicking it focuses without raising it over other apps. A 400 ms poll lifts it above the desktop when **Show desktop** (Win+D) makes Progman/WorkerW the foreground, drops it back when an app takes focus, and re-owns it after an Explorer restart; minimize is undone; **Ctrl+Alt+D** (global, only while active) turns it off. Sets `win._desktopMode` so `ipc/window.js` ignores minimize/expand/fullscreen. FFI via **`koffi`** (user32/kernel32, no native build). State is **main-owned** in `appdata/desktop_mode.json` (device-local, never synced, never written by the renderer). ⚠️ Do **not** re-parent into WorkerW/Progman (`SetParent`, the Wallpaper Engine trick): the icon view then eats all input, and `GetParent()` returns 0 for a re-parented non-`WS_CHILD` window. Also, Electron implements `resizable:false` as min = max = current size — size the window **before** locking it. Desktop-only. |
 
 ### Renderer modules (`renderer/`)
 
@@ -227,7 +228,7 @@ instead of doing it all inline; always mirror desktop↔PWA in the same task; "p
 ### Data files (`appdata/`)
 
 Stored in `C:\Assistant\appdata\`. Allowed filenames are whitelisted in `ipc/data.js`:
-`tasks.json`, `projects.json`, `purchases.json`, `settings.json`, `schedule.json`, `todos.json`, `archived_projects.json`, `print_history.json` (+ the `print_archive/` folder of copied STL/gcode, and the `gradescope_attachments/` folder of downloaded assignment files — both device-local, written directly by main, not via the `data:save` whitelist). Linked-account metadata files are also written directly by main, outside the `data:save` whitelist: `github.json`, `gradescope.json`, `variate.json` (Variate — non-secret name/email/connected only; the SSO session lives in the `persist:variate` partition, not here).
+`tasks.json`, `projects.json`, `purchases.json`, `settings.json`, `schedule.json`, `todos.json`, `archived_projects.json`, `print_history.json` (+ the `print_archive/` folder of copied STL/gcode, and the `gradescope_attachments/` folder of downloaded assignment files — both device-local, written directly by main, not via the `data:save` whitelist). Linked-account metadata files are also written directly by main, outside the `data:save` whitelist: `github.json`, `gradescope.json`, `variate.json` (Variate — non-secret name/email/connected only; the SSO session lives in the `persist:variate` partition, not here), `desktop_mode.json` (`{ enabled }` — desktop mode on/off, device-local).
 
 ---
 
@@ -376,6 +377,12 @@ LAN, view-only reflection of the native EngInk (Android) notebook. `ipc/engink-m
 - `engink:stop()` → `{ running:false }` · `engink:status()` → same shape as start.
 - Push channels (renderer subscribes): `engink:message` (the tablet's `open`/`page`/`wet`/`wetClear`/`view` traffic + synthetic `server`/`client` status events) and `engink:status` (pairing/connection snapshot). Preload: `window.api.engink.{start,stop,status,onMessage,onStatus,removeListeners}`.
 
+### Desktop mode (Settings → General)
+Windows-only; see `ipc/desktop-mode.js`. Preload: `window.api.desktop.{status,setEnabled,onChanged}`.
+- `desktop:status()` → `{ supported, active, enabled }` (`enabled` = persisted pref in `desktop_mode.json`)
+- `desktop:setEnabled(on)` → `{ ok, active, error? }` — attaches/detaches and persists. Also re-applied at launch by `startupAttach()`.
+- Push channel `desktop:changed(active)` → `renderer/titlebar.js` toggles `body.desktop-mode-active`, which hides `.titlebar-controls` and the split shell's `#split-winctrls`.
+
 ### Auth
 - `auth:googleSignIn()` → `{ idToken, accessToken }`
 
@@ -409,6 +416,8 @@ LAN, view-only reflection of the native EngInk (Android) notebook. `ipc/engink-m
 ## Architecture Notes
 
 - **Context isolation**: renderer has no Node access. All OS/file/network calls go through `window.api` (preload) → IPC → main process.
+- **Single instance** (`main.js` `acquireSingleInstance`): a second launch focuses the running app (or `reveal()`s it in desktop mode) instead of starting a copy — two instances on one Chromium profile leave the second unable to open Local Storage/IndexedDB, so it boots signed-out on the first-run screen. `updates:restart` relaunches with `--relaunched`, which waits up to ~5 s for the exiting instance to release the lock.
+- **⚠️ Never force-kill the running app** (`Stop-Process -Force` / `taskkill /F`) to apply changes — it can corrupt the profile's Local Storage/IndexedDB (lost sign-in, onboarding flag, local theme/split layout). Close it gracefully (window ✕, or post `WM_CLOSE` to its `Chrome_WidgetWin_1` window) and relaunch with `launch.vbs`.
 - **⚠️ Subframe preload (`nodeIntegrationInSubFrames: true`)**: needed so Split Window's `<iframe>` app panes get `window.api`. Because it runs the preload in *every* subframe, `preload.js` **gates `contextBridge.exposeInMainWorld('api', …)` to real app frames only** (`location.pathname` ends with `/renderer/index.html`). This keeps the sandboxed remote-utility / email iframes privilege-free — if you add another trusted in-app frame, make sure it loads `renderer/index.html` or the gate must be updated.
 - **Fluidd camera bridge**: renderer captures WebRTC H.264 frames, decodes to JPEG via canvas, sends via `printer:sendCameraFrame`. Fluidd's `/snapshot` and `/stream` endpoints read `state.latestCameraFrame`.
 - **OrcaSlicer workaround**: CLI never exits on Windows — `slicer:slice` spawns it, polls for output file stability, then kills it.

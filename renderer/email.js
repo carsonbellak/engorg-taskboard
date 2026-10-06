@@ -22,6 +22,8 @@ class EmailView {
     this.messages = [];
     this.openMsg = null;            // { accountId, folder, uid }
     this.pollTimer = null;
+    this.watchDebounce = null;      // coalesces bursts of IMAP IDLE new-mail pushes
+    this.active = false;            // whether the email view is currently on screen
     this.loadImages = false;
     this.composeAttachments = [];
     this.built = false;
@@ -34,15 +36,36 @@ class EmailView {
     this.providers = await window.api.email.listProviders().catch(() => ({}));
     await this._loadAccounts();   // builds the 3-pane shell, or the onboarding screen if no accounts
     this.built = true;
+
+    // Near-instant delivery: the main process holds an IMAP IDLE connection per account
+    // and fires email:new the moment the server reports new mail — refresh right away
+    // (debounced so a burst of pushes collapses into one reload).
+    window.api.email.onNewMail((info) => this._onNewMail(info));
+    // A quick catch-up whenever the user returns to the app window.
+    window.addEventListener('focus', () => { if (this.active) this._refreshList(true); });
   }
 
   activate() {
+    this.active = true;
+    window.api.email.watch(true);            // spin up the IMAP IDLE push watchers
+    this._refreshList(true);                 // immediate catch-up on (re)entering the view
     if (this.pollTimer) clearInterval(this.pollTimer);
-    this.pollTimer = setInterval(() => this._refreshList(true), 60000);
+    this.pollTimer = setInterval(() => this._refreshList(true), 20000);  // fallback poll
   }
 
   deactivate() {
+    this.active = false;
+    window.api.email.watch(false);           // drop the idle connections while hidden
     if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+  }
+
+  // An IMAP IDLE push arrived. Only refresh when it affects what's on screen (the watcher
+  // only follows INBOX), and debounce so a flurry of events triggers a single reload.
+  _onNewMail(info) {
+    if (!this.active || this.folder !== 'INBOX') return;
+    if (this.selection !== 'unified' && this.selection !== info.accountId) return;
+    clearTimeout(this.watchDebounce);
+    this.watchDebounce = setTimeout(() => this._refreshList(true), 400);
   }
 
   _esc(s) {

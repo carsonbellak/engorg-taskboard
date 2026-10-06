@@ -7,10 +7,13 @@ const { ipcMain, app, screen } = require('electron');
 module.exports = function registerWindow(getMainWindow) {
   const win = () => getMainWindow();
 
-  ipcMain.handle('win:minimize', () => { const w = win(); if (w) w.minimize(); });
+  // In desktop mode (ipc/desktop-mode.js sets w._desktopMode) the window IS the desktop:
+  // minimize / expand / fullscreen are ignored so it stays fitted to the work area.
+  ipcMain.handle('win:minimize', () => { const w = win(); if (w && !w._desktopMode) w.minimize(); });
   // Expand/restore is owned by main.js (main window keeps an _expanded flag + glass inset).
   ipcMain.handle('win:maximizeToggle', () => {
     const w = win(); if (!w) return false;
+    if (w._desktopMode) return false;
     if (typeof w.toggleExpand === 'function') return w.toggleExpand();
     // Fallback for any window without the helpers.
     if (w.isMaximized()) { w.unmaximize(); return false; }
@@ -35,14 +38,14 @@ module.exports = function registerWindow(getMainWindow) {
       case 'zoomIn': wc.setZoomLevel(wc.getZoomLevel() + 0.5); break;
       case 'zoomOut': wc.setZoomLevel(wc.getZoomLevel() - 0.5); break;
       case 'zoomReset': wc.setZoomLevel(0); break;
-      case 'toggleFullscreen': w.setFullScreen(!w.isFullScreen()); break;
+      case 'toggleFullscreen': if (!w._desktopMode) w.setFullScreen(!w.isFullScreen()); break;
       case 'undo': wc.undo(); break;
       case 'redo': wc.redo(); break;
       case 'cut': wc.cut(); break;
       case 'copy': wc.copy(); break;
       case 'paste': wc.paste(); break;
       case 'selectAll': wc.selectAll(); break;
-      case 'minimize': w.minimize(); break;
+      case 'minimize': if (!w._desktopMode) w.minimize(); break;
       case 'close': w.close(); break;
       case 'quit': app.quit(); break;
       default: break;

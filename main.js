@@ -32,9 +32,35 @@ const registerWindow        = require('./ipc/window');
 const registerEnginkMirror  = require('./ipc/engink-mirror');
 const registerFileMerger    = require('./ipc/file-merger');
 const registerRelease       = require('./ipc/release');
+const registerOsTheme       = require('./ipc/os-theme');
+const registerDesktopMode   = require('./ipc/desktop-mode');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
+
+// ── Single instance ─────────────────────────────────────────────────────────────────
+// Two copies of the app would share one Chromium profile: the second can't open Local
+// Storage / IndexedDB, so it boots signed-out on the first-run screen while both fight
+// over the window. A second launch (e.g. double-clicking the shortcut while desktop mode
+// has the board behind other apps) now brings the running copy forward instead.
+// updates:restart relaunches with --relaunched, so that launch waits briefly for the
+// exiting instance to release the lock rather than quitting as a duplicate.
+async function acquireSingleInstance() {
+  if (app.requestSingleInstanceLock()) return true;
+  if (!process.argv.includes('--relaunched')) return false;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (app.requestSingleInstanceLock()) return true;
+  }
+  return false;
+}
+app.on('second-instance', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (registerDesktopMode.isActive()) { registerDesktopMode.reveal(); return; }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+});
 
 function ensureDataDir() {
   fs.mkdirSync(config.DATA_DIR, { recursive: true });
@@ -207,7 +233,8 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (!(await acquireSingleInstance())) { app.quit(); return; }
   ensureDataDir();
 
   registerData(getMainWindow);
@@ -236,6 +263,8 @@ app.whenReady().then(() => {
   registerEnginkMirror(getMainWindow);
   registerFileMerger(getMainWindow);
   registerRelease();
+  registerOsTheme();
+  registerDesktopMode(getMainWindow);
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
@@ -266,6 +295,9 @@ app.whenReady().then(() => {
   // buildMenu() sets the application menu (kept for keyboard accelerators); make
   // sure the native menu bar stays hidden afterward — the custom titlebar owns it.
   if (mainWindow) mainWindow.setMenuBarVisibility(false);
+  // If the app was left in desktop mode (acting as the Windows desktop), re-enter it once
+  // the first paint lands. No-op off Windows / when off (state: appdata/desktop_mode.json).
+  registerDesktopMode.startupAttach();
 });
 
 app.on('window-all-closed', () => {

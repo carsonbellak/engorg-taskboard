@@ -2141,8 +2141,7 @@ function openScheduleForm(editId = null, prefill = null) {
     if (!item) return;
     heading.textContent = 'Edit Event';
     document.getElementById('sched-title').value = item.title || '';
-    document.getElementById('sched-date').value = item.date || '';
-    document.getElementById('sched-day').value = item.day || '';
+    document.getElementById('sched-date').value = item.date || calDateStr(new Date());
     document.getElementById('sched-start').value = item.startTime || '';
     document.getElementById('sched-end').value = item.endTime || '';
     projSel.value = item.projectId || '';
@@ -2151,9 +2150,8 @@ function openScheduleForm(editId = null, prefill = null) {
   } else {
     heading.textContent = 'New Event';
     document.getElementById('sched-title').value = '';
-    // Pre-fill date/start when created from a calendar slot (week-view tap).
-    document.getElementById('sched-date').value = prefill?.date || '';
-    document.getElementById('sched-day').value = '';
+    // Pre-fill date from a calendar slot (week-view tap), otherwise default to today.
+    document.getElementById('sched-date').value = prefill?.date || calDateStr(new Date());
     document.getElementById('sched-start').value = prefill?.time || '';
     document.getElementById('sched-end').value = '';
     projSel.value = currentProject !== 'all' ? currentProject : '';
@@ -2171,8 +2169,9 @@ document.getElementById('btn-cancel-sched').addEventListener('click', () => {
 document.getElementById('btn-save-sched').addEventListener('click', async () => {
   const title = document.getElementById('sched-title').value.trim();
   if (!title) return;
-  const date = document.getElementById('sched-date').value || null;
-  const day = document.getElementById('sched-day').value || null;
+  const date = document.getElementById('sched-date').value || calDateStr(new Date());
+  // `day` is derived from the date (no day picker) — kept for day-board/calendar rendering.
+  const day = calDayName(new Date(date + 'T00:00:00'));
   const startTime = document.getElementById('sched-start').value || null;
   const endTime = document.getElementById('sched-end').value || null;
   const projectId = document.getElementById('sched-project').value || null;

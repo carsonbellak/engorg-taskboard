@@ -164,7 +164,7 @@ object MirrorManager : PageCanvas.MirrorSink {
             val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
             val segs = JSONArray()
             val shape = rec.shape
-            if (shape != null) { o.put("k", "s"); for (poly in shape.polylines()) segs.put(ptsJson(poly)) }
+            if (shape != null) { o.put("k", "s"); if (shape.dashed) o.put("d", true); for (poly in shape.polylines()) segs.put(ptsJson(poly)) }
             else { o.put("k", "f"); segs.put(ptsJson(rec.points)) }
             o.put("segs", segs)
             recs.put(o)

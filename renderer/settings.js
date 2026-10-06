@@ -891,7 +891,66 @@ function applyTheme(themeId) {
 
   // Ambient FX layer
   if (window.ThemeFx) window.ThemeFx.init(themeId);
+
+  // Optionally make Windows itself match the theme (accent, or full contrast theme).
+  maybeSyncWindows();
 }
+
+// ── Windows theme sync ───────────────────────────────────────────────────────
+// settings.osThemeMode = 'off' | 'accent' drives whether Windows follows the app
+// theme (see ipc/os-theme.js). 'accent' matches Windows dark/light mode + sets the
+// accent color used for highlights/selected items/links (NOT flooding surfaces) —
+// the most Windows exposes without high contrast (which would force-flatten every
+// app, incl. this one). Only the real top window pushes it — split panes (embedded)
+// share the one OS, so they skip it — and theme-change re-applies are debounced so
+// flipping theme cards doesn't spam the shell.
+let _winSyncTimer = null;
+function _isDarkNow() { return document.body.classList.contains('theme-dark'); }
+// Resolve any CSS color (e.g. a theme var) to { r, g, b } via computed style.
+function resolveColorRgb(cssColor) {
+  try {
+    const el = document.createElement('span');
+    el.style.cssText = `color:${cssColor};display:none`;
+    document.body.appendChild(el);
+    const cs = getComputedStyle(el).color; // "rgb(r, g, b)" / "rgba(r, g, b, a)"
+    el.remove();
+    const m = cs.match(/rgba?\(([^)]+)\)/i);
+    if (!m) return null;
+    const p = m[1].split(',').map((s) => parseFloat(s.trim()));
+    if (p.length < 3 || p.slice(0, 3).some((n) => !Number.isFinite(n))) return null;
+    return { r: Math.round(p[0]), g: Math.round(p[1]), b: Math.round(p[2]) };
+  } catch { return null; }
+}
+function resolveAccentRgb() { return resolveColorRgb('var(--accent)'); }
+function _pushWindowsTheme(mode) {
+  if (!(window.api && window.api.osTheme)) return;
+  if (mode === 'accent') {
+    const rgb = resolveAccentRgb();
+    if (rgb) { try { window.api.osTheme.apply({ ...rgb, dark: _isDarkNow() }); } catch {} }
+  }
+}
+// Re-apply the current mode when the app theme changes (debounced).
+function maybeSyncWindows() {
+  try {
+    if (window.windowSplit && window.windowSplit.EMBEDDED) return;
+    const mode = (window.dataManager && dataManager.settings && dataManager.settings.osThemeMode) || 'off';
+    if (mode === 'off' || !(window.api && window.api.osTheme)) return;
+    clearTimeout(_winSyncTimer);
+    _winSyncTimer = setTimeout(() => { _pushWindowsTheme(mode); }, 350);
+  } catch {}
+}
+// User changed the mode in Settings: revert Windows to its real state first (clean
+// transition), then apply the new mode.
+function setWindowsThemeMode(mode) {
+  dataManager.updateSettings({ osThemeMode: mode });
+  if (!(window.api && window.api.osTheme)) return;
+  Promise.resolve()
+    .then(() => window.api.osTheme.restore())
+    .catch(() => {})
+    .finally(() => { if (mode !== 'off') _pushWindowsTheme(mode); });
+}
+window.maybeSyncWindows = maybeSyncWindows;
+window.setWindowsThemeMode = setWindowsThemeMode;
 
 // Push the saved Liquid Glass slider value into the CSS var the .style-glass
 // rules read. Harmless for non-glass themes (no rule consumes it there).
@@ -1009,6 +1068,19 @@ function renderSettings() {
         </div>
       </div>
 
+      <!-- Make Windows itself match the app theme -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Windows Theme</h3>
+        <p class="settings-section-hint">Match Windows dark/light mode and the accent color to the app theme. The accent is used for highlights, selected items and links — it is <i>not</i> painted over the Start menu / taskbar / title bars (that would flood Windows with the accent color). Recoloring those surfaces isn't possible without high contrast, which flattens every app, including this one. This PC only; <b>Off</b> restores your previous Windows colors. Updates whenever you change the app theme.</p>
+        <div class="settings-option-row">
+          ${[['off', 'Off'], ['accent', 'Accent']].map(([m, label]) => `
+            <button class="settings-indicator-btn ${((dataManager.settings.osThemeMode || 'off') === m) ? 'active' : ''}" data-oswin="${m}">
+              <span>${label}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
       </section>
       <section class="settings-tab-panel" data-panel="general">
       <!-- General Settings -->
@@ -1058,6 +1130,11 @@ function renderSettings() {
             <span class="settings-toggle-label">3D Printer Support</span>
             <span class="settings-toggle-desc">Install the Printer &amp; Slicer utilities, OrcaSlicer proxy, and remote printer controls (also available in the Utility Store)</span>
             <input type="checkbox" class="settings-checkbox" id="settings-printer-enabled" ${dataManager.settings.printerEnabled === true ? 'checked' : ''}>
+          </label>
+          <label class="settings-toggle-row" id="settings-desktop-mode-row" style="display:none">
+            <span class="settings-toggle-label">Desktop mode</span>
+            <span class="settings-toggle-desc">Make the app your desktop: it fills your primary monitor behind all your other windows, and “Show desktop” (Win+D) brings it forward. Click into it as usual. Ctrl+Alt+D turns it off from anywhere. Windows only.</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-desktop-mode">
           </label>
           <label class="settings-toggle-row">
             <span class="settings-toggle-label">Interface</span>
@@ -1352,6 +1429,16 @@ function renderSettings() {
     });
   });
 
+  // Windows theme sync mode (device-local; Windows-only): off / accent / contrast.
+  // Switching modes reverts Windows first, then applies the chosen mode.
+  container.querySelectorAll('[data-oswin]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.dataset.oswin;
+      container.querySelectorAll('[data-oswin]').forEach((b) => b.classList.toggle('active', b === btn));
+      setWindowsThemeMode(mode);
+    });
+  });
+
   // Linked Accounts hub (Cloud / GitHub / Email)
   refreshLinkedAccounts();
 
@@ -1459,6 +1546,26 @@ function renderSettings() {
   });
   const uiModeSel = document.getElementById('settings-ui-mode');
   if (uiModeSel) uiModeSel.addEventListener('change', (e) => { if (window.applyUiMode) window.applyUiMode(e.target.value); });
+  // Desktop mode — main owns the on/off state (appdata/desktop_mode.json, device-local), so
+  // this only asks main and mirrors what it reports. Hidden where unsupported (non-Windows).
+  const desktopRow = document.getElementById('settings-desktop-mode-row');
+  const desktopCb = document.getElementById('settings-desktop-mode');
+  if (desktopRow && desktopCb && window.api?.desktop?.status) {
+    window.api.desktop.status().then((s) => {
+      if (!s || !s.supported) return;
+      desktopRow.style.display = '';
+      desktopCb.checked = !!s.active;
+    }).catch(() => {});
+    desktopCb.addEventListener('change', async (e) => {
+      let res;
+      try { res = await window.api.desktop.setEnabled(e.target.checked); }
+      catch (err) { res = { ok: false, error: err.message }; }
+      desktopCb.checked = !!(res && res.active);
+      if (res && res.ok === false) {
+        window._showConfirm?.({ title: 'Desktop mode', message: 'Couldn’t switch desktop mode: ' + (res.error || 'unknown error'), confirmText: 'OK' });
+      }
+    });
+  }
   const tabPosSel = document.getElementById('settings-tabbar-pos');
   if (tabPosSel) tabPosSel.addEventListener('change', (e) => { if (window.applyTabBarPos) window.applyTabBarPos(e.target.value); });
   const showCompletedCb = document.getElementById('settings-show-completed');

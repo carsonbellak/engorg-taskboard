@@ -176,7 +176,7 @@ function genId() {
 
 const pool = new Map(); // accountId -> ImapFlow
 
-async function buildImap(account) {
+async function buildImap(account, extra = {}) {
   return new ImapFlow({
     host: account.imap.host,
     port: account.imap.port,
@@ -184,6 +184,7 @@ async function buildImap(account) {
     auth: await imapAuth(account),
     logger: false,
     emitLogs: false,
+    ...extra,
   });
 }
 
@@ -206,6 +207,86 @@ async function closeAccount(accountId) {
   const client = pool.get(accountId);
   pool.delete(accountId);
   if (client) { try { await client.logout(); } catch {} }
+}
+
+// ───────────────────────── New-mail watchers (IMAP IDLE push) ─────────────────────────
+// A dedicated IDLE connection per account pushes an `email:new` event to the renderer the
+// instant the server reports a new message in INBOX, so mail appears near-instantly instead
+// of waiting for the next poll. imapflow keeps the connection in IDLE automatically between
+// commands and emits `exists` when the message count changes; `maxIdleTime` re-issues IDLE
+// periodically so servers/proxies don't silently drop a long-lived idle socket. Watchers run
+// only while the email view is active (toggled via `email:watch`), mirroring the renderer's
+// poll lifecycle, and reconnect with capped backoff if the connection drops.
+const WATCH_MAX_IDLE = 5 * 60 * 1000; // re-arm IDLE every 5 min (under Gmail's ~29 min cap)
+const watchers = new Map(); // accountId -> { client, timer, backoff, closed }
+let watching = false;
+let getWindow = null;
+
+function pushToRenderer(channel, payload) {
+  try {
+    const w = getWindow && getWindow();
+    if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
+  } catch {}
+}
+
+function startWatcher(accountId) {
+  if (watchers.has(accountId)) return;
+  const entry = { client: null, timer: null, backoff: 5000, closed: false };
+  watchers.set(accountId, entry);
+
+  const scheduleReconnect = () => {
+    if (entry.closed) return;
+    entry.client = null;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(connect, entry.backoff);
+    entry.backoff = Math.min(entry.backoff * 2, 60000);
+  };
+
+  async function connect() {
+    if (entry.closed) return;
+    const account = getAccount(accountId);
+    if (!account) return;
+    let client;
+    try {
+      client = await buildImap(account, { maxIdleTime: WATCH_MAX_IDLE });
+      entry.client = client;
+      client.on('error', scheduleReconnect);
+      client.on('close', scheduleReconnect);
+      client.on('exists', () => pushToRenderer('email:new', { accountId }));
+      await client.connect();
+      await client.mailboxOpen('INBOX');
+      entry.backoff = 5000; // reset after a clean connect
+    } catch {
+      if (client) { try { client.removeAllListeners(); } catch {} }
+      scheduleReconnect();
+    }
+  }
+
+  connect();
+}
+
+async function stopWatcher(accountId) {
+  const entry = watchers.get(accountId);
+  if (!entry) return;
+  watchers.delete(accountId);
+  entry.closed = true;
+  clearTimeout(entry.timer);
+  const client = entry.client;
+  entry.client = null;
+  if (client) {
+    try { client.removeAllListeners(); } catch {}
+    try { await client.logout(); } catch { try { client.close(); } catch {} }
+  }
+}
+
+function startAllWatchers() {
+  watching = true;
+  for (const a of loadAccounts()) startWatcher(a.id);
+}
+
+async function stopAllWatchers() {
+  watching = false;
+  await Promise.allSettled([...watchers.keys()].map(stopWatcher));
 }
 
 // Find a folder by IMAP special-use flag (e.g. '\\Sent', '\\Trash'), with name fallbacks.
@@ -456,6 +537,20 @@ async function scanAccountInvites(accountId) {
 // ───────────────────────── Registration ─────────────────────────
 
 module.exports = function register(getMainWindow) {
+  getWindow = getMainWindow;
+
+  // Start/stop the IMAP IDLE push watchers. The email view calls watch(true) when it
+  // becomes active and watch(false) when it's hidden, so idle connections only live while
+  // mail is actually on screen.
+  ipcMain.handle('email:watch', (e, enable) => {
+    if (enable) startAllWatchers();
+    else stopAllWatchers();
+    return { watching };
+  });
+
+  // Tear down idle connections cleanly when the app is closing.
+  try { require('electron').app.on('before-quit', () => { stopAllWatchers(); }); } catch {}
+
   ipcMain.handle('email:listProviders', () => EMAIL_PROVIDERS);
 
   ipcMain.handle('email:oauthConfigured', () => oauth.isConfigured());
@@ -501,6 +596,7 @@ module.exports = function register(getMainWindow) {
     const accounts = loadAccounts();
     accounts.push(account);
     saveAccounts(accounts);
+    if (watching) startWatcher(account.id);
     return publicAccount(account);
   });
 
@@ -521,6 +617,7 @@ module.exports = function register(getMainWindow) {
     };
     accounts.push(account);
     saveAccounts(accounts);
+    if (watching) startWatcher(account.id);
     return publicAccount(account);
   });
 
@@ -536,11 +633,14 @@ module.exports = function register(getMainWindow) {
     accounts[idx] = merged;
     saveAccounts(accounts);
     await closeAccount(id); // force reconnect with new settings
+    await stopWatcher(id);
+    if (watching) startWatcher(id); // re-arm the watcher with the new settings
     return publicAccount(merged);
   });
 
   ipcMain.handle('email:removeAccount', async (e, id) => {
     await closeAccount(id);
+    await stopWatcher(id);
     tokenCache.delete(id);
     saveAccounts(loadAccounts().filter(a => a.id !== id));
     return { ok: true };

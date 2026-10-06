@@ -13,10 +13,13 @@ enum class ShapeType { LINE, ARROW, RECT, ELLIPSE, TRIANGLE, AXES2D, AXES3D }
  * A parametric shape defined by a small set of draggable vertices (in page-local coords).
  * The vertices ARE the editable handles; [polylines] turns them into dense point paths that
  * get built into ink strokes for rendering. Editing a handle just moves a vertex and rebuilds.
+ *
+ * [dashed] is a render-only trait (the geometry is identical): when true the shape's outline is
+ * drawn with a dashed stroke — handy for system boundaries, control volumes, hidden edges, etc.
  */
-class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>) {
+class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: Boolean = false) {
 
-    fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }))
+    fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }), dashed)
 
     /** The draggable handle points (same objects as [verts]). */
     val handles: List<PointF> get() = verts
