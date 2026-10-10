@@ -44,11 +44,6 @@ class LibraryActivity : ComponentActivity() {
     private var currentFolder: String? = null
     private lateinit var importPicker: ActivityResultLauncher<Array<String>>
 
-    private val covers = intArrayOf(
-        Color.rgb(0x29, 0x47, 0xC9), Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0x89, 0x7B),
-        Color.rgb(0x2E, 0x7D, 0x32), Color.rgb(0xF5, 0x7C, 0x00), Color.rgb(0xDC, 0x26, 0x50),
-        Color.rgb(0x8E, 0x24, 0xAA), Color.rgb(0x5E, 0x35, 0xB1), Color.rgb(0x45, 0x4B, 0x55),
-    )
     private val pageColors = intArrayOf(
         Color.WHITE,
         Color.rgb(0xFB, 0xF7, 0xEC), // warm ivory
@@ -133,18 +128,6 @@ class LibraryActivity : ComponentActivity() {
         val mask = GradientDrawable().apply { cornerRadius = dp(radiusDp).toFloat(); setColor(Color.WHITE) }
         return RippleDrawable(ColorStateList.valueOf(tint), null, mask)
     }
-
-    /** Shift a color toward white (f>0) or black (f<0) by fraction |f|, for cover depth. */
-    private fun shade(c: Int, f: Float): Int = if (f >= 0)
-        Color.rgb(
-            (Color.red(c) + (255 - Color.red(c)) * f).toInt(),
-            (Color.green(c) + (255 - Color.green(c)) * f).toInt(),
-            (Color.blue(c) + (255 - Color.blue(c)) * f).toInt(),
-        ) else Color.rgb(
-            (Color.red(c) * (1 + f)).toInt(),
-            (Color.green(c) * (1 + f)).toInt(),
-            (Color.blue(c) * (1 + f)).toInt(),
-        )
 
     private fun iconBtn(pathData: String, accent: Boolean = false, sizeDp: Int = 42, onClick: () -> Unit) = ImageButton(this).apply {
         setImageBitmap(Icons.bitmap(pathData, dp(22)))
@@ -337,31 +320,24 @@ class LibraryActivity : ComponentActivity() {
 
     private fun notebookTile(nb: NotebookStore.Notebook): View {
         val w = dp(150); val h = dp(186); val m = dp(6); val radius = dp(14)
+        val cover = Covers.resolve(nb.coverStyle, nb.coverColor)
+        // Pale covers get dark ink for the title/chrome; everything else stays white.
+        val ink = if (cover.isLight) Color.rgb(0x1F, 0x23, 0x28) else Color.WHITE
+        val chrome = Covers.withAlpha(ink, 0xCC)
         val card = FrameLayout(this).apply {
             layoutParams = GridLayout.LayoutParams().apply { width = w; height = h; setMargins(m, m, m, m) }
-            // A book-like cover: subtle top-to-bottom shading for depth instead of a flat fill.
-            background = GradientDrawable(
-                GradientDrawable.Orientation.TOP_BOTTOM,
-                intArrayOf(shade(nb.coverColor, 0.14f), nb.coverColor, shade(nb.coverColor, -0.12f)),
-            ).apply { cornerRadius = radius.toFloat() }
+            // A book-like cover: the catalog design (shading, pattern, bound spine) drawn to size.
+            background = CoverDrawable(cover, radius.toFloat())
             clipToOutline = true
             elevation = dp(5).toFloat()
-            foreground = rippleFg(14, Color.argb(0x40, 255, 255, 255))
+            foreground = rippleFg(14, if (cover.isLight) Color.argb(0x30, 0, 0, 0) else Color.argb(0x40, 255, 255, 255))
             setOnClickListener { openNotebook(nb) }
             setOnLongClickListener { startItemDrag(this, "nb:${nb.id}"); true }
         }
-        // Darker "spine" down the left edge (its square right side is clipped to the rounded card).
-        card.addView(View(this).apply {
-            background = GradientDrawable().apply { setColor(shade(nb.coverColor, -0.26f)) }
-            layoutParams = FrameLayout.LayoutParams(dp(7), MATCH_PARENT)
-        })
-        card.addView(View(this).apply {
-            background = GradientDrawable().apply { setColor(Color.argb(0x22, 255, 255, 255)) }
-            layoutParams = FrameLayout.LayoutParams(dp(1), MATCH_PARENT).apply { leftMargin = dp(7) }
-        })
         card.addView(TextView(this).apply {
-            text = nb.title; setTextColor(Color.WHITE); textSize = 15f; setTypeface(null, Typeface.BOLD)
-            setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), Color.argb(0x70, 0, 0, 0))
+            text = nb.title; setTextColor(ink); textSize = 15f; setTypeface(null, Typeface.BOLD)
+            if (cover.isLight) setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.argb(0xA0, 255, 255, 255))
+            else setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), Color.argb(0x90, 0, 0, 0))
             setPadding(dp(14), dp(12), dp(12), dp(14))
             layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { gravity = Gravity.BOTTOM }
         })
@@ -369,10 +345,10 @@ class LibraryActivity : ComponentActivity() {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(12), dp(11), dp(10), dp(10))
             layoutParams = FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.START }
-            addView(ImageView(this@LibraryActivity).apply { setImageBitmap(Icons.bitmap(Icons.PAGE, dp(13))); setColorFilter(Color.argb(0xCC, 255, 255, 255)); layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) })
-            addView(TextView(this@LibraryActivity).apply { text = "  ${nb.pageIds.size}"; setTextColor(Color.argb(0xCC, 255, 255, 255)); textSize = 11f })
+            addView(ImageView(this@LibraryActivity).apply { setImageBitmap(Icons.bitmap(Icons.PAGE, dp(13))); setColorFilter(chrome); layoutParams = LinearLayout.LayoutParams(dp(13), dp(13)) })
+            addView(TextView(this@LibraryActivity).apply { text = "  ${nb.pageIds.size}"; setTextColor(chrome); textSize = 11f })
         })
-        card.addView(menuDot(Color.argb(0xE0, 255, 255, 255)) { notebookMenu(nb) }, FrameLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP or Gravity.END; setMargins(0, dp(4), dp(4), 0) })
+        card.addView(menuDot(Covers.withAlpha(ink, 0xE0)) { notebookMenu(nb) }, FrameLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP or Gravity.END; setMargins(0, dp(4), dp(4), 0) })
         return card
     }
 
@@ -492,17 +468,18 @@ class LibraryActivity : ComponentActivity() {
     private fun createNotebookDialog(folderId: String?) {
         // Start from the defaults saved on the user's profile (synced across devices) so the dialog
         // reuses your last choice instead of resetting each time.
-        var cover = InkSettings.nbCover(this); var paper = InkSettings.nbPaper(this); var pageColor = InkSettings.nbPageColor(this)
+        var cover = Covers.resolve(InkSettings.nbCoverStyle(this), InkSettings.nbCover(this))
+        var paper = InkSettings.nbPaper(this); var pageColor = InkSettings.nbPageColor(this)
         sheet { box, dialog ->
             box.addView(iconView(Icons.BOOK, 26, AppTheme.text))
             val input = themedInput("")
             box.addView(input, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
-            box.addView(fieldRow(Icons.PALETTE, colorChipRow(covers, cover) { cover = it }))
+            box.addView(fieldRow(Icons.PALETTE, coverPicker(cover.id) { cover = it }))
             box.addView(fieldRow(Icons.GRID, paperChipRow(paper) { paper = it }))
             box.addView(fieldRow(Icons.DROPLET, colorChipRow(pageColors, pageColor) { pageColor = it }))
             actionRow(box, dialog) {
-                InkSettings.setNotebookDefaults(this, paper, cover, pageColor)  // remember + sync the choice
-                val nb = store.createNotebook(input.text.toString().ifBlank { "Untitled" }, folderId, cover, paper, pageColor)
+                InkSettings.setNotebookDefaults(this, paper, cover.base, cover.id, pageColor)  // remember + sync the choice
+                val nb = store.createNotebook(input.text.toString().ifBlank { "Untitled" }, folderId, cover.base, paper, pageColor, cover.id)
                 rebuild(); openNotebook(nb)
             }
         }
@@ -567,7 +544,7 @@ class LibraryActivity : ComponentActivity() {
     private fun notebookMenu(nb: NotebookStore.Notebook) = iconMenu(listOf<Pair<String, () -> Unit>>(
         Icons.SPLIT to { splitPickDialog(nb) },
         Icons.PEN to { renameDialog(nb.title) { nb.title = it.ifBlank { nb.title }; store.save(); rebuild() } },
-        Icons.PALETTE to { coverColorDialog(nb) },
+        Icons.PALETTE to { coverDialog(nb) },
         Icons.FOLDER to { moveDialog(nb) },
         Icons.TRASH to { confirmDelete { store.deleteNotebook(nb); rebuild() } },
     ))
@@ -618,9 +595,12 @@ class LibraryActivity : ComponentActivity() {
         Icons.TRASH to { confirmDelete { if (currentFolder == fo.id) currentFolder = null; store.deleteFolder(fo); rebuild() } },
     ))
 
-    private fun coverColorDialog(nb: NotebookStore.Notebook) = sheet { box, dialog ->
+    private fun coverDialog(nb: NotebookStore.Notebook) = sheet { box, dialog ->
         box.addView(iconView(Icons.PALETTE, 24, AppTheme.text))
-        box.addView(colorChipRow(covers, nb.coverColor) { nb.coverColor = it; store.save(); rebuild(); dialog.dismiss() }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
+        val current = Covers.resolve(nb.coverStyle, nb.coverColor).id
+        box.addView(coverPicker(current) {
+            nb.coverStyle = it.id; nb.coverColor = it.base; store.save(); rebuild(); dialog.dismiss()
+        }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
     }
 
     private fun moveDialog(nb: NotebookStore.Notebook) = sheet { box, dialog ->
@@ -643,6 +623,38 @@ class LibraryActivity : ComponentActivity() {
     }
 
     // ---- chips ----
+    /**
+     * The cover catalog as a sideways-scrolling shelf of miniature covers (3 rows), with the chosen
+     * cover's name underneath. Opens scrolled to the current pick.
+     */
+    private fun coverPicker(initialId: String, onSelect: (Covers.Cover) -> Unit): View {
+        val tw = dp(38); val th = dp(48); val gap = dp(7)
+        val label = TextView(this).apply { setTextColor(muted()); textSize = 12f; setPadding(dp(2), dp(6), 0, 0) }
+        val grid = GridLayout(this).apply { rowCount = 3; orientation = GridLayout.VERTICAL; clipChildren = false; clipToPadding = false; setPadding(dp(2), dp(3), dp(2), dp(3)) }
+        val views = ArrayList<Pair<View, Covers.Cover>>()
+        fun ring(sel: Boolean) = GradientDrawable().apply {
+            cornerRadius = dp(6).toFloat(); setColor(Color.TRANSPARENT)
+            setStroke(dp(if (sel) 3 else 1), if (sel) AppTheme.accent else Color.argb(0x40, 0x80, 0x80, 0x80))
+        }
+        fun refresh(selId: String) {
+            for ((v, cv) in views) v.foreground = ring(cv.id == selId)
+            label.text = views.firstOrNull { it.second.id == selId }?.second?.name ?: ""
+        }
+        for (cv in Covers.ALL) {
+            val v = View(this).apply {
+                background = CoverDrawable(cv, dp(6).toFloat())
+                clipToOutline = true
+                layoutParams = GridLayout.LayoutParams().apply { width = tw; height = th; setMargins(0, 0, gap, gap) }
+                setOnClickListener { onSelect(cv); refresh(cv.id) }
+            }
+            views.add(v to cv); grid.addView(v)
+        }
+        refresh(initialId)
+        val scroller = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(grid) }
+        views.firstOrNull { it.second.id == initialId }?.first?.let { sel -> scroller.post { scroller.scrollTo((sel.left - dp(40)).coerceAtLeast(0), 0) } }
+        return LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(scroller); addView(label) }
+    }
+
     private fun colorChipRow(colors: IntArray, initial: Int, onSelect: (Int) -> Unit): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val views = ArrayList<Pair<View, Int>>()

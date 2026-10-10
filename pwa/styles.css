@@ -430,14 +430,6 @@ body[data-style="glass"] .board-column {
   flex-shrink: 0;
   z-index: 10;
 }
-/* Installed PWA: no browser toolbar occupies the bottom, so the home-indicator safe-area
-   clearance below the hot bar is just dead navy space — remove it so the bar sits at the
-   very bottom. Kept in a browser tab (where the bottom bar makes it correct). Both the
-   media query and the JS-set html.standalone class are used for reliability across iOS. */
-@media (display-mode: standalone) {
-  #bottom-nav { padding-bottom: 0; }
-}
-html.standalone #bottom-nav { padding-bottom: 0; }
 .nav-item {
   flex: 1;
   display: flex; flex-direction: column; align-items: center;
@@ -1554,16 +1546,6 @@ select.form-input option { background: var(--bg); color: var(--text); }
   gap: 8px;
 }
 
-/* === BOTTOM NAV SCROLL FOR MANY ITEMS === */
-#bottom-nav {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-#bottom-nav::-webkit-scrollbar { display: none; }
-.nav-item {
-  min-width: 54px;
-}
-
 /* === iOS "Add to Home Screen" BANNER === */
 .ios-install-banner {
   position: fixed;
@@ -1968,13 +1950,6 @@ select.form-input option { background: var(--bg); color: var(--text); }
 .eco-sheet-info td { color: var(--text); padding: 5px 0; }
 
 /* === PWA SETTINGS SHEET === */
-/* The header cog is now a real button; keep the gradient-clip look from .app-logo. */
-.app-logo-btn {
-  border: none; padding: 2px 4px; margin-left: -2px;
-  cursor: pointer; line-height: 1; font-family: inherit;
-  transition: transform .12s;
-}
-.app-logo-btn:active { transform: scale(0.88); }
 
 .pset-sheet { display: flex; flex-direction: column; }
 .pset-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
@@ -2073,3 +2048,286 @@ select.form-input option { background: var(--bg); color: var(--text); }
 .pset-field > span { font-size: 14px; font-weight: 600; color: var(--text-secondary); flex-shrink: 0; }
 .pset-field .form-input { width: auto; min-width: 150px; margin: 0; }
 .pset-acct { font-size: 14px; color: var(--text-secondary); word-break: break-all; }
+
+/* =========================================================================
+   MODERN iOS LAYER
+   Native-feeling chrome on top of the themes above: system (SF) font, translucent
+   header, floating "Liquid Glass" tab bar + round add button, sheets that slide up
+   with a grabber and drag-to-dismiss (app.js closeOverlay / swipe handler), filled
+   inputs, segmented controls and press feedback. Radii scale off the theme's
+   --radius so square themes (Mono / Hacker / Grunge) stay square.
+   ========================================================================= */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  /* Declared on body (not :root) so glass themes' body-level --bg-card is picked up. */
+  --ease-ios: cubic-bezier(.32, .72, 0, 1);
+  --hairline: 0.5px;
+  --fill: color-mix(in srgb, var(--text) 7%, transparent);
+  --fill-strong: color-mix(in srgb, var(--text) 13%, transparent);
+  --chrome-bg: color-mix(in srgb, var(--bg-card) 74%, transparent);
+  --chrome-border: color-mix(in srgb, var(--border) 70%, transparent);
+  --dock-h: 62px;
+  --dock-side: 12px;
+  --dock-gap: 10px;
+  --dock-bottom: max(12px, calc(var(--safe-bottom) - 12px));
+  --dock-radius: calc(var(--radius) * 2.6);
+}
+input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+
+/* --- Header: translucent material bar --- */
+#app-header {
+  gap: 8px;
+  padding: 8px 12px;
+  padding-top: max(8px, env(safe-area-inset-top));
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: var(--hairline) solid var(--chrome-border);
+}
+.app-header-left { flex: 1; min-width: 0; }
+.app-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.hdr-btn {
+  width: 36px; height: 36px; padding: 0; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%; overflow: hidden;
+  background: var(--fill); color: var(--accent);
+  cursor: pointer; font-family: inherit;
+  transition: transform .25s var(--ease-ios), background .2s;
+}
+.hdr-btn svg { width: 20px; height: 20px; }
+.hdr-btn:active { transform: scale(.86); background: var(--fill-strong); }
+.hdr-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Project picker as a pill "title menu" (still a native <select> → iOS picker wheel). */
+.project-select {
+  min-width: 0; max-width: 100%;
+  padding: 8px 30px 8px 14px;
+  border: none; border-radius: 999px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center / 11px, var(--fill);
+  color: var(--text);
+  font-size: 15px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* --- Filter chips --- */
+.filter-bar { padding: 8px 16px 10px; gap: 6px; scrollbar-width: none; }
+.filter-select, .filter-chip {
+  border: none; border-radius: 999px;
+  padding: 7px 12px; font-size: 13px; font-weight: 600;
+  background-color: var(--fill); color: var(--text);
+  transition: transform .2s var(--ease-ios), background .2s, color .2s;
+}
+.filter-select {
+  padding-right: 26px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 10px center / 9px, var(--fill);
+}
+.filter-chip { color: var(--text-secondary); }
+.filter-chip:active, .filter-select:active { transform: scale(.95); }
+.filter-chip.active { background: var(--danger); color: #fff; }
+
+/* --- Content: scrolls beneath the floating dock --- */
+#app-content {
+  padding-bottom: calc(var(--dock-h) + var(--dock-bottom) + 28px);
+  overscroll-behavior-y: contain;
+}
+@keyframes view-in { from { opacity: 0; transform: translateY(8px); } }
+#app-content.view-enter { animation: view-in .32s var(--ease-ios) backwards; }
+
+/* --- Floating tab bar (iOS 26-style dock) --- */
+#bottom-nav {
+  position: fixed;
+  left: var(--dock-side); right: var(--dock-side); bottom: var(--dock-bottom);
+  height: var(--dock-h);
+  padding: 5px;
+  gap: 2px;
+  align-items: stretch;
+  overflow: hidden;
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(180%) blur(24px);
+  border: var(--hairline) solid var(--chrome-border);
+  border-top: var(--hairline) solid var(--chrome-border);
+  border-radius: var(--dock-radius);
+  box-shadow: 0 10px 36px rgba(0,0,0,.20), 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.10);
+  z-index: 40;
+  transition: right .35s var(--ease-ios);
+}
+body.has-fab #bottom-nav { right: calc(var(--dock-side) + var(--dock-h) + var(--dock-gap)); }
+.nav-item, .nav-more {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 0;
+  background: transparent; border: none;
+  border-radius: calc(var(--dock-radius) - 5px);
+  color: var(--text-secondary);
+  cursor: pointer; font-family: inherit;
+  transition: color .2s, background .3s var(--ease-ios), transform .25s var(--ease-ios);
+}
+.nav-item.active, .nav-more.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.nav-item:active, .nav-more:active { transform: scale(.9); }
+.nav-icon { font-size: 0; line-height: 0; display: flex; }
+.nav-icon svg { width: 24px; height: 24px; transition: stroke-width .2s; }
+.nav-item.active .nav-icon svg, .nav-more.active .nav-icon svg { stroke-width: 2.2; }
+.nav-label {
+  font-size: 10px; font-weight: 600; letter-spacing: 0;
+  max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* "More" sheet: app-icon style grid of the overflow tabs. */
+.nav-more-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 10px; }
+.nav-more-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 6px 12px;
+  border: none; border-radius: calc(var(--radius) + 4px);
+  background: var(--fill); color: var(--text);
+  font-family: inherit; cursor: pointer;
+  transition: transform .25s var(--ease-ios), background .2s;
+}
+.nav-more-tile:active { transform: scale(.94); background: var(--fill-strong); }
+.nav-more-tile.active { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.nav-more-tile-ic { color: var(--accent); display: flex; }
+.nav-more-tile-ic svg { width: 28px; height: 28px; }
+.nav-more-tile-label { font-size: 12px; font-weight: 600; }
+
+/* --- Add button: round glass-edged button beside the dock --- */
+.fab {
+  right: var(--dock-side);
+  bottom: var(--dock-bottom);
+  width: var(--dock-h); height: var(--dock-h);
+  border-radius: var(--dock-radius);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 45%, transparent), inset 0 1px 0 rgba(255,255,255,.28);
+  z-index: 41;
+  transition: transform .3s var(--ease-ios);
+}
+.fab:active { transform: scale(.86); }
+
+/* --- Sheets: slide up, grabber, drag down to dismiss --- */
+@keyframes overlay-in { from { background-color: rgba(0,0,0,0); } }
+@keyframes sheet-in { from { transform: translateY(100%); } }
+.overlay {
+  background: rgba(0,0,0,.4);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  animation: overlay-in .3s ease backwards;
+  transition: background-color .26s ease;
+}
+.overlay.closing { background-color: rgba(0,0,0,0); pointer-events: none; }
+.overlay-sheet {
+  position: relative;
+  padding: 30px 20px 24px;
+  padding-bottom: calc(20px + var(--safe-bottom));
+  border-radius: calc(var(--radius) * 2.2) calc(var(--radius) * 2.2) 0 0;
+  box-shadow: 0 -10px 40px rgba(0,0,0,.22);
+  overscroll-behavior: contain;
+  /* backwards fill only — a forwards fill would override the inline drag transform. */
+  animation: sheet-in .45s var(--ease-ios) backwards;
+}
+.overlay-sheet::before {
+  content: ''; position: absolute; top: 8px; left: 50%;
+  width: 36px; height: 5px; margin-left: -18px; border-radius: 3px;
+  background: var(--fill-strong);
+}
+.overlay-sheet h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.overlay-sheet label { letter-spacing: 0.02em; }
+/* iPad / wide screens: centered form sheet instead of an edge-to-edge drawer. */
+@media (min-width: 640px) {
+  .overlay { align-items: center; justify-content: center; }
+  .overlay-sheet { max-width: 540px; border-radius: calc(var(--radius) * 2); padding-bottom: 24px; }
+}
+
+/* --- Inputs: filled, borderless, focus ring --- */
+.form-input, .login-input {
+  font-size: 16px; /* ≥16px stops iOS zooming into the field on focus */
+  border: 1px solid transparent;
+  background-color: var(--fill);
+  border-radius: calc(var(--radius) - 1px);
+  transition: border-color .2s, box-shadow .2s;
+}
+.form-input:focus, .login-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+select.form-input {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 14px center / 11px, var(--fill);
+}
+
+/* --- Priority picker as a segmented control --- */
+.priority-row {
+  gap: 2px; padding: 2px;
+  background: var(--fill);
+  border-radius: calc(var(--radius) - 2px);
+}
+.priority-btn,
+.priority-btn.active,
+.priority-btn[data-p="High"].active,
+.priority-btn[data-p="Low"].active {
+  border: none; padding: 9px;
+  border-radius: calc(var(--radius) - 4px);
+  background: transparent;
+}
+.priority-btn.active,
+.priority-btn[data-p="High"].active,
+.priority-btn[data-p="Low"].active {
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px rgba(0,0,0,.14), 0 1px 1px rgba(0,0,0,.05);
+}
+
+/* --- Buttons --- */
+.btn-primary, .btn-secondary, .btn-primary-full, .btn-secondary-full, .btn-danger-full, .btn-google {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+  border-radius: calc(var(--radius) + 2px);
+  transition: transform .25s var(--ease-ios), opacity .2s;
+}
+.btn-secondary, .btn-secondary-full { border: none; background: var(--fill); color: var(--text); }
+.btn-primary:active, .btn-secondary:active, .btn-primary-full:active, .btn-secondary-full:active,
+.btn-danger-full:active, .btn-danger-sm:active, .btn-google:active { transform: scale(.97); opacity: .85; }
+
+/* --- Cards: softer edges + spring press feedback --- */
+.note-card, .purchase-card, .event-card, .board-column, .stat-card, .timer-card, .alarm-row {
+  border-color: var(--chrome-border);
+}
+body.theme-light .note-card, body.theme-light .purchase-card, body.theme-light .event-card,
+body.theme-light .board-column, body.theme-light .stat-card {
+  box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.05);
+}
+.note-card, .board-card, .purchase-card, .cal-scard, .cal-agenda-day, .timer-preset-btn, .eco-list-row {
+  transition: transform .25s var(--ease-ios), border-color .15s, opacity .2s;
+}
+.note-card:active, .board-card:active, .purchase-card:active, .cal-scard:active { transform: scale(.975); }
+.note-checkbox { transition: transform .25s var(--ease-ios), background .15s, border-color .15s; }
+.note-checkbox:active { transform: scale(.8); }
+
+/* Board columns stop above the floating dock. */
+.board-column {
+  max-height: calc(100vh - 230px - env(safe-area-inset-top) - var(--safe-bottom));
+  max-height: calc(100dvh - 230px - env(safe-area-inset-top) - var(--safe-bottom));
+}
+/* Tree canvas is full-bleed under the dock — lift its toolbar above it. */
+.eco-toolbar { bottom: calc(var(--dock-h) + var(--dock-bottom) + 14px); }
+.eco-toolbar button { border-radius: 50%; background: var(--chrome-bg); -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+
+/* --- Login --- */
+.login-logo {
+  width: 88px; height: 88px; margin-bottom: 18px;
+  border-radius: 22.5%;
+  box-shadow: 0 12px 32px rgba(99,102,241,.35);
+}
+.login-title {
+  font-size: 34px; font-weight: 700; letter-spacing: -0.03em;
+  background: none; -webkit-text-fill-color: currentColor; color: var(--text);
+}
+
+/* Install banner: an app-icon tile, floating above the dock. */
+.ios-install-banner {
+  bottom: calc(var(--dock-h) + var(--dock-bottom) + 12px);
+  border-radius: calc(var(--radius) * 1.6);
+  background: var(--chrome-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
+}
+img.ios-install-icon { object-fit: cover; border-radius: 22.5%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay, .overlay-sheet, #app-content.view-enter { animation: none; }
+}

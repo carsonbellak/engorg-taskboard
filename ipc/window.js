@@ -2,34 +2,36 @@
 // and the menu actions that the themed titlebar reproduces from the (now hidden)
 // native application menu. See renderer/titlebar.js for the UI.
 
-const { ipcMain, app, screen } = require('electron');
+const { ipcMain, app, screen, BrowserWindow } = require('electron');
 
 module.exports = function registerWindow(getMainWindow) {
-  const win = () => getMainWindow();
+  // Act on the window that asked (the main window, or desktop mode's separate desktop
+  // window); fall back to the main window.
+  const win = (e) => (e && e.sender && BrowserWindow.fromWebContents(e.sender)) || getMainWindow();
 
   // In desktop mode (ipc/desktop-mode.js sets w._desktopMode) the window IS the desktop:
   // minimize / expand / fullscreen are ignored so it stays fitted to the work area.
-  ipcMain.handle('win:minimize', () => { const w = win(); if (w && !w._desktopMode) w.minimize(); });
+  ipcMain.handle('win:minimize', (e) => { const w = win(e); if (w && !w._desktopMode) w.minimize(); });
   // Expand/restore is owned by main.js (main window keeps an _expanded flag + glass inset).
-  ipcMain.handle('win:maximizeToggle', () => {
-    const w = win(); if (!w) return false;
+  ipcMain.handle('win:maximizeToggle', (e) => {
+    const w = win(e); if (!w) return false;
     if (w._desktopMode) return false;
     if (typeof w.toggleExpand === 'function') return w.toggleExpand();
     // Fallback for any window without the helpers.
     if (w.isMaximized()) { w.unmaximize(); return false; }
     w.maximize(); return true;
   });
-  ipcMain.handle('win:close', () => { const w = win(); if (w) w.close(); });
-  ipcMain.handle('win:isMaximized', () => {
-    const w = win();
+  ipcMain.handle('win:close', (e) => { const w = win(e); if (w) w.close(); });
+  ipcMain.handle('win:isMaximized', (e) => {
+    const w = win(e);
     return !!(w && (typeof w.isExpanded === 'function' ? w.isExpanded() : w.isMaximized()));
   });
   // Renderer signals when the Liquid Glass theme is active so "maximize" uses the inset.
-  ipcMain.handle('win:setGlassMode', (e, on) => { const w = win(); if (w && typeof w.setGlassMode === 'function') w.setGlassMode(on); });
+  ipcMain.handle('win:setGlassMode', (e, on) => { const w = win(e); if (w && typeof w.setGlassMode === 'function') w.setGlassMode(on); });
 
   // Mirror of the native menu roles so the titlebar dropdowns do the same thing.
   ipcMain.handle('appmenu:action', (e, name) => {
-    const w = win(); if (!w) return;
+    const w = win(e); if (!w) return;
     const wc = w.webContents;
     switch (name) {
       case 'reload': wc.reload(); break;

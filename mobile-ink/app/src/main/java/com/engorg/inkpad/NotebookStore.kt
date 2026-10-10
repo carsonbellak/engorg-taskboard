@@ -23,6 +23,7 @@ class NotebookStore(private val dir: File) {
         var paper: String = "GRID",
         var pageColor: Int = Color.WHITE,
         var lastPage: Int = 0,   // page this notebook was last viewed on (restored on reopen)
+        var coverStyle: String = "",  // Covers catalog id ("" = pre-catalog notebook → classic solid of coverColor)
     )
 
     val folders = ArrayList<Folder>()
@@ -68,6 +69,7 @@ class NotebookStore(private val dir: File) {
                             o.optString("paper", "GRID"),
                             o.optInt("pageColor", Color.WHITE),
                             o.optInt("lastPage", 0),
+                            o.optString("coverStyle", ""),
                         )
                     )
                 }
@@ -93,6 +95,7 @@ class NotebookStore(private val dir: File) {
                         .put("paper", nb.paper)
                         .put("pageColor", nb.pageColor)
                         .put("lastPage", nb.lastPage)
+                        .put("coverStyle", nb.coverStyle)
                 )
             }
             libFile().writeText(JSONObject().put("folders", fa).put("notebooks", na).toString())
@@ -133,8 +136,9 @@ class NotebookStore(private val dir: File) {
         cover: Int,
         paper: String = "GRID",
         pageColor: Int = Color.WHITE,
+        coverStyle: String = "",
     ): Notebook =
-        Notebook(id(), title, folderId, cover, System.currentTimeMillis(), arrayListOf(id()), paper, pageColor).also {
+        Notebook(id(), title, folderId, cover, System.currentTimeMillis(), arrayListOf(id()), paper, pageColor, coverStyle = coverStyle).also {
             notebooks.add(it); save()
         }
 

@@ -5,10 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="theme-color" content="#818CF8">
+  <meta name="apple-mobile-web-app-title" content="EngOrg">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
+  <meta name="theme-color" content="#0F172A">
   <title>EngOrg</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icon-192.svg">
+  <!-- iOS ignores SVG touch icons; inlined PNG because the release pipeline skips binary files -->
+  <link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAYAAAA9zQYyAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAABDPSURBVHhe7d2Ld9NGFgbw/q+72/e79A2UR8IjQBIICSEQkkCAEmB5NZRAU2BLCyUUFsqztAuUQpeWbikklmQ7zJ47zsjSaGRLMzLWHd/vnO+cljQ9sf1DGY1Go+f+9vxfDPr3YF+o9h+hPvb7vOiL1b6g6IuiL1X7ktSXX472lWBfecxeVfS1YF+t9vVQn/h9Q/S1at+M6VvBvl7p2zF9J9g3qp2n6LvQN6N9L9i3pv2+L/ftafaBoh/KfWeafST1Y0XnQ+dVu0DRhcG+W+0noc74XST6XrWLY7oE+n64S4P9oOC3TdUPC6w90OcIc7SEGSdmDpowE2ZbMIdBE2bCjBzzMh80YSbMFmCugCbMhNkSzCHQhJkwY8e87KM50ISZMNuAmYMmzITZFswSaMKsKmHGg3l5FTRhVpUw48I8B5owq0qY8WEOgSbMhBk7Zh80YSbMNmDmoAkzYbYFcxU0YSbMFmBewUETZsJsCeYQaBkyYY6WMOcb84qP50DLkAlztIQ5/5g5aBkyYY6WMOPArARNmAkzVswrZdCEmTBjxhwCTZgJM3bMPmjCTJhtwMxBE2bCbAvmKmjCTJgVxYa5g4MmzIRZUYyYQ6AJc7SEGRdmHzRhjpYw48PMQRPmaAkzTswd8yXQMmTCTJgxYV4VBC1DJsyEGRtmH7QMmTATZoyYOWgZMmEmzFgxK0ETZsKMFfPq+U4YNGEmzJgxh0AT5uwwd66cYbt2OGysRnu7Zwhzxph90IQ5O8znz3ksaW5cL7K2+YQ5K8wcNGHODvOxCVc2WzcXznmEWVEdzGHQCsiEOTlm6K3/lGSvdfPk8SxhzgjzGh+0AjJhTocZ+vjxrOw1UQhzNpjXLADQCsiEOT1mmL0wBk2YjTBz0DJkwqyH2Rg0YTbGrARNmPUwG4EmzJlg7pRBE2Z9zFmAJsxmmEOgCbMZZuj0tD5owmyO2QdNmNNj7u2aYV9MuOzGtSJ78KDMYT59+lS2mjh/PCyzn26W2IlJjw32OYRZAzMHTZiTYx4dLrArl4uxQwsT0HIKM7Mc+PgBlzAnxBwGTZiVmNd3zbCpb+MRB5Ml6GAA97XLRbZlg0OYa2Du8kFbiLlt0Qy7fq3oo3j4sMy2DhUikOMwA2QYTqRJo0AHc/tWiW0brMBOgnmgx2G//FwZEkHgn/tWO1ZiroC2FDMAllMqPWV7xpyamHs0IIvogNb5HsidWyU2OujUxQyX1uXAn23qcSKQsWMOgbYds0gQdRDy8sUzqVbKqaKDU+d7gvnheomtX11IjFkEvrZZQo0dc9fCOdCtglkEUO8dc3zMhw+5bGYm/sNPE1OgOvHcWXb2dJGtXJgMs0gQtQ2YOehWwywCqPfvddiPN9OvkKsXQF0Ldr2v6+a3B2W2c8RNhFlEoLYBswS6dTCLzM5mj6rZ0XlNPmrkmLuroPFihpocZRtxpGxWTF7LHw9n2erFuDHPgcaNuX3RjPzZpI4JhLwki9cwNupGEGPCHAKNETNcKFnXaQ4akgWIZiWrn/3IQS8CGRNmHzRWzKKYZyjyEjhJ7u90UGPmoLFjhsK8chYxBf3ozzL79V6ZfXe2yDs54bE9O91QJ496/td/vV/mi5JMYvozi0ydLqLHXAWNGLNYm3H0SPo7ruXo4ACQp066bHNfQXsJ6Ma1BXZy0mO//Jz+5FbnZ5ZzYapkBea1HLQFmEWzQJ0kgPjEpMvWdsxkvji/s73Ajo67/OidNCaobcIcAi0jxoZZ9FgDUcNYfXLCfWb3AB7c4xoPSWrFNsxrP5kDLSPGillcyp48li1q151l584WWfv85tyd/eVRjy8hzTJXv7cPMwctI8aOGWpyoUUOLLLnQ4smbzWw8pMCOz+V3euCCylrFtuFORY0ZsxZDjngZC9vm8B8ftBjnqs/Zg7myqXKUdoWzOtUoDFjhiWgWcxJwxADdgjNG2bR4X6HPfrT/HVCdg651mCOgMaMGXrx3/EL88VMQL0ZAZhL7usODDFyhlncabJ2uVN3JiTJa/7v/bI1mEOgsWPesqkgf1apA5g7luYfc3BR/p1btVEnycQhzwrMPmjsmOEeQJ2dP4OBYQaGI7N8y9SqRQXj4QecIMqQMWLmoG3APJTB0TnPY+Y4zOJOE1jLbHqiCEdp7JjDoJFihq0GTI/OeZzNSIpZdN8us9md/wWO0lgx9/igEWM2PTrDYyGwYxZ3mZz+Kv6kOEngKI0Zc88iAI0YM9TkTm2Y4svDRZMsMIs7TWA8rJt7d8uoMfugZcRYMENN5p1DQw0LMEM/22s29BjoctBi5qBlxJgww1YEuoG/CM1am9EozKImU3nnzhTRYo4FjQEzVHeHI8hn+5/dqrlniRkKV/90AyeHWDGvV4HGghm2tIW5Y53AkkxbMUPhUvbNG/ozP8O9DkrMEdCYMJvMbvA1zRZjhm4b0B+O/esLDyXmEGhMmKFfndT7tQo3g65qy/5OkzxhFusy0uygFMyPN0oRyBgwr1/sVkBjwwy9rXkx5f69cktghl46r3eOAX8RMGLmoDFihibZgFwVuBewFTDDFb8DY3q/xSAbVrroMIdBI8K85ONp+f1PnA3dANd+zKK6t279c7uHDnOvDzqHmA9/5vJbqWCIIPf338p8ja/ceoHdOVsJMxTGw/Uiv4/Qvx7N8rXScu/eLrNvThRzibkCOoeYTS5n14L9w/ViS2GGnqmxvqPWe1UvADtvmEOgZcjNwgzPNjFN3AcFuxW1Ema4hD35uf7BoV6O7PNyhdkHLUNuFmYx1DBNHGg4IWwlzNC4E8O49yhNLp4r5QozBy1DbiZmKDzM0jRxH9b4/iroVsAMHepVX2CJe4/SJAhaRtwMzL1LFKCbiRlmMBoJesdI6z2htXup+opq3HuUJgK0jLhZmPtk0M3G3GjQG7oLLYVZrJpT3Z4V9x6lCYCWETcTcwh0HjA3GnRPxxzoFsIMVc1Fx71HaRIHulmYfdB5wdxo0Fs3Oy2HGapK3HuUJirQzcTMQecJc6NB79/deg+Ch6WgqsS9R2kig2425groHGGe32DQsHt+K2GGwiVsVeLeozQJgs4D5g0q0M3EPH/eNBs2WOcsEvdhwYUVGbHNmGEtxtFD6iuFce9Rmpw+UcwV5gjoZmMWhfUajci1y2rQtmKGfn1cDRpignr6ySzrbc8X5hDovGBeMG+a7y939XKRL8ZPk3ofEDzDpJUwQ69eqr04qd57psr9u2X26WY3d5g3LJ0DnSfMclWbwMAdJzqBvyCdbYWWwQz9S3PfO75OQzEll7cxcxAzB40Ns1icr5pbTZKJcbdlMG/fpH+CvWWtG0Gcd8xh0IgwQ+F5gDqBR0y0Ambod2dqDzfiAlcWZcQYMPf7oJFhhsKMhU5g64MVC+3HDHeawIJ8ncBaZxkyBswV0AgxwwIjeCqrbvZ+6lqPebBb//05e6oyHYcNcwg0JszQZQtmUs+CiNy5VbIaM9z79+0pvd9gkD0jHkrMPmhsmMUSUN1xNGR00LEWMxyddU+a4fuwYuagsWKGwqVs3cBR2kbM0Hpzz7Vy7VL+LmcnxRwFrYCcV8ywJmNNW0F72AE5fNCzDjMcnU3ek/07KsMNjJg3hkArIOcZsyhMw+kGNge3CTP09k/6wzDYugAz5ipoBWQMmOECyYHd+mfzkONHPWsw74tZWZc0MLuBGfPGNgCtgIwFsyhsj6sb+PW8a5uLHrPJiSAEvrdPLDZCipmDliFjwwwdP2B2lOYf5moHLeaeNof9/kD/LzVkShydEWNWgsaGOYujNAS2CYOHWGLDDNtx/ZRgu69a8Y/OyDEPyKCxYoa1GYcNj9KQm9dL6DCbXEAR4UdnCzCHQGPGLC5jw3rnWkmy9vfyxQpqDJhh08R6qfeaYaF+3zI7MPugbcAMhat/qjlY+UOV/13Or/fLbN1yJ7eYYcx842q6v7zyv4tMjlePzjJibJg5aFswi7UZly+Gj1pxH2Tcn4vALvY7htzcYYbZjHongHGvTf5zWFVnE+YoaOSYoV3t1WeLyB+gnHpfh6P9scNeBHGzMMM8c72puXqvSXwd1jyPbnCtwrwpBNoCzGJtxr4xl83O1v5gReoBgPxyt8yf/dcszHBUrjfEgCR5LRD47747UxlqyIgxY66CtgjzQI+T+ulPSSHAs//6O51nhrm/w+V7X6jOC+QkfQ0i8P+c2O9FIGPGXAHd4phFkoIACBfPF9nGLqdhmAEyTMfVG16IJP3Z5ahQY8bMQRPmatLCgMVN8MgHeMilKeaRXpd9c7zI7t2tfcKXdYKosWPe1C6BliFjwTzUb44ZkhZ0MI/+nGVXLpX4IyBg1/y9o24sZtie6+CYx7783GPfny/x52vrxuRnFgHUh/d46DFvDoKWIWPBDIV54yySBQ5VYG8M3f0x6iWrn7lQmGX9y3Fj9kHLkDFh7lqm3l2zlZIVanGUxoqZg5YhY8IMhVVylGzy5XgRNWYlaEyYxRpmGL9SzAIXWrascVFjHmz3wqAxYobCAv0kc7WU+Jyc8NBjDoHGiln04N70qK9dKTXs6A7j2lptROAoe+NK+hPkrycDQw3EmH3Q2DGLO00OpUB9YarEL2H3rHD4FcCskgZrmv+2Xh7+Vma7BitrMwBo0tiEmYO2BbNoEtQCc7C7R13jo7UOUJ3vCQauJp444kVWzSVBbRvmCmiLMCdBrcIcXJtx+qvkl5zl6ODU+R4IDC8unSvVXJxfC7WNmLcEQcuQsWIWd5ns2xW+CxqAT50u1sQs2rWkwC9pp4WtizNNBORNqyrDizjMoiePeKEHb8I/23ICKGPesmwOtAwZO2Zxp8m6FQ4/Wp845rHB9U4izME1GQD71HEv8VCkkaDhVilYecchp7w7e6TH5YihW3vwT83JFZg5aBmyLZizvtNkdMDhazVqHbWzBg1HU7ije3w37u25nhVmJWjCHMUsr5rbNezyIcnPt8uhX+emoGFYBA/kOf9tyd9jDvPGic8a85AMmjDXx6xaAgrPMoHVc6qHxCcJPKBH3pOZMKfHHAJNmPUwB6u7hBXj06byiNkHTZjNMcOdJk+e6IGWERNmPcwcNGHOBjPcA5glaMKcHnMYNGE2wpwlaMKsh3nYB02YjTFDYa5YJ4Q5G8zDywE0Yc4EM+w1p/NcwOBDLgmzGeYQaMJshhn6/YX0q/bEQy4JszlmHzRhNscMhU0U4TklSQNXHfl2XIQ5Uh3MHDRhzgaz6Po2hz+rBNZd1CpcDRwQ6zIIcyaYJdCE2RRzV7ALq5VnMWjM3BjMI1XQhJkw48c8B5owE2Y7MIdAE2bCLCPGhnlkxRxowkyYZcQYMXPQhJkwy4ixYq6CJsyE2QLMWzlowkyYLcEcAi0jJszREuZ8Y/ZBy4gJc7SEOf+YOWgZMWGOljDjwLx1ZQxowkyYZcgYMG9TgSbMhFmGjAVzBDRhJswyZEyYQ6AJM2GWIWPD7IMmzIRZhowRMwdNmAmzDBkr5gpowkyYLcE8KoMmzIQZM+YQaMJMmLFj9kETZsJsA+bRDo89R5gJsy2Yw6AJcwQxYcaFebsPmjBHEBNmfJgroAlzBDFhxok5BDoCmTATZmSYt3cUK6AjkAkzYUaImYOOQCbMhBkpZjVoBWTCHC1hzh/mHRHQCsiEOVrCnE/MYdAKyIQ5WsKcX8xV0ArIhDlawpxvzDtWAWgFZMIcLWHOP2YOWoZMmKMlzDgwK0ETZsKMFfNOGTRhJsyYMUP/D8tYR7Ow/8z7AAAAAElFTkSuQmCC">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,7 +20,7 @@
   <!-- iOS "Add to Home Screen" install banner (shown only on iOS Safari, not when already installed) -->
   <div id="ios-install-banner" class="ios-install-banner hidden">
     <button id="ios-install-dismiss" class="ios-install-close" aria-label="Dismiss">&times;</button>
-    <div class="ios-install-icon">&#9881;</div>
+    <img class="ios-install-icon" src="icon-512.svg" alt="">
     <div class="ios-install-body">
       <div class="ios-install-title">Install EngOrg</div>
       <div class="ios-install-text">
@@ -33,7 +37,7 @@
   <!-- Login Screen -->
   <div id="screen-login" class="screen active">
     <div class="login-container">
-      <div class="login-logo">&#9881;</div>
+      <img class="login-logo" src="icon-512.svg" alt="EngOrg">
       <h1 class="login-title">EngOrg</h1>
       <p class="login-subtitle">Engineering Task Board</p>
       <div class="login-form">
@@ -56,14 +60,14 @@
     <!-- Top Bar -->
     <header id="app-header">
       <div class="app-header-left">
-        <button id="btn-settings" class="app-logo app-logo-btn" title="Settings" aria-label="Settings">&#9881;</button>
+        <button id="btn-settings" class="hdr-btn" title="Settings" aria-label="Settings"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
         <select id="project-selector" class="project-select">
           <option value="all">All Projects</option>
         </select>
-        <button id="btn-new-project" class="btn-new-proj" title="New project">+</button>
-      </div>
+        </div>
       <div class="app-header-right">
-        <button id="btn-user-menu" class="btn-icon" title="Account">&#128100;</button>
+        <button id="btn-new-project" class="hdr-btn" title="New project" aria-label="New project"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="btn-user-menu" class="hdr-btn hdr-avatar" title="Account" aria-label="Account"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="10" r="3.2"/><path d="M6.2 18.4a6.5 6.5 0 0 1 11.6 0"/></svg></button>
       </div>
     </header>
 
@@ -99,51 +103,64 @@
     <main id="app-content"></main>
 
     <!-- Floating Add Button -->
-    <button id="fab-add" class="fab">+</button>
+    <button id="fab-add" class="fab" aria-label="Add"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
 
     <!-- Bottom Navigation -->
     <nav id="bottom-nav">
       <button class="nav-item active" data-navid="notes" data-view="notes">
-        <span class="nav-icon">&#128204;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.5L15.5 3z"/><path d="M15 3v6h6"/><path d="M7 13h7M7 17h4"/></svg></span>
         <span class="nav-label">Notes</span>
       </button>
       <button class="nav-item" data-navid="board" data-view="board">
-        <span class="nav-icon">&#128203;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M15 3v18"/><path d="M5.5 7h1.5M11 7h2M17 7h1.5M11 11h2"/></svg></span>
         <span class="nav-label">Board</span>
       </button>
       <button class="nav-item" data-navid="ink" data-href="ink.html">
-        <span class="nav-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/><path d="M15 5l4 4"/></svg></span>
         <span class="nav-label">EngInk</span>
       </button>
       <button class="nav-item" data-navid="ecosystem" data-view="ecosystem">
-        <span class="nav-icon">&#127795;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18.5" r="2.2"/><circle cx="12" cy="18.5" r="2.2"/><circle cx="19" cy="18.5" r="2.2"/><path d="M12 7.2v9M12 11.5H6.5a1.5 1.5 0 0 0-1.5 1.5v3.3M12 11.5h5.5a1.5 1.5 0 0 1 1.5 1.5v3.3"/></svg></span>
         <span class="nav-label">Tree</span>
       </button>
       <button class="nav-item" data-navid="timeline" data-view="timeline">
-        <span class="nav-icon">&#128197;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg></span>
         <span class="nav-label">Timeline</span>
       </button>
       <button class="nav-item" data-navid="calendar" data-view="calendar">
-        <span class="nav-icon">&#128198;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M7.5 13.5h.01M12 13.5h.01M16.5 13.5h.01M7.5 17h.01M12 17h.01"/></svg></span>
         <span class="nav-label">Calendar</span>
       </button>
       <button class="nav-item" data-navid="purchases" data-view="purchases">
-        <span class="nav-icon">&#128230;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8 12 3 3 8v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/><path d="M7.5 5.5l9 5"/></svg></span>
         <span class="nav-label">Orders</span>
       </button>
       <button class="nav-item" data-navid="stats" data-view="stats">
-        <span class="nav-icon">&#128202;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V11M10 20V4M16 20v-6M22 20H2"/></svg></span>
         <span class="nav-label">Stats</span>
       </button>
       <button class="nav-item" data-navid="timers" data-view="timers">
-        <span class="nav-icon">&#9201;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13.5" r="8"/><path d="M12 9.5v4l2.5 1.5M9.5 2.5h5M12 2.5v3"/></svg></span>
         <span class="nav-label">Timers</span>
       </button>
       <button class="nav-item" data-navid="printer" data-view="printer">
-        <span class="nav-icon">&#127912;</span>
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.5 3.5 7.2v9.6L12 21.5l8.5-4.7V7.2L12 2.5z"/><path d="M3.5 7.2 12 12l8.5-4.8M12 12v9.5"/></svg></span>
         <span class="nav-label">Printer</span>
       </button>
+      <!-- iOS-style overflow tab: shown by applyHotbar() when more than 5 tabs are visible -->
+      <button class="nav-more hidden" id="nav-more" aria-label="More">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="19" cy="12" r="1.3" fill="currentColor"/></svg></span>
+        <span class="nav-label">More</span>
+      </button>
     </nav>
+
+    <!-- "More" tab sheet: the tabs that don't fit in the bar -->
+    <div id="nav-more-overlay" class="overlay hidden">
+      <div class="overlay-sheet">
+        <h2>More</h2>
+        <div id="nav-more-grid" class="nav-more-grid"></div>
+      </div>
+    </div>
 
     <!-- New Project Overlay -->
     <div id="new-project-overlay" class="overlay hidden">

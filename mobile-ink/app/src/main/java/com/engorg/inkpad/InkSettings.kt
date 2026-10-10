@@ -30,8 +30,11 @@ object InkSettings {
     fun nbPaper(ctx: Context): String = nb(ctx).getString("nbPaper", "GRID") ?: "GRID"
     fun nbCover(ctx: Context): Int = nb(ctx).getInt("nbCover", DEFAULT_COVER)
     fun nbPageColor(ctx: Context): Int = nb(ctx).getInt("nbPageColor", Color.WHITE)
-    fun setNotebookDefaults(ctx: Context, paper: String, cover: Int, pageColor: Int) {
-        nb(ctx).edit().putString("nbPaper", paper).putInt("nbCover", cover).putInt("nbPageColor", pageColor).apply()
+    /** Covers catalog id of the last-chosen cover ("" = derive from [nbCover]). */
+    fun nbCoverStyle(ctx: Context): String = nb(ctx).getString("nbCoverStyle", "") ?: ""
+    fun setNotebookDefaults(ctx: Context, paper: String, cover: Int, coverStyle: String, pageColor: Int) {
+        nb(ctx).edit().putString("nbPaper", paper).putInt("nbCover", cover).putString("nbCoverStyle", coverStyle)
+            .putInt("nbPageColor", pageColor).apply()
     }
 
     // ---- last ink session (device-local: which notebooks were open side by side) ----
@@ -62,6 +65,7 @@ object InkSettings {
             EmailPrefs.savedEmail(ctx)?.let { o.put("savedEmail", it) }
             o.put("nbPaper", nbPaper(ctx))
             o.put("nbCover", nbCover(ctx))
+            o.put("nbCoverStyle", nbCoverStyle(ctx))
             o.put("nbPageColor", nbPageColor(ctx))
         } catch (_: Exception) { }
         return o.toString()
@@ -87,6 +91,7 @@ object InkSettings {
             val nbE = nb(ctx).edit()
             if (o.has("nbPaper")) nbE.putString("nbPaper", o.optString("nbPaper", "GRID"))
             if (o.has("nbCover")) nbE.putInt("nbCover", o.getInt("nbCover"))
+            if (o.has("nbCoverStyle")) nbE.putString("nbCoverStyle", o.optString("nbCoverStyle", ""))
             if (o.has("nbPageColor")) nbE.putInt("nbPageColor", o.getInt("nbPageColor"))
             nbE.apply()
         } catch (_: Exception) { }

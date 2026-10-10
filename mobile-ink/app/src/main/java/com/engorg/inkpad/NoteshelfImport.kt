@@ -38,12 +38,6 @@ object NoteshelfImport {
     private val PAGE_W = FinishedStrokesView.PAGE_W
     private val PAGE_H = FinishedStrokesView.PAGE_H
 
-    private val covers = intArrayOf(
-        Color.rgb(0x29, 0x47, 0xC9), Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0x89, 0x7B),
-        Color.rgb(0x2E, 0x7D, 0x32), Color.rgb(0xF5, 0x7C, 0x00), Color.rgb(0xDC, 0x26, 0x50),
-        Color.rgb(0x8E, 0x24, 0xAA), Color.rgb(0x5E, 0x35, 0xB1), Color.rgb(0x45, 0x4B, 0x55),
-    )
-
     fun importZip(
         context: Context,
         zipUri: Uri,
@@ -121,10 +115,10 @@ object NoteshelfImport {
             @Suppress("UNCHECKED_CAST")
             val pages = (doc["pages"] as? List<Any?>)?.mapNotNull { it as? Map<String, Any?> } ?: return false
 
-            val cover = covers[(title.hashCode() and Int.MAX_VALUE) % covers.size]
+            val cover = Covers.ALL[(title.hashCode() and Int.MAX_VALUE) % Covers.ALL.size]
             var pageColor = Color.WHITE
             var pageColorSet = false
-            val nb = store.createNotebook(title, folderId, cover, "PLAIN", pageColor)
+            val nb = store.createNotebook(title, folderId, cover.base, "PLAIN", pageColor, cover.id)
             nb.pageIds.clear()
 
             for (pg in pages) {

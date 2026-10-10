@@ -202,6 +202,6 @@
   const applyDesktopMode = (on) => document.body.classList.toggle('desktop-mode-active', !!on);
   if (api.desktop) {
     api.desktop.onChanged(applyDesktopMode);
-    api.desktop.status().then((s) => applyDesktopMode(s && s.active)).catch(() => {});
+    api.desktop.status().then((s) => applyDesktopMode(s && (s.here ?? s.active))).catch(() => {});
   }
 })();

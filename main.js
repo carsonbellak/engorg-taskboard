@@ -56,7 +56,8 @@ async function acquireSingleInstance() {
 }
 app.on('second-instance', () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (registerDesktopMode.isActive()) { registerDesktopMode.reveal(); return; }
+  // Desktop + normal window: a relaunch brings the (possibly hidden) normal window back.
+  if (registerDesktopMode.isActive() && !registerDesktopMode.hasSeparateWindow()) { registerDesktopMode.reveal(); return; }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -64,6 +65,68 @@ app.on('second-instance', () => {
 
 function ensureDataDir() {
   fs.mkdirSync(config.DATA_DIR, { recursive: true });
+}
+
+// Win11 acrylic: a transparent window base + DWM acrylic material, so when the Liquid
+// Glass theme fades its surfaces out the desktop shows (frosted) through the app. Other
+// themes paint an opaque body over it, so they look unchanged. No-op off Windows.
+const WINDOW_LOOK = process.platform === 'win32' ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' } : {};
+
+function webPreferences() {
+  return {
+    preload: path.join(__dirname, 'preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    // Split Window renders the app inside same-origin <iframe>s. This makes the
+    // preload (and thus window.api via contextBridge) load in those subframes too.
+    nodeIntegrationInSubFrames: true,
+    // Custom offline spell checker (ipc/spell.js + renderer/spellcheck.js) handles
+    // note fields with hover suggestions; Chromium's built-in checker is left off
+    // so the two don't double-underline.
+    spellcheck: false
+  };
+}
+
+// Per-window wiring shared by the main window and the separate desktop window.
+function wireAppWebContents(win) {
+  // Native edit context menu for editable fields (spelling is handled by the custom
+  // offline checker in the renderer, so no spelling items here).
+  win.webContents.on('context-menu', (event, params) => {
+    if (!params.isEditable) return; // non-editable right-clicks use the app's own menus
+    const menu = new Menu();
+    menu.append(new MenuItem({ role: 'cut', enabled: params.editFlags.canCut }));
+    menu.append(new MenuItem({ role: 'copy', enabled: params.editFlags.canCopy }));
+    menu.append(new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }));
+    menu.append(new MenuItem({ role: 'selectAll' }));
+    menu.popup();
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http')) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  // Keep the application menu registered (for keyboard accelerators) but hidden —
+  // the custom titlebar reproduces the menu items visually.
+  win.setMenuBarVisibility(false);
+}
+
+// Desktop mode's "keep a normal window too": a second app instance that ipc/desktop-mode.js
+// attaches to the desktop. Embedded (like a Split Window pane) so it doesn't re-run the
+// main window's background services (calendar/LMS sync, printer bridge, update checks);
+// off the taskbar, since it's the desktop rather than an app. Created hidden.
+function createDesktopWindow() {
+  const win = new BrowserWindow({
+    ...screen.getPrimaryDisplay().workArea,
+    show: false,
+    skipTaskbar: true,
+    titleBarStyle: 'hidden',
+    ...WINDOW_LOOK,
+    webPreferences: webPreferences(),
+    icon: path.join(__dirname, 'assets', 'icon.ico'),
+    title: 'Engineering Task Board — Desktop'
+  });
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { embedded: '1', desktop: '1' } });
+  wireAppWebContents(win);
+  return win;
 }
 
 function createWindow() {
@@ -81,42 +144,25 @@ function createWindow() {
     // menu bar but keep the resizable window frame. The app draws its own slim,
     // theme-aware bar with the File/Edit/View/Window menus and window controls.
     titleBarStyle: 'hidden',
-    // Win11 acrylic: a transparent window base + DWM acrylic material, so when the Liquid
-    // Glass theme fades its surfaces out the desktop shows (frosted) through the app. Other
-    // themes paint an opaque body over it, so they look unchanged. No-op off Windows.
-    ...(process.platform === 'win32' ? { backgroundColor: '#00000000', backgroundMaterial: 'acrylic' } : {}),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      // Split Window renders the app inside same-origin <iframe>s. This makes the
-      // preload (and thus window.api via contextBridge) load in those subframes too.
-      nodeIntegrationInSubFrames: true,
-      // Custom offline spell checker (ipc/spell.js + renderer/spellcheck.js) handles
-      // note fields with hover suggestions; Chromium's built-in checker is left off
-      // so the two don't double-underline.
-      spellcheck: false
-    },
+    ...WINDOW_LOOK,
+    webPreferences: webPreferences(),
     icon: path.join(__dirname, 'assets', 'icon.ico'),
     title: 'Engineering Task Board'
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  wireAppWebContents(mainWindow);
 
-  // Native edit context menu for editable fields (spelling is handled by the custom
-  // offline checker in the renderer, so no spelling items here).
-  mainWindow.webContents.on('context-menu', (event, params) => {
-    if (!params.isEditable) return; // non-editable right-clicks use the app's own menus
-    const menu = new Menu();
-    menu.append(new MenuItem({ role: 'cut', enabled: params.editFlags.canCut }));
-    menu.append(new MenuItem({ role: 'copy', enabled: params.editFlags.canCopy }));
-    menu.append(new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }));
-    menu.append(new MenuItem({ role: 'selectAll' }));
-    menu.popup();
+  // Desktop mode with "keep a normal window too": the desktop lives in its own window, so
+  // closing this one just tucks it away (a relaunch or turning desktop mode off brings it
+  // back) — it keeps running the background services. Quitting still closes it.
+  let quitting = false;
+  app.on('before-quit', () => { quitting = true; });
+  mainWindow.on('close', (e) => {
+    if (quitting || !registerDesktopMode.hasSeparateWindow()) return;
+    e.preventDefault();
+    mainWindow.hide();
   });
-  // Keep the application menu registered (for keyboard accelerators) but hidden —
-  // the custom titlebar reproduces the menu items visually.
-  mainWindow.setMenuBarVisibility(false);
 
   // ── Maximize that respects the taskbar (and keeps Liquid Glass acrylic alive) ──────
   // A native maximize on a hidden-title-bar window can spill under the taskbar, and — for
@@ -173,11 +219,6 @@ function createWindow() {
 
   mainWindow.on('maximize', () => { if (!_fitting) mainWindow.expand(); });   // double-click / snap / Win+Up
   mainWindow.on('unmaximize', () => { if (!_fitting) { mainWindow._expanded = false; mainWindow.webContents.send('win:maximized', false); } });
-
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) shell.openExternal(url);
-    return { action: 'deny' };
-  });
 
   // ── Web Serial support (UART Bridge utility) ───────────────────────────────
   // Local trusted desktop app: grant permission checks, and relay the OS serial
@@ -264,7 +305,7 @@ app.whenReady().then(async () => {
   registerFileMerger(getMainWindow);
   registerRelease();
   registerOsTheme();
-  registerDesktopMode(getMainWindow);
+  registerDesktopMode(getMainWindow, { createDesktopWindow });
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,

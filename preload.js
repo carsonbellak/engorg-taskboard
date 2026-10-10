@@ -113,6 +113,8 @@ const __api = {
   desktop: {
     status: () => ipcRenderer.invoke('desktop:status'),
     setEnabled: (on) => ipcRenderer.invoke('desktop:setEnabled', on),
+    // true = desktop runs in its own window and the normal app window stays alongside it
+    setSeparate: (on) => ipcRenderer.invoke('desktop:setSeparate', on),
     onChanged: (cb) => ipcRenderer.on('desktop:changed', (e, v) => cb(v))
   },
   // App updates — check the canonical repo for newer commits on startup

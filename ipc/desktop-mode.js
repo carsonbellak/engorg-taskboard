@@ -27,6 +27,12 @@
 // seconds (visible flashing). Also note Electron implements resizable:false as
 // min = max = the current size, so the window must be sized BEFORE it's locked.
 //
+// "Keep a normal window too" (`separate`): instead of turning the main window into the
+// desktop, a second app window (index.html?embedded=1&desktop=1 — embedded so it doesn't
+// duplicate the main window's background services) is created and attached, and the main
+// window stays a normal app window. Closing the main window then only hides it (a relaunch
+// brings it back); closing the desktop window turns desktop mode off.
+//
 // On/off is persisted by main in appdata/desktop_mode.json — device-local, never synced,
 // and never written by the renderer, so a stale renderer settings save can't re-enable it.
 
@@ -49,6 +55,10 @@ const PTR = process.arch === 'ia32' ? 4 : 8;
 const WP_FLAGS_OFFSET = PTR * 2 + 16;
 
 let getWin = null;
+let makeDeskWin = null; // main.js factory for the separate desktop window (registerDesktopMode opts)
+let deskWin = null;     // the separate desktop window, when "keep a normal window too" is on
+let separate = false;   // mirror of the persisted `separate` pref
+let quitting = false;
 let fns = null;
 let ffiBroken = false;
 let active = false;
@@ -95,6 +105,29 @@ function loadFfi() {
 
 const supported = () => process.platform === 'win32' && !!loadFfi();
 
+// The window that acts as the desktop: the main window itself, or — in "separate" mode —
+// a second, dedicated app window, so the normal app window keeps working alongside it.
+function target() {
+  if (separate) return deskWin && !deskWin.isDestroyed() ? deskWin : null;
+  return getWin && getWin();
+}
+
+// Create the separate desktop window (hidden until it has painted).
+function openDeskWin() {
+  if (deskWin && !deskWin.isDestroyed()) return Promise.resolve(deskWin);
+  if (!makeDeskWin) return Promise.resolve(null);
+  const win = makeDeskWin();
+  deskWin = win;
+  // Closing it (e.g. Window → Close from inside it) turns desktop mode off; quitting doesn't.
+  win.on('close', (e) => { if (quitting) return; e.preventDefault(); setEnabled(false); });
+  win.on('closed', () => { if (deskWin === win) deskWin = null; });
+  return new Promise((resolve) => {
+    const done = () => resolve(win.isDestroyed() ? null : win);
+    win.webContents.once('did-finish-load', done);
+    setTimeout(done, 8000);
+  });
+}
+
 // Native HWND of a BrowserWindow (the buffer holds the handle value itself).
 function hwndOf(win) {
   return readPtr(win.getNativeWindowHandle(), 0);
@@ -117,7 +150,7 @@ function isDesktopWindow(h) {
 // matches) — anything unexpected and it leaves the message untouched.
 function onWindowPosChanging(_wParam, lParam) {
   try {
-    const win = getWin && getWin();
+    const win = target();
     if (!active || !fns || !win || win.isDestroyed()) return;
     const addr = readPtr(lParam, 0);
     if (!addr) return;
@@ -167,7 +200,7 @@ const lower = (win) => { zMove(win, HWND_BOTTOM); lifted = false; };
 
 // ── Show-desktop / Explorer-restart watcher ──────────────────────────────────────────
 function tick() {
-  const win = getWin && getWin();
+  const win = target();
   if (!active || !fns || !win || win.isDestroyed()) return;
   try {
     const me = hwndOf(win);
@@ -199,9 +232,10 @@ function notify(win, on) {
   try { win.webContents.send('desktop:changed', on); } catch (_) {}
 }
 
-function attach() {
+async function attach() {
   if (!supported()) return { ok: false, error: 'Desktop mode needs Windows.' };
-  const win = getWin && getWin();
+  if (separate && !target()) await openDeskWin();
+  const win = target();
   if (!win || win.isDestroyed()) return { ok: false, error: 'No app window.' };
   if (active) { fitToWorkArea(win); return { ok: true }; }
   const progman = fns.FindWindowW('Progman', null);
@@ -222,6 +256,12 @@ function attach() {
   const me = hwndOf(win);
   setOwner(me, progman);
   fns.SetWindowPos(me, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (!win.isVisible()) {
+    // The separate desktop window starts hidden; show it without stealing focus, then
+    // park it back at the bottom in case showing nudged it up.
+    win.showInactive();
+    fns.SetWindowPos(me, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  }
   lifted = false;
   lastFg = 0;
 
@@ -251,10 +291,25 @@ function stopRuntime(win) {
 }
 
 function detach() {
-  const win = getWin && getWin();
+  const win = target();
   const wasActive = active;
   stopRuntime(win);
   active = false;
+
+  // Separate mode: the desktop window simply goes away; bring the normal window back if
+  // it was tucked away (closing it while the desktop was up only hides it).
+  if (separate) {
+    if (win && !win.isDestroyed()) win.destroy();
+    deskWin = null;
+    saved = null;
+    const main = getWin && getWin();
+    if (wasActive && main && !main.isDestroyed()) {
+      if (!main.isVisible()) main.show();
+      main.focus();
+    }
+    return { ok: true };
+  }
+
   if (!wasActive || !win || win.isDestroyed()) return { ok: true };
 
   win._desktopMode = false;
@@ -276,45 +331,80 @@ function detach() {
 }
 
 // ── Persistence (main-owned) ───────────────────────────────────────────────────────────
-function readPersisted() {
-  try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')).enabled === true; } catch (_) { return false; }
+// { enabled, separate } — `separate` = "keep a normal window too": the desktop runs in its
+// own second window instead of turning the main window into the desktop.
+function readState() {
+  try {
+    const s = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+    return { enabled: s.enabled === true, separate: s.separate === true };
+  } catch (_) { return { enabled: false, separate: false }; }
 }
-function writePersisted(on) {
-  try { fs.writeFileSync(STATE_FILE, JSON.stringify({ enabled: !!on })); }
+const readPersisted = () => readState().enabled;
+function writeState(patch) {
+  try { fs.writeFileSync(STATE_FILE, JSON.stringify({ ...readState(), ...patch })); }
   catch (e) { console.warn('[DesktopMode] could not save state:', e.message); }
 }
 
-function setEnabled(on) {
-  const res = on ? attach() : detach();
-  if (res.ok) writePersisted(!!on);
-  return { ...res, active };
+async function setEnabled(on) {
+  const res = on ? await attach() : detach();
+  if (res.ok) writeState({ enabled: !!on });
+  return { ...res, active, separate };
+}
+
+// Switch between "the app window is the desktop" and "desktop + a normal window". If
+// desktop mode is on, it's re-attached in the new arrangement right away.
+async function setSeparate(on) {
+  on = !!on;
+  if (on === separate) return { ok: true, active, separate };
+  const wasActive = active;
+  if (wasActive) detach();
+  separate = on;
+  writeState({ separate: on });
+  let res = { ok: true };
+  if (wasActive) res = await attach();
+  if (wasActive && !res.ok) writeState({ enabled: false });
+  return { ...res, active, separate };
 }
 
 // ── Registration ───────────────────────────────────────────────────────────────────────
-function registerDesktopMode(getMainWindow) {
+// opts.createDesktopWindow() → a hidden BrowserWindow for separate mode (main.js owns
+// window construction so both windows share webPreferences and handlers).
+function registerDesktopMode(getMainWindow, opts = {}) {
   getWin = getMainWindow;
+  makeDeskWin = opts.createDesktopWindow || null;
+  separate = readState().separate;
 
-  ipcMain.handle('desktop:status', () => ({ supported: supported(), active, enabled: readPersisted() }));
+  // `here` = the asking window is the one acting as the desktop (its titlebar hides the
+  // window controls); `active` = desktop mode is on at all (the Settings toggle).
+  ipcMain.handle('desktop:status', (e) => {
+    const w = target();
+    const here = active && !!w && !w.isDestroyed() && w.webContents === e.sender;
+    return { supported: supported(), active, here, enabled: readPersisted(), separate };
+  });
   ipcMain.handle('desktop:setEnabled', (_e, on) => setEnabled(!!on));
+  ipcMain.handle('desktop:setSeparate', (_e, on) => setSeparate(!!on));
 
   // Keep it fitted to the primary work area as displays / scaling / the taskbar change.
   const refit = () => {
-    const w = getWin && getWin();
+    const w = target();
     if (active && w && !w.isDestroyed()) fitToWorkArea(w);
   };
   screen.on('display-metrics-changed', refit);
   screen.on('display-added', refit);
   screen.on('display-removed', refit);
+  app.on('before-quit', () => { quitting = true; });
   app.on('will-quit', () => { try { globalShortcut.unregister(ESCAPE_ACCEL); } catch (_) {} });
 }
 
 // Called from main.js once the window exists: re-enter desktop mode if it was left on.
+// (In separate mode the desktop window is created after the main window has loaded, so
+// the main renderer — which runs the background services — boots first.)
 registerDesktopMode.startupAttach = function startupAttach() {
   if (!readPersisted() || !supported()) return;
   const win = getWin && getWin();
   if (!win) return;
-  const go = () => setTimeout(() => {
-    const r = attach();
+  const go = () => setTimeout(async () => {
+    const r = await attach();
     if (!r.ok) console.warn('[DesktopMode] startup attach failed:', r.error);
   }, 400);
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', go);
@@ -324,15 +414,17 @@ registerDesktopMode.startupAttach = function startupAttach() {
 // A second launch while in desktop mode brings the board forward (until another app
 // takes focus, when the watcher drops it back to the bottom).
 registerDesktopMode.reveal = function reveal() {
-  const win = getWin && getWin();
+  const win = target();
   if (!active || !win || win.isDestroyed()) return;
   raise(win);
   win.focus();
 };
 
 registerDesktopMode.isActive = () => active;
+// True while the desktop lives in its own window, alongside the normal app window.
+registerDesktopMode.hasSeparateWindow = () => active && separate && !!target();
 registerDesktopMode.attach = attach;
 registerDesktopMode.detach = detach;
-registerDesktopMode._debug = () => ({ lockHits, lifted, hooked, PTR, WP_FLAGS_OFFSET });
+registerDesktopMode._debug = () => ({ lockHits, lifted, hooked, PTR, WP_FLAGS_OFFSET, separate });
 
 module.exports = registerDesktopMode;

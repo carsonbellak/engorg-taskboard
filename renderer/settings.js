@@ -1136,6 +1136,11 @@ function renderSettings() {
             <span class="settings-toggle-desc">Make the app your desktop: it fills your primary monitor behind all your other windows, and “Show desktop” (Win+D) brings it forward. Click into it as usual. Ctrl+Alt+D turns it off from anywhere. Windows only.</span>
             <input type="checkbox" class="settings-checkbox" id="settings-desktop-mode">
           </label>
+          <label class="settings-toggle-row" id="settings-desktop-separate-row" style="display:none">
+            <span class="settings-toggle-label">Keep a normal window too</span>
+            <span class="settings-toggle-desc">Run the desktop in its own window so the app also stays open as a regular window at the same time. Closing the regular window just tucks it away while the desktop is on — open the app again to bring it back.</span>
+            <input type="checkbox" class="settings-checkbox" id="settings-desktop-separate">
+          </label>
           <label class="settings-toggle-row">
             <span class="settings-toggle-label">Interface</span>
             <span class="settings-toggle-desc">Classic tabs, or the organic Ecosystem tree as the whole app (the gear stays available to switch back)</span>
@@ -1550,12 +1555,24 @@ function renderSettings() {
   // this only asks main and mirrors what it reports. Hidden where unsupported (non-Windows).
   const desktopRow = document.getElementById('settings-desktop-mode-row');
   const desktopCb = document.getElementById('settings-desktop-mode');
+  const separateRow = document.getElementById('settings-desktop-separate-row');
+  const separateCb = document.getElementById('settings-desktop-separate');
   if (desktopRow && desktopCb && window.api?.desktop?.status) {
     window.api.desktop.status().then((s) => {
       if (!s || !s.supported) return;
       desktopRow.style.display = '';
       desktopCb.checked = !!s.active;
+      if (separateRow && separateCb) { separateRow.style.display = ''; separateCb.checked = !!s.separate; }
     }).catch(() => {});
+    separateCb?.addEventListener('change', async (e) => {
+      let res;
+      try { res = await window.api.desktop.setSeparate(e.target.checked); }
+      catch (err) { res = { ok: false, error: err.message }; }
+      if (res) { separateCb.checked = !!res.separate; desktopCb.checked = !!res.active; }
+      if (res && res.ok === false) {
+        window._showConfirm?.({ title: 'Desktop mode', message: 'Couldn’t switch desktop mode: ' + (res.error || 'unknown error'), confirmText: 'OK' });
+      }
+    });
     desktopCb.addEventListener('change', async (e) => {
       let res;
       try { res = await window.api.desktop.setEnabled(e.target.checked); }

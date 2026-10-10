@@ -187,8 +187,9 @@ function applyTheme(themeId) {
   document.body.dataset.style = theme.style || ''; // enables the liquid-glass CSS
 
   // Update meta theme-color
+  // (the page background, like native apps — an accent-tinted status bar looks dated)
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', theme.vars['--accent'] || '#818CF8');
+  if (meta) meta.setAttribute('content', theme.vars['--bg'] || '#0F172A');
 
   // Liquid-glass translucency (mirrors the desktop slider, synced via settings).
   applyGlassStrength();
@@ -233,7 +234,7 @@ function applyHotbar() {
   if (!nav) return;
   const printerOn = !!(data && data.settings && data.settings.printerEnabled);
   const hidden = new Set(pwaSettings.navHidden || []);
-  let visibleCount = 0;
+  const visibleIds = [];
   orderedNavIds().forEach(id => {
     const el = nav.querySelector(`.nav-item[data-navid="${id}"]`);
     if (!el) return;
@@ -241,14 +242,47 @@ function applyHotbar() {
     let visible = !hidden.has(id);
     if (id === 'printer') visible = visible && printerOn;
     el.style.display = visible ? '' : 'none';
-    if (visible) visibleCount++;
+    if (visible) visibleIds.push(id);
   });
   // Never leave the bar completely empty — fall back to Notes.
-  if (visibleCount === 0) {
+  if (visibleIds.length === 0) {
     const notes = nav.querySelector('.nav-item[data-navid="notes"]');
     if (notes) notes.style.display = '';
   }
+  // Like a native iOS tab bar: at most 5 slots. With more, the first 4 stay in the bar
+  // and the rest move under a "More" tab (a sheet), instead of a sideways-scrolling bar.
+  const more = document.getElementById('nav-more');
+  navOverflowIds = visibleIds.length > NAV_MAX_TABS ? visibleIds.slice(NAV_MAX_TABS - 1) : [];
+  navOverflowIds.forEach(id => { nav.querySelector(`.nav-item[data-navid="${id}"]`).style.display = 'none'; });
+  if (more) { nav.appendChild(more); more.classList.toggle('hidden', !navOverflowIds.length); }
+  syncNavMore();
 }
+
+const NAV_MAX_TABS = 5;
+let navOverflowIds = [];
+// The More tab lights up when the current view lives under it.
+function syncNavMore() {
+  const more = document.getElementById('nav-more');
+  if (more) more.classList.toggle('active', navOverflowIds.includes(currentView));
+}
+function openNavMore() {
+  const grid = document.getElementById('nav-more-grid');
+  grid.innerHTML = navOverflowIds.map(id => {
+    const src = document.querySelector(`.nav-item[data-navid="${id}"]`);
+    const label = PWA_NAV_ITEMS.find(n => n.id === id)?.label || id;
+    return `<button class="nav-more-tile${id === currentView ? ' active' : ''}" data-more-nav="${id}">
+      <span class="nav-more-tile-ic">${src?.querySelector('.nav-icon')?.innerHTML || ''}</span>
+      <span class="nav-more-tile-label">${escapeHtml(label)}</span></button>`;
+  }).join('');
+  document.getElementById('nav-more-overlay').classList.remove('hidden');
+}
+document.getElementById('nav-more').addEventListener('click', openNavMore);
+document.getElementById('nav-more-grid').addEventListener('click', (e) => {
+  const tile = e.target.closest('[data-more-nav]');
+  if (!tile) return;
+  closeOverlay('nav-more-overlay');
+  document.querySelector(`.nav-item[data-navid="${tile.dataset.moreNav}"]`)?.click();
+});
 
 // Keep the notes/board filter bar's Sort/Color selects in step with the saved defaults.
 function syncFilterBarSelects() {
@@ -621,6 +655,25 @@ document.querySelectorAll('.nav-item').forEach(btn => {
   });
 });
 
+// Runs after the handler above (same element, registered later), so the view has
+// already re-rendered by the time this animates it in.
+let _lastNavView = currentView;
+document.querySelectorAll('.nav-item[data-view]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const content = document.getElementById('app-content');
+    syncNavMore();
+    if (btn.dataset.view === _lastNavView) {   // re-tapping the current tab → back to top
+      content.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    _lastNavView = btn.dataset.view;
+    content.scrollTop = 0;
+    content.classList.remove('view-enter');
+    void content.offsetWidth; // restart the entrance animation
+    content.classList.add('view-enter');
+  });
+});
+
 document.getElementById('project-selector').addEventListener('change', (e) => {
   currentProject = e.target.value;
   render();
@@ -673,6 +726,7 @@ function render() {
 
   const fabViews = ['notes', 'board', 'timeline', 'calendar', 'purchases'];
   if (fab) fab.style.display = fabViews.includes(currentView) ? 'flex' : 'none';
+  document.body.classList.toggle('has-fab', fabViews.includes(currentView));
 
   const filterViews = ['notes', 'board'];
   filterBar.classList.toggle('hidden', !filterViews.includes(currentView));
@@ -1296,11 +1350,11 @@ function showNoteDetail(id) {
 }
 
 document.getElementById('btn-close-detail').addEventListener('click', () => {
-  document.getElementById('note-detail-overlay').classList.add('hidden');
+  closeOverlay('note-detail-overlay');
   editingNoteId = null;
 });
 document.getElementById('btn-edit-detail').addEventListener('click', () => {
-  document.getElementById('note-detail-overlay').classList.add('hidden');
+  document.getElementById('note-detail-overlay').classList.add('hidden'); // instant: the edit sheet replaces it
   if (editingNoteId) openAddNote(editingNoteId);
 });
 document.getElementById('btn-delete-detail').addEventListener('click', async () => {
@@ -1308,7 +1362,7 @@ document.getElementById('btn-delete-detail').addEventListener('click', async () 
   if (!confirm('Delete this note?')) return;
   data.tasks = data.tasks.filter(t => t.id !== editingNoteId);
   await saveCollection('tasks', { tasks: data.tasks });
-  document.getElementById('note-detail-overlay').classList.add('hidden');
+  closeOverlay('note-detail-overlay');
   editingNoteId = null;
   render();
 });
@@ -2162,7 +2216,7 @@ function openScheduleForm(editId = null, prefill = null) {
 }
 
 document.getElementById('btn-cancel-sched').addEventListener('click', () => {
-  document.getElementById('add-schedule-overlay').classList.add('hidden');
+  closeOverlay('add-schedule-overlay');
   editingScheduleId = null;
 });
 
@@ -2187,7 +2241,7 @@ document.getElementById('btn-save-sched').addEventListener('click', async () => 
     });
   }
   await saveCollection('schedule', { items: data.scheduleItems });
-  document.getElementById('add-schedule-overlay').classList.add('hidden');
+  closeOverlay('add-schedule-overlay');
   editingScheduleId = null;
   render();
 });
@@ -2197,7 +2251,7 @@ document.getElementById('btn-delete-sched').addEventListener('click', async () =
   if (!confirm('Delete this event?')) return;
   data.scheduleItems = data.scheduleItems.filter(i => i.id !== editingScheduleId);
   await saveCollection('schedule', { items: data.scheduleItems });
-  document.getElementById('add-schedule-overlay').classList.add('hidden');
+  closeOverlay('add-schedule-overlay');
   editingScheduleId = null;
   render();
 });
@@ -2298,7 +2352,7 @@ function openPurchaseForm(editId = null) {
 }
 
 document.getElementById('btn-cancel-purch').addEventListener('click', () => {
-  document.getElementById('add-purchase-overlay').classList.add('hidden');
+  closeOverlay('add-purchase-overlay');
   editingPurchaseId = null;
 });
 
@@ -2323,7 +2377,7 @@ document.getElementById('btn-save-purch').addEventListener('click', async () => 
     });
   }
   await saveCollection('purchases', { purchases: data.purchases });
-  document.getElementById('add-purchase-overlay').classList.add('hidden');
+  closeOverlay('add-purchase-overlay');
   editingPurchaseId = null;
   render();
 });
@@ -2333,7 +2387,7 @@ document.getElementById('btn-delete-purch').addEventListener('click', async () =
   if (!confirm('Delete this order?')) return;
   data.purchases = data.purchases.filter(i => i.id !== editingPurchaseId);
   await saveCollection('purchases', { purchases: data.purchases });
-  document.getElementById('add-purchase-overlay').classList.add('hidden');
+  closeOverlay('add-purchase-overlay');
   editingPurchaseId = null;
   render();
 });
@@ -2476,7 +2530,7 @@ document.querySelectorAll('.priority-btn').forEach(btn => {
 });
 
 document.getElementById('btn-cancel-add').addEventListener('click', () => {
-  document.getElementById('add-note-overlay').classList.add('hidden');
+  closeOverlay('add-note-overlay');
   editingNoteId = null;
 });
 
@@ -2508,7 +2562,7 @@ document.getElementById('btn-save-add').addEventListener('click', async () => {
     });
   }
   await saveCollection('tasks', { tasks: data.tasks });
-  document.getElementById('add-note-overlay').classList.add('hidden');
+  closeOverlay('add-note-overlay');
   editingNoteId = null;
   render();
 });
@@ -2749,6 +2803,10 @@ function formatPrinterTime(seconds) {
 
 // ===================== USER MENU =====================
 function updateUserMenu(user) {
+  const btn = document.getElementById('btn-user-menu');
+  if (btn && user.photoURL && !btn.querySelector('img')) {
+    btn.innerHTML = `<img src="${escapeHtml(user.photoURL)}" alt="" referrerpolicy="no-referrer">`;
+  }
   document.getElementById('user-info').innerHTML = `
     ${user.photoURL ? `<img src="${user.photoURL}" class="user-avatar">` : ''}
     <div class="user-name">${user.displayName || 'User'}</div>
@@ -2782,7 +2840,7 @@ document.getElementById('btn-new-project').addEventListener('click', () => {
 });
 
 document.getElementById('btn-cancel-new-proj').addEventListener('click', () =>
-  document.getElementById('new-project-overlay').classList.add('hidden'));
+  closeOverlay('new-project-overlay'));
 
 document.getElementById('btn-save-new-proj').addEventListener('click', async () => {
   const name = document.getElementById('new-proj-name').value.trim();
@@ -2800,20 +2858,88 @@ document.getElementById('btn-save-new-proj').addEventListener('click', async () 
   populateProjectSelector();
   currentProject = proj.id;
   document.getElementById('project-selector').value = proj.id;
-  document.getElementById('new-project-overlay').classList.add('hidden');
+  closeOverlay('new-project-overlay');
   render();
 });
 
 document.getElementById('btn-user-menu').addEventListener('click', () => document.getElementById('user-menu-overlay').classList.remove('hidden'));
-document.getElementById('btn-close-menu').addEventListener('click', () => document.getElementById('user-menu-overlay').classList.add('hidden'));
+document.getElementById('btn-close-menu').addEventListener('click', () => closeOverlay('user-menu-overlay'));
 document.getElementById('btn-signout').addEventListener('click', async () => {
-  document.getElementById('user-menu-overlay').classList.add('hidden');
+  closeOverlay('user-menu-overlay');
   await auth.signOut();
 });
 
 document.querySelectorAll('.overlay').forEach(overlay => {
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.classList.add('hidden'); });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeOverlay(overlay); });
 });
+
+// ===================== SHEETS (iOS-style present / dismiss) =====================
+// Sheets slide up via CSS when .hidden comes off. closeOverlay() slides them back down
+// before hiding (dynamic eco sheets are removed instead). Sheets can also be dragged
+// down to dismiss, like native iOS sheets.
+function closeOverlay(ov) {
+  if (typeof ov === 'string') ov = document.getElementById(ov);
+  if (!ov || ov.classList.contains('hidden') || ov.classList.contains('closing')) return;
+  const sheet = ov.querySelector('.overlay-sheet');
+  const finish = () => {
+    ov.classList.remove('closing');
+    if (sheet) { sheet.style.transition = ''; sheet.style.transform = ''; }
+    if (ov.classList.contains('eco-sheet-overlay')) ov.remove(); else ov.classList.add('hidden');
+  };
+  if (!sheet || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return finish();
+  ov.classList.add('closing');
+  sheet.style.transition = 'transform .26s cubic-bezier(.4,0,1,1)';
+  sheet.style.transform = 'translateY(110%)';
+  setTimeout(finish, 260);
+}
+
+(function enableSheetSwipeToDismiss() {
+  let drag = null;
+  // Any scroller between the touch and the sheet that isn't at its top owns the gesture.
+  const scrolledAbove = (el, sheet) => {
+    for (let n = el; n; n = n.parentElement) {
+      if (n.scrollTop > 0) return true;
+      if (n === sheet) return false;
+    }
+    return false;
+  };
+  document.addEventListener('touchstart', (e) => {
+    drag = null;
+    const sheet = e.target.closest && e.target.closest('.overlay-sheet');
+    if (!sheet || e.touches.length !== 1) return;
+    const ov = sheet.closest('.overlay');
+    if (!ov || ov.classList.contains('closing')) return;
+    if (e.target.closest('input, textarea, select, [contenteditable], .no-sheet-drag')) return;
+    drag = { sheet, ov, y0: e.touches[0].clientY, t0: Date.now(), dy: 0, active: false, target: e.target };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!drag) return;
+    const dy = e.touches[0].clientY - drag.y0;
+    if (!drag.active) {
+      if (dy < -4) { drag = null; return; }            // upward = ordinary scrolling
+      if (dy < 8) return;
+      if (scrolledAbove(drag.target, drag.sheet)) { drag = null; return; }
+      drag.active = true;
+      drag.sheet.style.transition = 'none';
+    }
+    e.preventDefault();
+    drag.dy = Math.max(0, dy);
+    drag.sheet.style.transform = `translateY(${drag.dy}px)`;
+  }, { passive: false });
+  const end = () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.active) return;
+    const velocity = d.dy / Math.max(1, Date.now() - d.t0);   // px per ms
+    if (d.dy > Math.min(140, d.sheet.offsetHeight * 0.3) || velocity > 0.6) closeOverlay(d.ov);
+    else {
+      d.sheet.style.transition = 'transform .35s cubic-bezier(.32,.72,0,1)';
+      d.sheet.style.transform = '';
+    }
+  };
+  document.addEventListener('touchend', end);
+  document.addEventListener('touchcancel', end);
+})();
 
 // ===================== PWA SETTINGS SHEET =====================
 let _psetTab = 'appearance';
@@ -2823,7 +2949,7 @@ function openPwaSettings() {
   document.getElementById('settings-overlay').classList.remove('hidden');
 }
 function closePwaSettings() {
-  document.getElementById('settings-overlay').classList.add('hidden');
+  closeOverlay('settings-overlay');
 }
 
 function renderPwaSettings() {
@@ -2899,7 +3025,7 @@ function psetHotbar() {
   }).join('');
   return `<div class="pset-section">
     <h3 class="pset-h3">Bottom bar</h3>
-    <p class="pset-hint">Pick which tabs show in the bottom navigation and their order. This device only.</p>
+    <p class="pset-hint">Pick which tabs show in the bottom bar and their order. Up to 5 fit — with more, the first 4 stay in the bar and the rest go under More. This device only.</p>
     <div class="pset-hb-list">${rows}</div>
     <button class="btn-secondary-full" id="pset-hb-reset" style="margin-top:12px">Reset to default</button>
   </div>`;
