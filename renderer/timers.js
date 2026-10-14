@@ -596,6 +596,48 @@ function _checkAlarms() {
   }
 }
 
+// Assignment reminders: one notification per assignment once it's due within
+// ASSIGNMENT_ALERT_HOURS. Fired-state is device-local (localStorage), keyed by the
+// due instant so a moved deadline re-arms. Mirrored in pwa/app.js + the server push
+// (functions/ notifyDueAssignments), which uses the same `asg-<id>` notification tag.
+const ASSIGNMENT_ALERT_HOURS = 6;
+const _ASG_ALERT_LS = 'engorg_asgAlerted';
+let _lastAsgCheck = 0;
+function _checkAssignmentsDue() {
+  const nowMs = Date.now();
+  if (nowMs - _lastAsgCheck < 60000) return;
+  _lastAsgCheck = nowMs;
+  if (typeof dataManager === 'undefined' || !Array.isArray(dataManager.tasks)) return;
+  let fired = {};
+  try { fired = JSON.parse(localStorage.getItem(_ASG_ALERT_LS) || '{}') || {}; } catch {}
+  const windowMs = ASSIGNMENT_ALERT_HOURS * 3600000;
+  const live = {};
+  let changed = false;
+  for (const t of dataManager.tasks) {
+    if (t.category !== 'assignment' || t.completed || !t.dueDate) continue;
+    const key = `${t.dueDate}T${t.dueTime || '23:59'}`;
+    const dueMs = new Date(key).getTime();
+    if (!isFinite(dueMs) || dueMs < nowMs - 3600000) continue;
+    if (fired[t.id] === key) { live[t.id] = key; continue; }
+    const left = dueMs - nowMs;
+    if (left > windowMs || left <= 0) continue;
+    live[t.id] = key; changed = true;
+    const h = Math.floor(left / 3600000), m = Math.round((left % 3600000) / 60000);
+    const proj = (dataManager.projects || []).find(p => p.id === t.projectId);
+    const due = new Date(dueMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const body = `${proj ? proj.name + ' · ' : ''}due ${due} (in ${h ? h + 'h ' : ''}${m}m)`;
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification(`📚 Due soon: ${t.title}`, { body, tag: `asg-${t.id}` });
+      } else _notify(`📚 Due soon: ${t.title}`, body);
+    } catch {}
+  }
+  // Prune entries for finished / removed assignments so the store stays small.
+  if (changed || Object.keys(fired).length !== Object.keys(live).length) {
+    try { localStorage.setItem(_ASG_ALERT_LS, JSON.stringify(live)); } catch {}
+  }
+}
+
 let _globalTimerWatch = null;
 function _ensureGlobalTimerWatch() {
   if (_globalTimerWatch) return;
@@ -607,6 +649,7 @@ function _ensureGlobalTimerWatch() {
       if (expMs && expMs <= now) _handleTimerExpiry(t);
     }
     _checkAlarms();
+    _checkAssignmentsDue();
   }, 1000);
 }
 _ensureGlobalTimerWatch();

@@ -29,8 +29,19 @@
             <path d="M7 1v11M3 5l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M1 8v8h12V8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-        </span> then <strong>Add to Home Screen</strong> for the full app experience.
+        </span> then <strong>Add to Home Screen</strong> to get assignment due alerts and the full app experience.
       </div>
+    </div>
+  </div>
+
+  <!-- One-tap "turn on alerts" prompt (shown once notifications are possible but not yet allowed) -->
+  <div id="push-banner" class="ios-install-banner push-banner hidden">
+    <button id="push-banner-dismiss" class="ios-install-close" aria-label="Not now">&times;</button>
+    <div class="ios-install-icon" aria-hidden="true">🔔</div>
+    <div class="ios-install-body">
+      <div class="ios-install-title">Never miss a deadline</div>
+      <div class="ios-install-text">Get a heads-up 6 hours before an assignment is due.</div>
+      <button id="push-banner-enable" class="timer-push-btn push-banner-btn">Turn on alerts</button>
     </div>
   </div>
 

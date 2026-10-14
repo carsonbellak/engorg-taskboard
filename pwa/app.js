@@ -366,6 +366,35 @@ async function subscribeToPush(uid) {
   }
 }
 
+// One-tap alerts prompt: browsers (iOS especially) only allow the permission request
+// from a tap, so instead of burying "Enable Notifications" in the Timers tab we float a
+// banner once push is possible. Hidden for good after a choice; "×" snoozes 3 days.
+function maybeShowPushBanner(uid) {
+  try {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || typeof Notification === 'undefined') return;
+    if (Notification.permission !== 'default') return;
+    const snooze = +localStorage.getItem('pushBannerSnoozeUntil') || 0;
+    if (Date.now() < snooze) return;
+    const banner = document.getElementById('push-banner');
+    if (!banner || banner.dataset.bound) return;
+    banner.dataset.bound = '1';
+    const show = () => {
+      if (window.appTour && window.appTour.isActive && window.appTour.isActive()) { setTimeout(show, 3000); return; }
+      if (Notification.permission === 'default') banner.classList.remove('hidden');
+    };
+    setTimeout(show, 2500);
+    document.getElementById('push-banner-dismiss').addEventListener('click', () => {
+      banner.classList.add('hidden');
+      try { localStorage.setItem('pushBannerSnoozeUntil', String(Date.now() + 3 * 86400000)); } catch (e) {}
+    });
+    document.getElementById('push-banner-enable').addEventListener('click', async () => {
+      banner.classList.add('hidden');
+      const perm = await Notification.requestPermission();
+      if (perm === 'granted') { await subscribeToPush(uid); if (currentView === 'timers') render(); }
+    });
+  } catch (e) { console.warn('push banner:', e); }
+}
+
 async function initPushNotifications(uid) {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
   if (Notification.permission === 'denied') return;
@@ -440,6 +469,7 @@ auth.onAuthStateChanged(user => {
     updateUserMenu(user);
     initPushNotifications(user.uid);
     maybeRunPwaTour();
+    maybeShowPushBanner(user.uid);
   } else {
     appScreen.classList.remove('active');
     loginScreen.classList.add('active');
@@ -3232,7 +3262,7 @@ function renderTimersPane() {
   if (!isPushGranted) {
     html += `<div class="timer-push-banner">
       <div class="timer-push-text">${isStandalone
-        ? 'Enable notifications to get alerted when timers finish.'
+        ? 'Enable notifications to get alerted when timers finish and when assignments are due within 6 hours.'
         : 'Add this app to your Home Screen first, then enable notifications for timer alerts.'}</div>
       ${isStandalone
         ? '<button class="timer-push-btn" id="btn-enable-push">Enable Notifications</button>'
@@ -3676,7 +3706,47 @@ async function pwaCheckTimersAndAlarms() {
     if (currentView === 'timers') render();
   }
 }
-setInterval(() => { pwaCheckTimersAndAlarms(); }, 1000);
+// Assignment reminders (mirrors renderer/timers.js _checkAssignmentsDue): one
+// notification per assignment once it's due within ASSIGNMENT_ALERT_HOURS while the
+// PWA is open. Shown through the service worker with the same `asg-<id>` tag the
+// server push (functions/ notifyDueAssignments) uses, so the two never stack.
+const ASSIGNMENT_ALERT_HOURS = 6;
+const ASG_ALERT_LS = 'engorg_asgAlerted';
+let lastAsgCheck = 0;
+async function pwaCheckAssignmentsDue() {
+  const nowMs = Date.now();
+  if (nowMs - lastAsgCheck < 60000) return;
+  lastAsgCheck = nowMs;
+  if (!Array.isArray(data.tasks) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  let fired = {};
+  try { fired = JSON.parse(localStorage.getItem(ASG_ALERT_LS) || '{}') || {}; } catch (e) {}
+  const windowMs = ASSIGNMENT_ALERT_HOURS * 3600000;
+  const live = {};
+  let changed = false;
+  for (const t of data.tasks) {
+    if (t.category !== 'assignment' || t.completed || !t.dueDate) continue;
+    const key = `${t.dueDate}T${t.dueTime || '23:59'}`;
+    const dueMs = new Date(key).getTime();
+    if (!isFinite(dueMs) || dueMs < nowMs - 3600000) continue;
+    if (fired[t.id] === key) { live[t.id] = key; continue; }
+    const left = dueMs - nowMs;
+    if (left > windowMs || left <= 0) continue;
+    live[t.id] = key; changed = true;
+    const h = Math.floor(left / 3600000), m = Math.round((left % 3600000) / 60000);
+    const proj = getProjectName(t.projectId);
+    const due = new Date(dueMs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const title = `📚 Due soon: ${t.title}`;
+    const opts = { body: `${proj ? proj + ' · ' : ''}due ${due} (in ${h ? h + 'h ' : ''}${m}m)`, tag: `asg-${t.id}`, icon: '/icon-192.svg', data: { url: '/' } };
+    try {
+      const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+      if (reg) await reg.showNotification(title, opts); else new Notification(title, opts);
+    } catch (e) {}
+  }
+  if (changed || Object.keys(fired).length !== Object.keys(live).length) {
+    try { localStorage.setItem(ASG_ALERT_LS, JSON.stringify(live)); } catch (e) {}
+  }
+}
+setInterval(() => { pwaCheckTimersAndAlarms(); pwaCheckAssignmentsDue(); }, 1000);
 
 // ===================== ECOSYSTEM (branched view — PWA mirror) =====================
 // Reflects the desktop "Ecosystem" canvas from the synced settings.ecosystem tree.

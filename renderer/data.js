@@ -72,6 +72,13 @@ class DataManager {
       settingsNeedsSave = true;
     }
 
+    // Record this device's IANA time zone so the server-side assignment reminder
+    // (functions/ notifyDueAssignments) can resolve local dueDate+dueTime to an instant.
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (tz && this.settings.timeZone !== tz) { this.settings.timeZone = tz; settingsNeedsSave = true; }
+    } catch {}
+
     // Load user categories into global APP_CATEGORIES
     if (this.settings.categories && this.settings.categories.length > 0) {
       APP_CATEGORIES = this.settings.categories;

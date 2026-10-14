@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v25';
+const CACHE_NAME = 'engorg-v26';
 // VAPID public key — must match the value set in Firebase secrets and app.js
 const VAPID_PUBLIC_KEY = 'BDmHi7C-yoOita_aL7JFADc18CiVCcn0Jw43XPIQZ_4Bu4J279M1PgRnktePqsJh_-UGkhikhwnnUOdUsBEeQhM';
 const ASSETS = [
@@ -39,7 +39,7 @@ self.addEventListener('push', event => {
     body: data.body || 'Your timer has finished.',
     icon: '/icon-192.svg',
     badge: '/icon-192.svg',
-    tag: data.timerId || 'timer',
+    tag: data.tag || data.timerId || 'timer',
     renotify: false,
     requireInteraction: true,
     data: { timerId: data.timerId, url: data.url || '/' },
@@ -74,7 +74,7 @@ self.addEventListener('notificationclick', event => {
           return client.focus();
         }
       }
-      return clients.openWindow('/#timers');
+      return clients.openWindow(event.notification.data?.url || '/#timers');
     })
   );
 });

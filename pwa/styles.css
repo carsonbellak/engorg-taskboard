@@ -2327,6 +2327,7 @@ body.theme-light .board-column, body.theme-light .stat-card {
   -webkit-backdrop-filter: saturate(180%) blur(24px); backdrop-filter: saturate(180%) blur(24px);
 }
 img.ios-install-icon { object-fit: cover; border-radius: 22.5%; }
+.push-banner-btn { margin-top: 10px; }
 
 @media (prefers-reduced-motion: reduce) {
   .overlay, .overlay-sheet, #app-content.view-enter { animation: none; }
