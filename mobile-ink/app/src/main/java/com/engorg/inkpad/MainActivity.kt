@@ -106,10 +106,14 @@ class MainActivity : ComponentActivity() {
                                 EmailPrefs.saveAccounts(this@MainActivity, accounts)
                                 // Adopt the ink-app preferences saved on the user's profile (pen,
                                 // default email, new-notebook defaults) so they're the same on
-                                // every Android device.
+                                // every Android device. If this device changed them more recently
+                                // (e.g. the app was killed in Ink before onResume could push), keep
+                                // the local prefs and push them up instead of pulling the stale copy.
                                 view.evaluateJavascript(INK_SETTINGS_JS) { settings ->
-                                    InkSettings.applyJson(this@MainActivity, settings)
-                                    lastSyncedInkSettings = InkSettings.toJson(this@MainActivity)
+                                    val applied = InkSettings.applyJson(this@MainActivity, settings)
+                                    val cur = InkSettings.toJson(this@MainActivity)
+                                    lastSyncedInkSettings = cur
+                                    if (!applied) pushInkSettings(cur)
                                     startActivity(Intent(this@MainActivity, LibraryActivity::class.java))
                                 }
                             }
@@ -171,11 +175,12 @@ class MainActivity : ComponentActivity() {
         val cur = InkSettings.toJson(this)
         if (cur != last) {
             lastSyncedInkSettings = cur
-            web.evaluateJavascript(
-                "window.__saveInkSettings && window.__saveInkSettings(${JSONObject.quote(cur)})",
-                null,
-            )
+            pushInkSettings(cur)
         }
+    }
+
+    private fun pushInkSettings(json: String) {
+        web.evaluateJavascript("window.__saveInkSettings && window.__saveInkSettings(${JSONObject.quote(json)})", null)
     }
 
     override fun onDestroy() {

@@ -25,6 +25,18 @@ object InkSettings {
 
     val DEFAULT_COVER = Color.rgb(0x29, 0x47, 0xC9)
 
+    // When the synced prefs were last changed (epoch ms). Travels in the blob as "modifiedAt" so a
+    // stale profile copy never overwrites newer on-device changes — e.g. when the app was killed
+    // inside Ink before MainActivity.onResume could push them, the next open used to pull the old
+    // profile pen back over the user's latest choice.
+    private const val MODIFIED_AT = "syncModifiedAt"
+    private fun modifiedAt(ctx: Context): Long = ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).getLong(MODIFIED_AT, 0L)
+    private fun setModifiedAt(ctx: Context, at: Long) {
+        ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).edit().putLong(MODIFIED_AT, at).apply()
+    }
+    /** Call whenever the user changes a synced pref on this device. */
+    fun markChanged(ctx: Context) = setModifiedAt(ctx, System.currentTimeMillis())
+
     // ---- new-notebook defaults (remembered so the create dialog reuses your last choice) ----
     private fun nb(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     fun nbPaper(ctx: Context): String = nb(ctx).getString("nbPaper", "GRID") ?: "GRID"
@@ -35,6 +47,7 @@ object InkSettings {
     fun setNotebookDefaults(ctx: Context, paper: String, cover: Int, coverStyle: String, pageColor: Int) {
         nb(ctx).edit().putString("nbPaper", paper).putInt("nbCover", cover).putString("nbCoverStyle", coverStyle)
             .putInt("nbPageColor", pageColor).apply()
+        markChanged(ctx)
     }
 
     // ---- last ink session (device-local: which notebooks were open side by side) ----
@@ -60,13 +73,14 @@ object InkSettings {
         try {
             if (ink.contains("brushSize")) o.put("brushSize", ink.getFloat("brushSize", 2f).toDouble())
             if (ink.contains("brushColor")) o.put("brushColor", ink.getInt("brushColor", 0))
-            if (ink.contains("smoothing")) o.put("smoothing", ink.getFloat("smoothing", 0.35f).toDouble())
+            if (ink.contains("smoothing")) o.put("smoothing", ink.getFloat("smoothing", 0.1f).toDouble())
             if (ink.contains("brush")) o.put("brush", ink.getString("brush", "PEN"))
             EmailPrefs.savedEmail(ctx)?.let { o.put("savedEmail", it) }
             o.put("nbPaper", nbPaper(ctx))
             o.put("nbCover", nbCover(ctx))
             o.put("nbCoverStyle", nbCoverStyle(ctx))
             o.put("nbPageColor", nbPageColor(ctx))
+            modifiedAt(ctx).takeIf { it > 0L }?.let { o.put("modifiedAt", it) }
         } catch (_: Exception) { }
         return o.toString()
     }
@@ -74,13 +88,17 @@ object InkSettings {
     /**
      * Apply a synced JSON blob (from the profile, via the WebView bridge) into the on-device prefs.
      * [json] is what `WebView.evaluateJavascript` returns — a JSON-encoded string holding the blob.
+     * Returns false when the on-device prefs are newer than the profile copy (nothing applied) —
+     * the caller should then push the local prefs up instead.
      */
-    fun applyJson(ctx: Context, json: String?) {
-        if (json.isNullOrBlank() || json == "null") return
+    fun applyJson(ctx: Context, json: String?): Boolean {
+        if (json.isNullOrBlank() || json == "null") return modifiedAt(ctx) == 0L
         try {
             val inner = (JSONTokener(json).nextValue() as? String) ?: json
-            if (inner.isBlank() || inner == "null" || inner == "{}") return
+            if (inner.isBlank() || inner == "null" || inner == "{}") return modifiedAt(ctx) == 0L
             val o = JSONObject(inner)
+            val remoteAt = o.optLong("modifiedAt", 0L)
+            if (modifiedAt(ctx) > remoteAt) return false
             val inkE = ctx.getSharedPreferences(INK_PREFS, Context.MODE_PRIVATE).edit()
             if (o.has("brushSize")) inkE.putFloat("brushSize", o.getDouble("brushSize").toFloat())
             if (o.has("brushColor")) inkE.putInt("brushColor", o.getInt("brushColor"))
@@ -94,6 +112,8 @@ object InkSettings {
             if (o.has("nbCoverStyle")) nbE.putString("nbCoverStyle", o.optString("nbCoverStyle", ""))
             if (o.has("nbPageColor")) nbE.putInt("nbPageColor", o.getInt("nbPageColor"))
             nbE.apply()
+            setModifiedAt(ctx, remoteAt)
         } catch (_: Exception) { }
+        return true
     }
 }

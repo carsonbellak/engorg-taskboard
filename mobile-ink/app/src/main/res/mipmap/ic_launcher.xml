@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Legacy launcher icon (Android 7.x) — a direct port of pwa/icon-512.svg. Android 8+ uses the adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="512" android:viewportHeight="512">
+    <path android:pathData="M96,0h320a96,96 0 0 1 96,96v320a96,96 0 0 1 -96,96h-320a96,96 0 0 1 -96,-96v-320a96,96 0 0 1 96,-96z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="0" android:startY="0" android:endX="512" android:endY="512">
+                <item android:offset="0" android:color="#FF6366F1" />
+                <item android:offset="1" android:color="#FFA78BFA" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <group android:translateX="256" android:translateY="256">
+        <path android:fillColor="#FFFFFF" android:fillType="evenOdd" android:pathData="M0,-138a138,138 0 0 1 0,276a138,138 0 0 1 0,-276zM0,-96a96,96 0 0 0 0,192a96,96 0 0 0 0,-192z" />
+        <group android:rotation="0"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="45"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="90"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="135"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="180"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="225"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="270"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+        <group android:rotation="315"><path android:fillColor="#FFFFFF" android:pathData="M-12,-165h24a10,10 0 0 1 10,10v34a10,10 0 0 1 -10,10h-24a10,10 0 0 1 -10,-10v-34a10,10 0 0 1 10,-10z" /></group>
+    </group>
+</vector>

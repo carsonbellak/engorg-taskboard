@@ -56,7 +56,7 @@ class InkActivity : ComponentActivity() {
     private var brushColor = Color.rgb(0x16, 0x1A, 0x22)
     private var brushSize = 2f
     private var brush = Brush.PEN
-    private var smoothing = 0.3f    // 0 = off, 1 = max; the slider spans a deliberately gentle range
+    private var smoothing = 0.1f    // 0 = off, 1 = max; the slider spans a deliberately gentle range
     private var pendingShape: ShapeType? = null
     private var pendingShapeDashed = false   // arm shapes with a dashed outline (e.g. system boundaries)
 
@@ -774,6 +774,7 @@ class InkActivity : ComponentActivity() {
             .putFloat("brushSize", brushSize).putInt("brushColor", brushColor)
             .putFloat("smoothing", smoothing).putString("brush", brush.name)
             .putBoolean("shapeDashed", pendingShapeDashed).apply()
+        InkSettings.markChanged(this)
     }
 
     // ---------- PDF export + email ----------
@@ -815,12 +816,12 @@ class InkActivity : ComponentActivity() {
             window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
         }
         val saved = EmailPrefs.savedEmail(this)
-        for (acc in accounts) col.addView(accountTile(acc, acc.email == saved) { EmailPrefs.setSavedEmail(this, acc.email); dialog.dismiss(); onPick(acc.email) })
+        for (acc in accounts) col.addView(accountTile(acc, acc.email == saved) { EmailPrefs.setSavedEmail(this, acc.email); InkSettings.markChanged(this); dialog.dismiss(); onPick(acc.email) })
         col.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(6), dp(14), dp(6), dp(6))
             addView(ImageView(this@InkActivity).apply { setImageBitmap(Icons.bitmap(Icons.ADD, dp(22))); setColorFilter(AppTheme.accent); layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)) })
-            setOnClickListener { dialog.dismiss(); promptEmail { e -> EmailPrefs.setSavedEmail(this@InkActivity, e); onPick(e) } }
+            setOnClickListener { dialog.dismiss(); promptEmail { e -> EmailPrefs.setSavedEmail(this@InkActivity, e); InkSettings.markChanged(this@InkActivity); onPick(e) } }
         })
         dialog.show()
     }
