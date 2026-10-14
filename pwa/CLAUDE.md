@@ -7,6 +7,8 @@ A leaner parallel implementation of the desktop app, hosted on Firebase Hosting 
 It is one file split by banner comments. Grep `// ===================== <NAME>` to jump to a section:
 `NATIVE INK APP SETTINGS BRIDGE` · `iOS "ADD TO HOME SCREEN" BANNER` · `THEMES` · `PWA-LOCAL SETTINGS` · `PUSH NOTIFICATIONS` · `STATE` · `AUTH` · `FIRESTORE LISTENERS` · `SAVE TO FIRESTORE` · `NAVIGATION` · `FILTERS` · `RENDER` · `NOTES VIEW` · `BOARD VIEW` · `NOTE DETAIL` · `TIMELINE VIEW` · `CALENDAR VIEW` (sub-sections `── MONTH/WEEK/DAY/AGENDA VIEW`) · `SCHEDULE CRUD` · `PURCHASES VIEW` · `PURCHASE CRUD` · `STATS VIEW` · `ADD/EDIT NOTE` · `PRINTER VIEW` · `USER MENU` · `NEW PROJECT` · `SHEETS` · `PWA SETTINGS SHEET` · `TIMERS VIEW` (`── PWA Alarms/Stopwatch/always-on watcher`) · `ECOSYSTEM`.
 
+**EngInk is Android-only.** There is no web ink page. The `ink` nav tab exists only inside the Android shell (`NATIVE_AUTH`): it navigates to `ink.html`, which `mobile-ink` `MainActivity` intercepts to launch native ink, so that page is never served. In a browser the tab is removed. Keep the `NATIVE INK APP SETTINGS BRIDGE`, because the Android app uses it.
+
 Desktop counterparts worth knowing: sticky-note palette + `sourceLogoSvg` mirror `renderer/components/sticky-note.js`; `projectOptionGroups()` renders project groups as `<optgroup>`s; `mountEcosystem` is the read/open-only Ecosystem mirror; `tour.js` is a **verbatim** copy of `renderer/tour.js`.
 
 ## PWA-only settings (no desktop mirror needed)
@@ -14,6 +16,8 @@ Desktop counterparts worth knowing: sticky-note palette + `sourceLogoSvg` mirror
 Stored in their own Firestore doc **`users/{uid}/data/pwaSettings`** — never inside the shared `settings` doc, because the desktop uploads settings with a full `.set()` (no merge) that would wipe any PWA key. Code: `pwaSettings` + `PWA_SETTINGS_DEFAULTS` + `PWA_NAV_ITEMS`, `applyAppearance()`/`effectiveTheme()` (PWA theme wins, else desktop's when `theme:'sync'`), `applyHotbar()` (reorders `.nav-item[data-navid]`), `savePwaSettings()`, localStorage cache `engorg_pwa_settings`.
 
 ## Deploying (manual — CI does not)
+
+**Only as part of a ship the user asked for in their latest message** (root CLAUDE.md → HARD RULE). Never deploy on your own initiative. The shared-state gate hook blocks `firebase deploy` otherwise.
 
 The `FIREBASE_SERVICE_ACCOUNT` secret is not set, so a release does **not** update the live PWA. After any release that touches `pwa/`:
 

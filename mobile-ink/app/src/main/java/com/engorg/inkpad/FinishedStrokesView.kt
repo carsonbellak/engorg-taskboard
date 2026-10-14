@@ -43,6 +43,9 @@ class FinishedStrokesView(context: Context) : View(context) {
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
 
+    /** Actions in the floating menu over a selection (or the lone Paste pill after an empty tap). */
+    enum class MenuAction(val label: String) { CUT("Cut"), COPY("Copy"), PASTE("Paste"), DUPLICATE("Duplicate"), DELETE("Delete") }
+
     companion object {
         const val PAGE_W = 816f   // 8.5in * 96
         const val PAGE_H = 1056f  // 11in  * 96
@@ -275,6 +278,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     var backdrop = Color.rgb(0xE9, 0xEA, 0xEC)
     var accent = Color.rgb(0x81, 0x8C, 0xF8)
     var textColor = Color.rgb(0x3A, 0x41, 0x4E)
+    var menuBg = Color.rgb(0xEE, 0xF0, 0xF4)
     var showAddPage = true
     private var addRectScreen: RectF? = null
     fun addPageRectScreen(): RectF? = addRectScreen
@@ -287,6 +291,13 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var selBox: RectF? = null
     private var vertexHandles: List<PointF>? = null
     private var lasso: List<PointF>? = null
+    private var selMenu: List<MenuAction> = emptyList()
+    private var pasteMenuPage = -1
+    private val pasteMenuAt = PointF()
+    private val menuHits = ArrayList<Pair<MenuAction, RectF>>()   // screen-space, rebuilt every draw
+
+    private val density = resources.displayMetrics.density
+    private fun dpf(v: Float) = v * density
 
     private val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val paperPaint = Paint().apply { isAntiAlias = true }
@@ -297,10 +308,11 @@ class FinishedStrokesView(context: Context) : View(context) {
     private val handleFill = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.WHITE }
     private val handleStroke = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f }
     private val lassoPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(8f, 6f), 0f) }
-    private val delPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(0xE5, 0x3E, 0x3E) }
-    private val delX = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; color = Color.WHITE }
-    private val dupFill = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
-    private val dupGlyph = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2.2f; color = Color.WHITE; strokeJoin = Paint.Join.ROUND }
+    private val selFill = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    private val menuPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
+    private val menuShadow = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.argb(60, 0, 0, 0) }
+    private val menuDivider = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 1f }
+    private val menuText = Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
     private val addTilePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 3f; pathEffect = DashPathEffect(floatArrayOf(16f, 12f), 0f) }
     private val addTileText = Paint().apply { isAntiAlias = true; textAlign = Paint.Align.CENTER; typeface = android.graphics.Typeface.DEFAULT_BOLD }
 
@@ -310,9 +322,34 @@ class FinishedStrokesView(context: Context) : View(context) {
     fun docHeight(): Float = if (pages.isEmpty()) PAGE_H else pages.size * (PAGE_H + GAP) - GAP
     fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
-    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?) { selPage = page; selBox = box; vertexHandles = handles; invalidate() }
-    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; invalidate() }
+    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>) {
+        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; invalidate()
+    }
+    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); pasteMenuPage = -1; menuHits.clear(); invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
+
+    /** Show a lone "Paste" pill anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
+    fun showPasteMenu(page: Int, x: Float, y: Float) { pasteMenuPage = page; pasteMenuAt.set(x, y); invalidate() }
+    fun pasteMenuShowing() = pasteMenuPage >= 0
+    fun pasteMenuAnchor(): Pair<Int, PointF>? = if (pasteMenuPage >= 0) pasteMenuPage to PointF(pasteMenuAt.x, pasteMenuAt.y) else null
+
+    /** The floating-menu action under a screen point, if any (hit rects are padded for fingers). */
+    fun menuActionAt(x: Float, y: Float): MenuAction? = menuHits.firstOrNull { it.second.contains(x, y) }?.first
+
+    /**
+     * The selection box as drawn on screen: the strokes' bounds padded a little and grown to a
+     * minimum size, so a thin line or a dot still gets a box you can actually land a finger in.
+     * PageCanvas hit-tests against this same rect so what you see is what you can grab.
+     */
+    fun selectionScreenRect(): RectF? {
+        val box = selBox ?: return null
+        val r = RectF(sx(selPage, box.left), sy(selPage, box.top), sx(selPage, box.right), sy(selPage, box.bottom))
+        r.inset(-dpf(6f), -dpf(6f))
+        val min = dpf(48f)
+        if (r.width() < min) r.inset(-(min - r.width()) / 2f, 0f)
+        if (r.height() < min) r.inset(0f, -(min - r.height()) / 2f)
+        return r
+    }
 
     fun eraseNear(page: Int, x: Float, y: Float, radius: Float): Boolean {
         if (page < 0 || page >= pages.size) return false
@@ -455,33 +492,59 @@ class FinishedStrokesView(context: Context) : View(context) {
                 canvas.drawPath(p, lassoPaint)
             }
         }
-        val box = selBox ?: return
+        menuHits.clear()
+        if (pasteMenuPage >= 0) {
+            val px = sx(pasteMenuPage, pasteMenuAt.x); val py = sy(pasteMenuPage, pasteMenuAt.y)
+            drawMenu(canvas, listOf(MenuAction.PASTE), px, py - dpf(14f), py + dpf(14f))
+        }
+        val rect = selectionScreenRect() ?: return
         selPaint.color = accent; handleStroke.color = accent
-        val l = sx(selPage, box.left); val t = sy(selPage, box.top)
-        val r = sx(selPage, box.right); val b = sy(selPage, box.bottom)
-        canvas.drawRect(l, t, r, b, selPaint)
-        val hr = 11f
-        for (c in listOf(floatArrayOf(l, t), floatArrayOf(r, t), floatArrayOf(r, b), floatArrayOf(l, b))) {
+        handleStroke.strokeWidth = dpf(1.5f)
+        // Faint tint inside the box so it reads as one grabbable object, not just a dashed outline.
+        selFill.color = Color.argb(0x1A, Color.red(accent), Color.green(accent), Color.blue(accent))
+        canvas.drawRect(rect, selFill)
+        canvas.drawRect(rect, selPaint)
+        val hr = dpf(8f)
+        for (c in listOf(floatArrayOf(rect.left, rect.top), floatArrayOf(rect.right, rect.top), floatArrayOf(rect.right, rect.bottom), floatArrayOf(rect.left, rect.bottom))) {
             canvas.drawCircle(c[0], c[1], hr, handleFill); canvas.drawCircle(c[0], c[1], hr, handleStroke)
         }
-        val dcx = r + 20f; val dcy = t - 20f
-        canvas.drawCircle(dcx, dcy, 15f, delPaint)
-        canvas.drawLine(dcx - 6, dcy - 6, dcx + 6, dcy + 6, delX)
-        canvas.drawLine(dcx - 6, dcy + 6, dcx + 6, dcy - 6, delX)
-        // Duplicate handle (accent circle + copy glyph) stacked just below the delete handle.
-        val ncx = r + 20f; val ncy = t + 18f
-        dupFill.color = accent
-        canvas.drawCircle(ncx, ncy, 15f, dupFill)
-        // Back square (offset up-right), then the front square filled with the accent so it reads
-        // as sitting on top, both outlined in white → a standard "copy/duplicate" icon.
-        canvas.drawRect(ncx - 2f, ncy - 8f, ncx + 8f, ncy + 2f, dupGlyph)
-        canvas.drawRect(ncx - 8f, ncy - 2f, ncx + 2f, ncy + 8f, dupFill)
-        canvas.drawRect(ncx - 8f, ncy - 2f, ncx + 2f, ncy + 8f, dupGlyph)
         vertexHandles?.let { hs ->
             for (h in hs) {
                 val hx = sx(selPage, h.x); val hy = sy(selPage, h.y)
-                canvas.drawCircle(hx, hy, 12f, handleFill); canvas.drawCircle(hx, hy, 12f, handleStroke)
+                canvas.drawCircle(hx, hy, dpf(9f), handleFill); canvas.drawCircle(hx, hy, dpf(9f), handleStroke)
             }
+        }
+        // Sit the menu clear of the corner handles' touch zones (above the box, or below if no room).
+        if (selMenu.isNotEmpty()) drawMenu(canvas, selMenu, rect.centerX(), rect.top - dpf(28f), rect.bottom + dpf(28f))
+    }
+
+    /**
+     * A rounded pill of text buttons whose bottom edge sits at [aboveY] (or whose top sits at
+     * [belowY] when there's no room above), clamped on-screen so it stays reachable when zoomed in.
+     * Records each button's padded hit rect in [menuHits].
+     */
+    private fun drawMenu(canvas: Canvas, actions: List<MenuAction>, cx: Float, aboveY: Float, belowY: Float) {
+        menuText.textSize = dpf(14f)
+        val padH = dpf(14f); val h = dpf(40f); val margin = dpf(8f)
+        val widths = actions.map { menuText.measureText(it.label) + padH * 2f }
+        val total = widths.sum()
+        var top = aboveY - h
+        if (top < margin) top = belowY
+        top = top.coerceIn(margin, (height - h - margin).coerceAtLeast(margin))
+        var left = (cx - total / 2f).coerceIn(margin, (width - total - margin).coerceAtLeast(margin))
+        val rr = h / 2f
+        canvas.drawRoundRect(left + dpf(1f), top + dpf(2f), left + total + dpf(1f), top + h + dpf(2f), rr, rr, menuShadow)
+        menuPaint.color = menuBg
+        canvas.drawRoundRect(left, top, left + total, top + h, rr, rr, menuPaint)
+        menuDivider.color = Color.argb(0x30, Color.red(textColor), Color.green(textColor), Color.blue(textColor))
+        val baseline = top + h / 2f - (menuText.descent() + menuText.ascent()) / 2f
+        for ((i, a) in actions.withIndex()) {
+            val w = widths[i]
+            if (i > 0) canvas.drawLine(left, top + h * 0.25f, left, top + h * 0.75f, menuDivider)
+            menuText.color = if (a == MenuAction.DELETE) Color.rgb(0xE5, 0x3E, 0x3E) else textColor
+            canvas.drawText(a.label, left + w / 2f, baseline, menuText)
+            menuHits.add(a to RectF(left, top - dpf(4f), left + w, top + h + dpf(4f)))
+            left += w
         }
     }
 }

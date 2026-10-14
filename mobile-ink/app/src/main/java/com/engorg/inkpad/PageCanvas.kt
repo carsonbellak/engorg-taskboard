@@ -14,6 +14,7 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -74,7 +75,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     var mirror: MirrorSink? = null
 
     val finishedView = FinishedStrokesView(context).apply {
-        backdrop = AppTheme.bg; accent = AppTheme.accent; textColor = AppTheme.text
+        backdrop = AppTheme.bg; accent = AppTheme.accent; textColor = AppTheme.text; menuBg = AppTheme.elevated
     }
     private val wetOverlay = WetOverlay(context)
     private val eraserOverlay = EraserOverlay(context)
@@ -139,12 +140,25 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private val dragStartBox = RectF()
     private var dragStartRecs = ArrayList<FinishedStrokesView.Rec>()
     private val lassoScreen = ArrayList<PointF>()
+    // What was selected before a lasso began — restored if that "lasso" turns out to be the first
+    // finger of a pinch, so zooming never drops the selection.
+    private var preLassoPage = -1
+    private val preLassoRecs = ArrayList<FinishedStrokesView.Rec>()
+    private var preLassoHadUi = false
+    // The selection as it was when a move/resize/vertex drag began (for reverting on a pinch).
+    private var gestureStartRecs = ArrayList<FinishedStrokesView.Rec>()
 
     private val undoStack = ArrayList<List<List<FinishedStrokesView.Rec>>>()
     private val redoStack = ArrayList<List<List<FinishedStrokesView.Rec>>>()
 
     lateinit var notebook: NotebookStore.Notebook
         private set
+
+    companion object {
+        /** In-app ink clipboard (page-local recs), shared by every pane so you can copy in one
+         *  notebook and paste into the split-view one. Recs are immutable, so sharing is safe. */
+        private val clipboard = ArrayList<FinishedStrokesView.Rec>()
+    }
 
     init {
         scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -426,6 +440,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 val idx = event.actionIndex
                 activePointerId = event.getPointerId(idx)
                 undoPushedThisGesture = false
+                // The floating Cut/Copy/Paste menu wins over every tool (a shape just drawn with the
+                // pen is selected too, so its menu must work without switching to the lasso).
+                finishedView.menuActionAt(event.getX(idx), event.getY(idx))?.let { a ->
+                    mode = Mode.NONE; runMenuAction(a); return true
+                }
                 if (finishedView.addPageRectScreen()?.contains(event.getX(idx), event.getY(idx)) == true) {
                     addArmed = true; mode = Mode.NONE; lastPanX = event.getX(idx); lastPanY = event.getY(idx); return true
                 }
@@ -437,6 +456,27 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     Mode.SELECT -> beginSelect(event.getX(idx), event.getY(idx))
                     else -> {}
                 }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second finger means pinch/pan. Undo whatever the first finger started (a lasso,
+                // or nudging the selection) so zooming keeps the selection exactly as it was.
+                addArmed = false
+                // Finger + finger only — a palm landing mid stylus-lasso must not cancel it.
+                val first = event.findPointerIndex(activePointerId)
+                if (mode == Mode.SELECT && first >= 0 && event.getToolType(first) == MotionEvent.TOOL_TYPE_FINGER &&
+                    event.getToolType(event.actionIndex) == MotionEvent.TOOL_TYPE_FINGER) {
+                    abortSelectGesture(); mode = Mode.PAN
+                }
+                return true
+            }
+            MotionEvent.ACTION_POINTER_UP -> {
+                // Keep panning with whichever finger is still down, from where it is now (no jump).
+                if (mode != Mode.PAN) return true   // never hand a stylus stroke/lasso over to a palm
+                val up = event.actionIndex
+                if (event.getPointerId(up) == activePointerId) activePointerId = event.getPointerId(if (up == 0) 1 else 0)
+                val idx = event.findPointerIndex(activePointerId)
+                if (idx >= 0) { lastPanX = event.getX(idx); lastPanY = event.getY(idx) }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -510,36 +550,64 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val box = selBox
         if (box == null || selRecs.isEmpty()) { finishedView.clearSelection(); return }
         val handles = if (selRecs.size == 1 && selRecs[0].shape != null) selRecs[0].shape!!.handles else null
-        finishedView.setSelection(selPage, box, handles)
+        val menu = ArrayList<FinishedStrokesView.MenuAction>()
+        menu.add(FinishedStrokesView.MenuAction.CUT); menu.add(FinishedStrokesView.MenuAction.COPY)
+        if (clipboard.isNotEmpty()) menu.add(FinishedStrokesView.MenuAction.PASTE)
+        menu.add(FinishedStrokesView.MenuAction.DUPLICATE); menu.add(FinishedStrokesView.MenuAction.DELETE)
+        finishedView.setSelection(selPage, box, handles, menu)
     }
 
     private fun beginSelect(sx: Float, sy: Float) {
-        val box = selBox
-        if (box != null && selRecs.isNotEmpty()) {
-            val dcx = screenX(box.right) + 20f; val dcy = screenY(selPage, box.top) - 20f
-            if (hypot(sx - dcx, sy - dcy) <= 26f) { deleteSelection(); return }
-            val ncx = screenX(box.right) + 20f; val ncy = screenY(selPage, box.top) + 18f
-            if (hypot(sx - ncx, sy - ncy) <= 24f) { duplicateSelection(); return }
+        val rect = finishedView.selectionScreenRect()
+        if (rect != null && selRecs.isNotEmpty()) {
+            // Touch targets are in dp so they stay finger-sized on a high-density tablet.
+            val handleR = dp(22).toFloat()
             if (selRecs.size == 1 && selRecs[0].shape != null) {
                 val hs = selRecs[0].shape!!.handles
-                for (i in hs.indices) if (hypot(sx - screenX(hs[i].x), sy - screenY(selPage, hs[i].y)) <= 30f) {
-                    grab = Grab.VERTEX; grabVertex = i; pushUndo(); dragStartRecs = ArrayList(selRecs); return
+                for (i in hs.indices) if (hypot(sx - screenX(hs[i].x), sy - screenY(selPage, hs[i].y)) <= handleR) {
+                    grab = Grab.VERTEX; grabVertex = i; pushUndo(); dragStartRecs = ArrayList(selRecs); gestureStartRecs = ArrayList(selRecs); return
                 }
             }
-            val corners = arrayOf(floatArrayOf(box.left, box.top), floatArrayOf(box.right, box.top), floatArrayOf(box.right, box.bottom), floatArrayOf(box.left, box.bottom))
-            for (i in corners.indices) if (hypot(sx - screenX(corners[i][0]), sy - screenY(selPage, corners[i][1])) <= 30f) {
-                grab = Grab.RESIZE; grabCorner = i; pushUndo()
-                dragStartBox.set(box); dragStartRecs = ArrayList(selRecs)
+            val corners = arrayOf(floatArrayOf(rect.left, rect.top), floatArrayOf(rect.right, rect.top), floatArrayOf(rect.right, rect.bottom), floatArrayOf(rect.left, rect.bottom))
+            var bestCorner = -1; var bestD = handleR
+            for (i in corners.indices) { val d = hypot(sx - corners[i][0], sy - corners[i][1]); if (d <= bestD) { bestD = d; bestCorner = i } }
+            if (bestCorner >= 0) {
+                grab = Grab.RESIZE; grabCorner = bestCorner; pushUndo()
+                dragStartBox.set(selBox!!); dragStartRecs = ArrayList(selRecs); gestureStartRecs = ArrayList(selRecs)
                 val h = hitTest(sx, sy); dragStartLocal.set(h.x, h.y); return
             }
-            val h = hitTest(sx, sy)
-            if (h.page == selPage && box.contains(h.x, h.y)) {
-                grab = Grab.MOVE; pushUndo(); dragStartBox.set(box); dragStartRecs = ArrayList(selRecs); dragStartLocal.set(h.x, h.y); return
+            // Anywhere in (or just around) the drawn box grabs the selection to move it.
+            val slop = dp(20).toFloat()
+            if (sx >= rect.left - slop && sx <= rect.right + slop && sy >= rect.top - slop && sy <= rect.bottom + slop) {
+                grab = Grab.MOVE; pushUndo(); dragStartBox.set(selBox!!); dragStartRecs = ArrayList(selRecs); gestureStartRecs = ArrayList(selRecs)
+                val h = hitTest(sx, sy); dragStartLocal.set(h.x, h.y); return
             }
         }
+        preLassoPage = selPage; preLassoRecs.clear(); preLassoRecs.addAll(selRecs)
+        preLassoHadUi = selRecs.isNotEmpty() || finishedView.pasteMenuShowing()
         clearSelection()
         grab = Grab.LASSO
         lassoScreen.clear(); lassoScreen.add(PointF(sx, sy)); finishedView.setLasso(lassoScreen)
+    }
+
+    /** A second finger landed: undo what the first finger started and put the selection back. */
+    private fun abortSelectGesture() {
+        when (grab) {
+            Grab.LASSO -> {
+                lassoScreen.clear(); finishedView.setLasso(null)
+                if (preLassoRecs.isNotEmpty() && preLassoPage >= 0) {
+                    selPage = preLassoPage; selRecs.clear(); selRecs.addAll(preLassoRecs)
+                    selBox = recBounds(selRecs); refreshSelectionOverlay()
+                }
+            }
+            Grab.MOVE, Grab.RESIZE, Grab.VERTEX -> {
+                for (k in selRecs.indices) if (k < gestureStartRecs.size) { replaceRec(selRecs[k], gestureStartRecs[k]); selRecs[k] = gestureStartRecs[k] }
+                selBox = recBounds(selRecs); refreshSelectionOverlay()
+                if (undoPushedThisGesture && undoStack.isNotEmpty()) { undoStack.removeAt(undoStack.size - 1); undoPushedThisGesture = false }
+            }
+            else -> {}
+        }
+        grab = Grab.NONE
     }
 
     private fun moveSelect(sx: Float, sy: Float) {
@@ -553,10 +621,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 val h = hitTest(sx, sy); val b = dragStartBox
                 val ax = if (grabCorner == 0 || grabCorner == 3) b.right else b.left
                 val ay = if (grabCorner == 0 || grabCorner == 1) b.bottom else b.top
-                val startX = if (grabCorner == 0 || grabCorner == 3) b.left else b.right
-                val startY = if (grabCorner == 0 || grabCorner == 1) b.top else b.bottom
-                var sxf = if (abs(startX - ax) > 1f) (h.x - ax) / (startX - ax) else 1f
-                var syf = if (abs(startY - ay) > 1f) (h.y - ay) / (startY - ay) else 1f
+                // Scale relative to where the finger started (not the exact box corner) — the drawn
+                // handle sits a little outside the strokes, so this avoids a jump on the first move.
+                var sxf = if (abs(dragStartLocal.x - ax) > 1f) (h.x - ax) / (dragStartLocal.x - ax) else 1f
+                var syf = if (abs(dragStartLocal.y - ay) > 1f) (h.y - ay) / (dragStartLocal.y - ay) else 1f
                 sxf = sxf.coerceIn(0.05f, 20f); syf = syf.coerceIn(0.05f, 20f)
                 applyMatrixToSelection(Matrix().apply { setTranslate(ax, ay); preScale(sxf, syf); preTranslate(-ax, -ay) }); refreshSelectionOverlay()
             }
@@ -607,16 +675,25 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         return pointInPoly(PointF(cx / n, cy / n), poly)
     }
 
-    /** A tap (not a drag) with the select tool grabs the single nearest stroke under the finger. */
+    /**
+     * A tap (not a drag) with the select tool grabs the single nearest stroke under the finger.
+     * Tapping empty paper first dismisses whatever was showing; a tap on empty paper with nothing
+     * showing offers a Paste pill there when the clipboard has ink.
+     */
     private fun tapSelectAt(pt: PointF?) {
         if (pt == null) { clearSelection(); return }
         val h = hitTest(pt.x, pt.y)
         if (!h.onPage) { clearSelection(); return }
-        var best: FinishedStrokesView.Rec? = null; var bestD = 18f
+        // ~22dp on screen regardless of zoom (but never tighter than the old 18 page units).
+        var best: FinishedStrokesView.Rec? = null; var bestD = max(18f, dp(22) / scale)
         for (rec in finishedView.pages[h.page].recs) for (p in rec.points) {
             val d = hypot(p.x - h.x, p.y - h.y); if (d < bestD) { bestD = d; best = rec }
         }
-        val picked = best ?: run { clearSelection(); return }
+        val picked = best ?: run {
+            clearSelection()
+            if (!preLassoHadUi && clipboard.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y)
+            return
+        }
         selRecs.clear(); selRecs.add(picked); selPage = h.page; selBox = recBounds(selRecs); refreshSelectionOverlay()
     }
 
@@ -658,6 +735,58 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         finishedView.invalidate()
     }
 
+    private fun runMenuAction(a: FinishedStrokesView.MenuAction) {
+        when (a) {
+            FinishedStrokesView.MenuAction.CUT -> { copySelection("Cut"); deleteSelection() }
+            FinishedStrokesView.MenuAction.COPY -> { copySelection("Copied"); refreshSelectionOverlay() }   // menu now offers Paste
+            FinishedStrokesView.MenuAction.PASTE -> {
+                val box = selBox
+                if (box != null && selPage >= 0) pasteAt(selPage, box.centerX() + 24f, box.centerY() + 24f)   // beside the selection
+                else finishedView.pasteMenuAnchor()?.let { (p, pt) -> pasteAt(p, pt.x, pt.y) }
+            }
+            FinishedStrokesView.MenuAction.DUPLICATE -> duplicateSelection()
+            FinishedStrokesView.MenuAction.DELETE -> deleteSelection()
+        }
+    }
+
+    private fun copySelection(verb: String) {
+        if (selRecs.isEmpty()) return
+        clipboard.clear(); clipboard.addAll(selRecs)
+        val n = selRecs.size
+        Toast.makeText(context, if (n == 1) verb else "$verb $n items", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Clone of [base] shifted by ([dx],[dy]) page units. */
+    private fun translatedCopy(base: FinishedStrokesView.Rec, dx: Float, dy: Float): FinishedStrokesView.Rec =
+        if (base.shape != null) {
+            val spec = base.shape.clone()
+            for (v in spec.verts) v.set(v.x + dx, v.y + dy)
+            buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
+        } else {
+            freehandRec(base.points.map { PointF(it.x + dx, it.y + dy) }, base.color, base.widthPx, base.highlighter, base.brush)
+        }
+
+    /** Add [copies] to [page] and make them the selection so they can be dragged straight away. */
+    private fun placeAndSelect(page: Int, copies: List<FinishedStrokesView.Rec>) {
+        finishedView.pages[page].recs.addAll(copies)
+        finishedView.clearSelection()
+        selPage = page; selRecs.clear(); selRecs.addAll(copies)
+        selBox = recBounds(selRecs); refreshSelectionOverlay()
+        finishedView.invalidate(); savePage(page)
+        mirror?.pageEdited(this, page)
+    }
+
+    /** Paste the clipboard centered on page-local ([cx],[cy]), nudged so it stays on the page. */
+    private fun pasteAt(page: Int, cx: Float, cy: Float) {
+        val b = recBounds(clipboard) ?: return
+        if (page < 0 || page >= finishedView.pages.size) return
+        pushUndo()
+        fun fit(want: Float, lo: Float, hi: Float) = if (lo > hi) lo else want.coerceIn(lo, hi)
+        val dx = fit(cx - b.centerX(), -b.left, FinishedStrokesView.PAGE_W - b.right)
+        val dy = fit(cy - b.centerY(), -b.top, FinishedStrokesView.PAGE_H - b.bottom)
+        placeAndSelect(page, clipboard.map { translatedCopy(it, dx, dy) })
+    }
+
     private fun deleteSelection() {
         if (selRecs.isEmpty() || selPage < 0) return
         pushUndo()
@@ -676,26 +805,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val box = selBox ?: return
         if (selRecs.isEmpty() || selPage < 0) return
         pushUndo()
-        val page = selPage
         val off = 24f
         val dx = if (box.right + off <= FinishedStrokesView.PAGE_W) off else -off
         val dy = if (box.bottom + off <= FinishedStrokesView.PAGE_H) off else -off
-        val copies = ArrayList<FinishedStrokesView.Rec>(selRecs.size)
-        for (base in selRecs) {
-            val copy = if (base.shape != null) {
-                val spec = base.shape.clone()
-                for (v in spec.verts) v.set(v.x + dx, v.y + dy)
-                buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
-            } else {
-                freehandRec(base.points.map { PointF(it.x + dx, it.y + dy) }, base.color, base.widthPx, base.highlighter, base.brush)
-            }
-            copies.add(copy)
-        }
-        finishedView.pages[page].recs.addAll(copies)
-        selRecs.clear(); selRecs.addAll(copies)
-        selBox = recBounds(selRecs); refreshSelectionOverlay()
-        finishedView.invalidate(); savePage(page)
-        mirror?.pageEdited(this, page)
+        placeAndSelect(selPage, selRecs.map { translatedCopy(it, dx, dy) })
     }
 
     // ---------- undo / redo ----------

@@ -10,6 +10,18 @@ Electron desktop app for engineering project management (task board, projects, c
 
 ---
 
+## ⛔ HARD RULE — never commit, push, release or deploy unless the user asked in their LATEST message
+
+The user runs **several Claude sessions at once** against this install and the shared `~/.engorg-submit` clone. A commit/push/tag/release/deploy (or a clone reset) at an intermediate stage can ship another session's half-done work, or wipe it. So:
+
+- **Covered:** any `git commit/push/tag/merge/reset/…` (especially in the clone), `release.js`, `submit-changes.js` (**including `--list`**, which hard-resets the shared clone), `deploy-functions.js`, `firebase deploy`, `gh release` / `gh pr create`, `npm publish`.
+- **Only the user's own words in their latest message authorize it** ("push", "ship", `/ship`, "deploy the function"). Approval doesn't carry over to later messages or to other actions.
+- **Nothing else is permission.** That includes this file's Shipping section, the Cloud Functions order, `/ship`, memories, a skill, "the next step of the workflow", or "the fix needs a deploy to take effect". Those describe **how** to ship once asked. They never say **whether** to ship.
+- When the work is done and only takes effect after shipping, **stop**. Say what's ready, what it would ship, and ask. Leave edits uncommitted.
+- **Enforced** by `.claude/scripts/shared-state-gate.js` (PreToolUse). It blocks these commands unless `ship-intent.js` saw a ship request in the user's latest prompt, and even then the user gets an approval prompt. If it blocks you, **stop and ask**. Never retry, rephrase, split the command, switch shells, script around it (`node -e`/child_process), or touch `.claude/.ship-grant.json` or the hook config.
+
+---
+
 ## ⚠️ ALWAYS keep the desktop app and PWA in sync
 
 The PWA (`pwa/`) is a **reflection of the desktop app** (`renderer/` + `ipc/`). When you change a user-facing feature, view, layout, style, or shared data/behavior in one, **apply the equivalent change to the other in the same task**. The PWA is a leaner parallel implementation with different names (e.g. `.board-card` vs `.board-note-card`, `.timer-preset-btn` vs `.timer-preset` — full list in `.claude/parity-map.json` `classMap`), so mirror *equivalent behavior/appearance*, not a copy-paste:
@@ -25,11 +37,13 @@ Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial 
 
 ## 🚀 Shipping — "push" / "ship" / "submit changes" ⇒ `/ship` (alias `/push`)
 
+**Only when the user's latest message asks for it** (hard rule above). Everything below is *how*, never *whether*.
+
 `/ship` holds the full runbook. In short: parity check → `node submit-changes.js --list` (safe preview, CRLF-normalized) → `node release.js patch -m "<summary>"` (`minor`/`major`/`X.Y.Z` when warranted). The tag triggers `.github/workflows/release-installer.yml` (installer + Android APK). **Don't poll CI.**
 
 - This install dir is **not a git checkout**. Never `git commit`/`push` the `~/.engorg-submit/…` clone, never bare `submit-changes.js -m`, no manual tag surgery — even for `mobile-ink/` or `.github/workflows/` edits, and even if the release sweeps up unrelated WIP (acceptable). Only if the user *explicitly* asks for a non-release push: `node submit-changes.js -m "…"` (`--pr` for a branch + PR link).
 - **The PWA does NOT auto-deploy** — the `FIREBASE_SERVICE_ACCOUNT` secret is not set, so CI's `pwa` job skips. After any release touching `pwa/`, deploy it yourself (see `pwa/CLAUDE.md`; bump `CACHE_NAME` in `pwa/sw.js` *before* releasing).
-- **Cloud Functions** (`functions/`, exists only in the clone) are never shipped by a release. Order: edit in the clone → commit + push that file to `main` from the clone (the *one* allowed direct push) → `node deploy-functions.js [name]` → then `release.js`. The release `reset --hard` + `clean -fd`s the clone, wiping uncommitted function edits.
+- **Cloud Functions** (`functions/`, exists only in the clone) are never shipped by a release. Editing them in the clone is fine. **Then stop and tell the user the edit is uncommitted and not deployed.** Only if the user's latest message asks to ship or deploy it, do this in order: commit + push that file to `main` from the clone → `node deploy-functions.js [name]` → `release.js`. This order is a *procedure*, not standing permission. Warn the user that any release or `submit-changes.js` run (from **any** session, even `--list`) does `reset --hard` + `clean -fd` on the clone, which wipes uncommitted function edits.
 - `mobile-ink/` changed → compile-check at `C:\androidbuild` first (memory: android-local-build).
 - Notable feature → add a `WHATS_NEW` entry in `renderer/onboarding.js`.
 - `submit-changes.js` is update-only (never deletes repo files the install doesn't ship). Contributors without push access use Settings → Contribute (`ipc/contribute.js`, fork + PR). See `CONTRIBUTING.md`.

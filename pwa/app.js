@@ -161,7 +161,7 @@ const PWA_NAV_ITEMS = [
   { id: 'ecosystem', label: 'Tree' }, { id: 'timeline', label: 'Timeline' }, { id: 'calendar', label: 'Calendar' },
   { id: 'purchases', label: 'Orders' }, { id: 'stats', label: 'Stats' }, { id: 'timers', label: 'Timers' },
   { id: 'printer', label: 'Printer' },
-];
+].filter(n => n.id !== 'ink' || NATIVE_AUTH); // EngInk exists only in the Android shell
 const PWA_SETTINGS_DEFAULTS = {
   theme: 'sync',           // 'sync' = follow the desktop theme; otherwise a COLOR_THEMES id
   glassStrength: null,     // null = follow the desktop's Liquid Glass slider; 0..1 to override
@@ -671,10 +671,13 @@ async function saveCollection(name, obj) {
 }
 
 // ===================== NAVIGATION =====================
+// The EngInk tab is only a hand-off to the native Android ink app: the shell intercepts the
+// navigation to ink.html (no such page is served). In a plain browser there's no EngInk.
+if (!NATIVE_AUTH) document.querySelector('.nav-item[data-navid="ink"]')?.remove();
 document.querySelectorAll('.nav-item').forEach(btn => {
   btn.addEventListener('click', () => {
-    // A nav item with data-href navigates to a standalone page (e.g. the fullscreen
-    // handwriting canvas) instead of switching in-app views.
+    // A nav item with data-href navigates away instead of switching in-app views
+    // (EngInk's ink.html, which the Android shell intercepts).
     if (btn.dataset.href) { location.href = btn.dataset.href; return; }
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
@@ -3089,7 +3092,7 @@ function psetWallpaper() {
         <li>Open <b>Shortcuts</b> &rarr; <b>Automation</b> tab &rarr; <b>+</b> &rarr; <b>Create Personal Automation</b>.</li>
         <li>Choose <b>Time of Day</b> &rarr; e.g. <b>6:00 AM</b>, <b>Daily</b> &rarr; Next.</li>
         <li>Add action <b>Get Contents of URL</b> &rarr; tap the URL field and <b>Paste</b> your link.</li>
-        <li>Add action <b>Set Wallpaper</b> &rarr; choose <b>Lock Screen</b>, turn <b>off &ldquo;Show Preview&rdquo;</b>.</li>
+        <li>Add action <b>Set Wallpaper</b> &rarr; select <b>both Lock Screen and Home Screen</b> (Lock Screen alone makes iOS regenerate a <b>blurred</b> home screen every run), turn <b>off &ldquo;Show Preview&rdquo;</b>.</li>
         <li>Tap Next &rarr; turn <b>off &ldquo;Ask Before Running&rdquo;</b> &rarr; <b>Done</b>.</li>
       </ol>
       <p class="pset-hint" style="margin-top:8px">Tip: add another automation at noon to refresh midday. If Set Wallpaper ever doesn't apply (an iOS quirk), add a 2-second <b>Wait</b> then a second <b>Set Wallpaper</b>.</p>
