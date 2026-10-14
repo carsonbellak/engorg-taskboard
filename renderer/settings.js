@@ -853,21 +853,119 @@ const COLOR_THEMES = {
   },
 };
 
-// Which themes count as dark (for scrollbar styling, etc.)
+// ── Popular editor & browser themes ─────────────────────────────────────────
+// Compact palettes of the most-installed VS Code themes + Chrome's Material
+// palettes, expanded into full theme var sets by paletteTheme(). Shown in their
+// own "Editor & Browser Themes" section. Mirrored (same palettes) in pwa/app.js
+// POPULAR_PALETTES — keep the two in sync. Accents are mid-tone on purpose: accent
+// buttons draw white text, so a theme's signature bright yellow wouldn't read.
+const POPULAR_PALETTES = {
+  dracula:         { name: 'Dracula', desc: 'Classic purple & pink dark', dark: true, bg: '#282A36', bg2: '#21222C', sidebar: '#21222C', header: '#191A21', card: '#343746', input: '#21222C', hover: '#44475A', border: '#44475A', borderLight: '#343746', text: '#F8F8F2', text2: '#E2E2DC', muted: '#A2A9CC', faint: '#6272A4', accent: '#BD93F9', accentHover: '#CBA9FB', accentText: '#CAA9FA', success: '#50FA7B', warning: '#F1FA8C', danger: '#FF5555' },
+  oneDarkPro:      { name: 'One Dark Pro', desc: "Atom's iconic dark", dark: true, bg: '#282C34', bg2: '#21252B', sidebar: '#21252B', header: '#1E2227', card: '#2C313A', input: '#1D1F23', hover: '#353B45', border: '#3E4452', borderLight: '#2C313A', text: '#D7DAE0', text2: '#ABB2BF', muted: '#8B919C', faint: '#5C6370', accent: '#61AFEF', accentHover: '#7CBEF4', accentText: '#7CBEF4', success: '#98C379', warning: '#E5C07B', danger: '#E06C75' },
+  monokaiPro:      { name: 'Monokai Pro', desc: 'Warm, vivid Monokai', dark: true, bg: '#2D2A2E', bg2: '#221F22', sidebar: '#221F22', header: '#19181A', card: '#363337', input: '#221F22', hover: '#403E41', border: '#4A474B', borderLight: '#363337', text: '#FCFCFA', text2: '#C1C0C0', muted: '#939293', faint: '#727072', accent: '#AB9DF2', accentHover: '#BDB2F5', accentText: '#BDB2F5', success: '#A9DC76', warning: '#FFD866', danger: '#FF6188' },
+  tokyoNight:      { name: 'Tokyo Night', desc: 'Neon-lit city after dark', dark: true, bg: '#1A1B26', bg2: '#16161E', sidebar: '#16161E', header: '#16161E', card: '#1F2335', input: '#16161E', hover: '#292E42', border: '#2F3549', borderLight: '#232433', text: '#C0CAF5', text2: '#A9B1D6', muted: '#7A80A3', faint: '#565F89', accent: '#7AA2F7', accentHover: '#8FB2FA', accentText: '#8FB2FA', success: '#9ECE6A', warning: '#E0AF68', danger: '#F7768E' },
+  catppuccinMocha: { name: 'Catppuccin Mocha', desc: 'Soothing pastel dark', dark: true, radius: [8, 10, 14], bg: '#1E1E2E', bg2: '#181825', sidebar: '#181825', header: '#181825', card: '#28283D', input: '#181825', hover: '#313244', border: '#45475A', borderLight: '#313244', text: '#CDD6F4', text2: '#BAC2DE', muted: '#A6ADC8', faint: '#7F849C', accent: '#CBA6F7', accentHover: '#D7BBFA', accentText: '#D7BBFA', success: '#A6E3A1', warning: '#F9E2AF', danger: '#F38BA8' },
+  catppuccinLatte: { name: 'Catppuccin Latte', desc: 'Soothing pastel light', dark: false, radius: [8, 10, 14], bg: '#EFF1F5', bg2: '#E6E9EF', sidebar: '#E6E9EF', header: '#DCE0E8', card: '#F8F9FB', input: '#FFFFFF', hover: '#DCE0E8', border: '#CCD0DA', borderLight: '#DCE0E8', text: '#4C4F69', text2: '#5C5F77', muted: '#6C6F85', faint: '#9CA0B0', accent: '#8839EF', accentHover: '#7426DB', accentText: '#7426DB', accentBg: '#EDE3FC', success: '#40A02B', warning: '#DF8E1D', danger: '#D20F39' },
+  githubDimmed:    { name: 'GitHub Dark Dimmed', desc: "GitHub's soft dark", dark: true, bg: '#22272E', bg2: '#1C2128', sidebar: '#1C2128', header: '#1C2128', card: '#2D333B', input: '#1C2128', hover: '#373E47', border: '#444C56', borderLight: '#373E47', text: '#CDD9E5', text2: '#ADBAC7', muted: '#768390', faint: '#636E7B', accent: '#539BF5', accentHover: '#6CB6FF', accentText: '#6CB6FF', success: '#57AB5A', warning: '#C69026', danger: '#E5534B' },
+  githubLight:     { name: 'GitHub Light', desc: "GitHub's crisp light", dark: false, bg: '#FFFFFF', bg2: '#F6F8FA', sidebar: '#F6F8FA', header: '#F6F8FA', card: '#FFFFFF', input: '#FFFFFF', hover: '#EAEEF2', border: '#D0D7DE', borderLight: '#D8DEE4', text: '#1F2328', text2: '#424A53', muted: '#656D76', faint: '#8C959F', accent: '#0969DA', accentHover: '#0550AE', accentText: '#0969DA', accentBg: '#DDF4FF', success: '#1A7F37', warning: '#9A6700', danger: '#D1242F' },
+  nightOwl:        { name: 'Night Owl', desc: 'Made for late-night work', dark: true, bg: '#011627', bg2: '#01111D', sidebar: '#01111D', header: '#010E17', card: '#0B2942', input: '#01111D', hover: '#13344F', border: '#1D3B53', borderLight: '#0B2942', text: '#D6DEEB', text2: '#B8C4D6', muted: '#8BA0B4', faint: '#5F7E97', accent: '#82AAFF', accentHover: '#9DBCFF', accentText: '#9DBCFF', success: '#ADDB67', warning: '#ECC48D', danger: '#EF5350' },
+  rosePine:        { name: 'Rosé Pine', desc: 'Muted, dusky florals', dark: true, radius: [8, 10, 14], bg: '#191724', bg2: '#1F1D2E', sidebar: '#1F1D2E', header: '#16141F', card: '#26233A', input: '#1F1D2E', hover: '#312E48', border: '#403D52', borderLight: '#26233A', text: '#E0DEF4', text2: '#C8C5E0', muted: '#908CAA', faint: '#6E6A86', accent: '#C4A7E7', accentHover: '#D2BBEE', accentText: '#EBBCBA', success: '#9CCFD8', warning: '#F6C177', danger: '#EB6F92' },
+  palenight:       { name: 'Material Palenight', desc: 'Soft purple Material', dark: true, bg: '#292D3E', bg2: '#232635', sidebar: '#232635', header: '#202331', card: '#31364A', input: '#232635', hover: '#3A3F58', border: '#414863', borderLight: '#31364A', text: '#E4E8F7', text2: '#A6ACCD', muted: '#878EB0', faint: '#676E95', accent: '#C792EA', accentHover: '#D4A9EF', accentText: '#D4A9EF', success: '#C3E88D', warning: '#FFCB6B', danger: '#F07178' },
+  gruvboxDark:     { name: 'Gruvbox Dark', desc: 'Retro groove, earthy warmth', dark: true, radius: [4, 6, 8], bg: '#282828', bg2: '#1D2021', sidebar: '#1D2021', header: '#1D2021', card: '#32302F', input: '#1D2021', hover: '#3C3836', border: '#504945', borderLight: '#3C3836', text: '#EBDBB2', text2: '#D5C4A1', muted: '#A89984', faint: '#7C6F64', accent: '#FE8019', accentHover: '#FF9A45', accentText: '#FE9A4A', success: '#B8BB26', warning: '#FABD2F', danger: '#FB4934' },
+  everforest:      { name: 'Everforest', desc: 'Comfy green forest dark', dark: true, bg: '#2D353B', bg2: '#272E33', sidebar: '#272E33', header: '#232A2E', card: '#343F44', input: '#272E33', hover: '#3D484D', border: '#475258', borderLight: '#3D484D', text: '#D3C6AA', text2: '#C5BA9F', muted: '#9DA9A0', faint: '#7A8478', accent: '#7FBBB3', accentHover: '#93C9C1', accentText: '#A7C080', success: '#A7C080', warning: '#DBBC7F', danger: '#E67E80' },
+  kanagawa:        { name: 'Kanagawa', desc: 'Inspired by The Great Wave', dark: true, bg: '#1F1F28', bg2: '#1A1A22', sidebar: '#1A1A22', header: '#16161D', card: '#2A2A37', input: '#16161D', hover: '#363646', border: '#3C3C51', borderLight: '#2A2A37', text: '#DCD7BA', text2: '#C8C093', muted: '#938F7E', faint: '#727169', accent: '#7E9CD8', accentHover: '#98B0E2', accentText: '#98B0E2', success: '#98BB6C', warning: '#E6C384', danger: '#E46876' },
+  synthwave84:     { name: "SynthWave '84", desc: 'Retro neon outrun', dark: true, bg: '#262335', bg2: '#241B2F', sidebar: '#241B2F', header: '#1E1A2B', card: '#2A2139', input: '#1E1A2B', hover: '#34294F', border: '#3E3460', borderLight: '#2F2645', text: '#F4EEFF', text2: '#D8CDEB', muted: '#9A92BE', faint: '#6D6A99', accent: '#FF7EDB', accentHover: '#FF9EE5', accentText: '#FF9EE5', success: '#72F1B8', warning: '#FEDE5D', danger: '#FE4450' },
+  solarizedDark:   { name: 'Solarized Dark', desc: 'Precision colors, dark', dark: true, bg: '#002B36', bg2: '#00212B', sidebar: '#00212B', header: '#001E26', card: '#073642', input: '#00212B', hover: '#0A4555', border: '#124D5C', borderLight: '#073642', text: '#EEE8D5', text2: '#93A1A1', muted: '#839496', faint: '#586E75', accent: '#268BD2', accentHover: '#3A9BE0', accentText: '#4AA3E3', success: '#859900', warning: '#B58900', danger: '#DC322F' },
+  solarizedLight:  { name: 'Solarized Light', desc: 'Precision colors, light', dark: false, bg: '#FDF6E3', bg2: '#EEE8D5', sidebar: '#EEE8D5', header: '#EEE8D5', card: '#FFFBEF', input: '#FDF6E3', hover: '#E8E1CB', border: '#DDD6C1', borderLight: '#EEE8D5', text: '#073642', text2: '#586E75', muted: '#657B83', faint: '#93A1A1', accent: '#268BD2', accentHover: '#1F78B8', accentText: '#1F6FAB', accentBg: '#E3EEF5', success: '#859900', warning: '#B58900', danger: '#DC322F' },
+  materialDark:    { name: 'Material Dark', desc: "Chrome's dark mode palette", dark: true, radius: [8, 12, 16], bg: '#202124', bg2: '#292A2D', sidebar: '#292A2D', header: '#35363A', card: '#303134', input: '#202124', hover: '#3C4043', border: '#3C4043', borderLight: '#303134', text: '#E8EAED', text2: '#BDC1C6', muted: '#9AA0A6', faint: '#5F6368', accent: '#8AB4F8', accentHover: '#AECBFA', accentText: '#AECBFA', success: '#81C995', warning: '#FDD663', danger: '#F28B82' },
+  materialLight:   { name: 'Material Light', desc: "Chrome's light Material palette", dark: false, radius: [8, 12, 16], bg: '#FFFFFF', bg2: '#F8F9FA', sidebar: '#F1F3F4', header: '#F1F3F4', card: '#FFFFFF', input: '#FFFFFF', hover: '#E8EAED', border: '#DADCE0', borderLight: '#E8EAED', text: '#202124', text2: '#3C4043', muted: '#5F6368', faint: '#80868B', accent: '#1A73E8', accentHover: '#1967D2', accentText: '#1967D2', accentBg: '#E8F0FE', success: '#188038', warning: '#E37400', danger: '#D93025' },
+};
+function _hexRgb(hex) {
+  const h = String(hex).replace('#', '');
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+}
+function paletteTheme(p) {
+  const [r, g, b] = _hexRgb(p.accent);
+  const [mr, mg, mb] = _hexRgb(p.muted);
+  const [sm, md, lg] = p.radius || [6, 8, 10];
+  const a = (al) => `rgba(${r},${g},${b},${al})`;
+  return {
+    name: p.name, desc: p.desc, style: 'standard', dark: !!p.dark, group: 'popular',
+    vars: {
+      '--bg-primary': p.bg, '--bg-secondary': p.bg2, '--bg-sidebar': p.sidebar, '--bg-header': p.header,
+      '--bg-card': p.card, '--bg-input': p.input, '--bg-hover': p.hover,
+      '--border-color': p.border, '--border-light': p.borderLight,
+      '--text-primary': p.text, '--text-secondary': p.text2, '--text-muted': p.muted, '--text-faint': p.faint,
+      '--accent': p.accent, '--accent-hover': p.accentHover, '--accent-bg': p.accentBg || a(p.dark ? 0.16 : 0.12), '--accent-text': p.accentText,
+      '--success': p.success, '--warning': p.warning, '--danger': p.danger,
+      '--shadow': p.dark ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.08)',
+      '--shadow-lg': p.dark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.12)',
+      '--radius-sm': sm + 'px', '--radius-md': md + 'px', '--radius-lg': lg + 'px',
+      '--border-width': '1px', '--card-border-width': '1.5px',
+      '--header-bg': 'var(--bg-header)', '--sidebar-bg': 'var(--bg-sidebar)',
+      '--card-blur': '0', '--card-opacity': '1',
+      '--font-weight-normal': '400', '--font-weight-bold': '700', '--font-weight-heavy': '800',
+      '--header-border': '1px solid var(--border-color)', '--sidebar-border': '1px solid var(--border-color)',
+      '--card-shadow': p.dark ? '0 2px 8px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2)' : '0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)',
+      '--card-hover-shadow': p.dark ? '0 12px 28px rgba(0,0,0,0.4), 0 4px 8px rgba(0,0,0,0.3)' : '0 12px 28px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.08)',
+      '--btn-shadow': `0 2px 8px ${a(p.dark ? 0.35 : 0.3)}`,
+      '--scrollbar-thumb': `rgba(${mr},${mg},${mb},0.3)`,
+      '--scrollbar-thumb-hover': `rgba(${mr},${mg},${mb},0.5)`,
+    },
+  };
+}
+for (const [id, p] of Object.entries(POPULAR_PALETTES)) COLOR_THEMES[id] = paletteTheme(p);
+
+// ── Signature mixes ─────────────────────────────────────────────────────────
+// Original palettes built on unexpected color pairings (buttons in one hue, links
+// in another, status colors chosen to match). Same compact format + expansion as
+// POPULAR_PALETTES, shown in their own "Signature Mixes" section. Mirrored (same
+// palettes) in pwa/app.js UNIQUE_PALETTES — keep the two in sync. Darks avoid pure
+// black and max-white text (HDR OLED).
+const UNIQUE_PALETTES = {
+  blueprint:       { name: 'Blueprint', desc: 'Drafting cyan on blueprint blue', dark: true, radius: [2, 3, 4], bg: '#12305A', bg2: '#0F2950', sidebar: '#0D2547', header: '#0B2142', card: '#18396A', input: '#0F2950', hover: '#1F4479', border: '#2C5288', borderLight: '#1F4479', text: '#E6F0FF', text2: '#C3D6F2', muted: '#8FAAD3', faint: '#6582B0', accent: '#2E8FD0', accentHover: '#45A2DE', accentText: '#8FD3FF', success: '#5FD3A0', warning: '#F2C14E', danger: '#FF7A6B' },
+  copperPatina:    { name: 'Copper Patina', desc: 'Verdigris teal & burnished copper', dark: true, bg: '#16292A', bg2: '#122223', sidebar: '#112021', header: '#0F1C1D', card: '#1D3435', input: '#122223', hover: '#264243', border: '#2F4F4F', borderLight: '#223B3C', text: '#E8E2D6', text2: '#CFC6B4', muted: '#93A89F', faint: '#6A817A', accent: '#C06A35', accentHover: '#D27E48', accentText: '#E59A66', success: '#6FBF9A', warning: '#D9A441', danger: '#D9594C' },
+  aurora:          { name: 'Aurora', desc: 'Green & violet over a polar night', dark: true, radius: [8, 10, 14], bg: '#0F1A26', bg2: '#0C1620', sidebar: '#0B141D', header: '#0A121A', card: '#152535', input: '#0C1620', hover: '#1C3044', border: '#24394F', borderLight: '#1A2B3D', text: '#E2F1EE', text2: '#BFD9D4', muted: '#86A6A6', faint: '#5E7D84', accent: '#258F72', accentHover: '#2FA584', accentText: '#ACA0FF', success: '#7FD68A', warning: '#E8C56A', danger: '#E77AA3' },
+  emberAsh:        { name: 'Ember & Ash', desc: 'Smoldering orange on cool charcoal', dark: true, bg: '#1E1F22', bg2: '#191A1C', sidebar: '#18191B', header: '#151617', card: '#26272B', input: '#191A1C', hover: '#303136', border: '#393B40', borderLight: '#2B2C30', text: '#ECE7E2', text2: '#CFC8C1', muted: '#9A948E', faint: '#6E6964', accent: '#D0531F', accentHover: '#E26A35', accentText: '#FF9259', success: '#7DB37A', warning: '#E3A33B', danger: '#E5484D' },
+  bioluminescence: { name: 'Bioluminescence', desc: 'Glowing cyan & jellyfish pink', dark: true, radius: [8, 10, 14], bg: '#08192A', bg2: '#071522', sidebar: '#06131F', header: '#05111B', card: '#0D2436', input: '#071522', hover: '#133146', border: '#193A52', borderLight: '#102A3D', text: '#D8F3F5', text2: '#B2DCE2', muted: '#73A4AE', faint: '#4F7C87', accent: '#0B8585', accentHover: '#0E9C9C', accentText: '#5AE6DE', success: '#5BE3A0', warning: '#F5C66A', danger: '#FF6AAA' },
+  plumGold:        { name: 'Plum & Gold', desc: 'Velvet plum with antique gold', dark: true, bg: '#24152A', bg2: '#1E1123', sidebar: '#1D1022', header: '#190E1D', card: '#2E1C35', input: '#1E1123', hover: '#3A2442', border: '#46304F', borderLight: '#352240', text: '#F2E8EE', text2: '#DCCBD6', muted: '#A790A3', faint: '#7A6378', accent: '#A8842C', accentHover: '#BC983C', accentText: '#E2C26A', success: '#8CC08A', warning: '#E6B450', danger: '#E2647A' },
+  vaporwave:       { name: 'Vaporwave', desc: 'Hot pink & mint on dusk purple', dark: true, radius: [8, 10, 14], bg: '#221A3A', bg2: '#1C1531', sidebar: '#1B142F', header: '#17112A', card: '#2B2148', input: '#1C1531', hover: '#362A58', border: '#44356A', borderLight: '#322752', text: '#F5ECFF', text2: '#DACCF2', muted: '#A492C8', faint: '#7867A0', accent: '#D0428F', accentHover: '#E05CA6', accentText: '#5FE6D0', success: '#7BE8A8', warning: '#FFD27A', danger: '#FF5C7A' },
+  espresso:        { name: 'Espresso', desc: 'Dark roast with a crema finish', dark: true, bg: '#211915', bg2: '#1B1411', sidebar: '#1A1310', header: '#16100D', card: '#2A201B', input: '#1B1411', hover: '#352923', border: '#42332B', borderLight: '#30251F', text: '#F0E6DC', text2: '#D6C6B6', muted: '#A28F7E', faint: '#776656', accent: '#A86B3C', accentHover: '#BC7F4E', accentText: '#D9A77A', success: '#8DB583', warning: '#D9A75A', danger: '#D96A5A' },
+  absinthe:        { name: 'Absinthe', desc: 'Chartreuse glow in a green bottle', dark: true, bg: '#141C14', bg2: '#111811', sidebar: '#101610', header: '#0E140E', card: '#1A251A', input: '#111811', hover: '#223022', border: '#2C3D2B', borderLight: '#1F2C1F', text: '#E6EEDC', text2: '#C9D6BC', muted: '#93A585', faint: '#687A5D', accent: '#5F8A10', accentHover: '#729F1A', accentText: '#B5E04A', success: '#7FD18B', warning: '#E8C547', danger: '#E0605A' },
+  nebula:          { name: 'Nebula', desc: 'Violet space, magenta dust', dark: true, radius: [8, 10, 14], bg: '#15142B', bg2: '#121124', sidebar: '#111023', header: '#0F0E1F', card: '#1D1B3A', input: '#121124', hover: '#272549', border: '#322F59', borderLight: '#232143', text: '#ECE9FF', text2: '#CFCAF0', muted: '#9690C2', faint: '#6B6596', accent: '#7B5CE0', accentHover: '#8F74EA', accentText: '#F28AD0', success: '#6ED8C0', warning: '#F2C46A', danger: '#FF6B8B' },
+  matchaLatte:     { name: 'Matcha Latte', desc: 'Whisked green tea & steamed milk', dark: false, radius: [8, 10, 14], bg: '#F3EFE4', bg2: '#EAE5D6', sidebar: '#EAE5D6', header: '#E3DDCB', card: '#FBF9F3', input: '#FFFFFF', hover: '#E3DDCB', border: '#D5CDB6', borderLight: '#E3DDCB', text: '#2E3424', text2: '#4A5340', muted: '#6F775F', faint: '#9DA28C', accent: '#5A7D2A', accentHover: '#4A6A20', accentText: '#4A6A20', accentBg: '#E3EBD2', success: '#3F8A3A', warning: '#B7791F', danger: '#C2453A' },
+  peachTeal:       { name: 'Peach & Teal', desc: 'Sunny apricot with a deep teal pop', dark: false, bg: '#FCEFE6', bg2: '#F8E4D6', sidebar: '#F8E4D6', header: '#F4D9C6', card: '#FFF9F5', input: '#FFFFFF', hover: '#F4D9C6', border: '#EBCBB4', borderLight: '#F4D9C6', text: '#2F2A28', text2: '#4F4440', muted: '#7D6A62', faint: '#A8968D', accent: '#127C78', accentHover: '#0E6663', accentText: '#0E6663', accentBg: '#D5ECEA', success: '#2E8A4A', warning: '#C47A12', danger: '#D0443A' },
+  lavenderSage:    { name: 'Lavender & Sage', desc: 'Herb-garden purple & soft green', dark: false, radius: [8, 10, 14], bg: '#F1EEF6', bg2: '#E8E3F0', sidebar: '#E8E3F0', header: '#DFD8EA', card: '#FBFAFD', input: '#FFFFFF', hover: '#DFD8EA', border: '#D1C8E0', borderLight: '#DFD8EA', text: '#2D2838', text2: '#4A4359', muted: '#716A80', faint: '#9F98AD', accent: '#7656B5', accentHover: '#6446A0', accentText: '#4F7A4B', accentBg: '#E8E0F5', success: '#5E8C5A', warning: '#B98324', danger: '#C24E5E' },
+  terracotta:      { name: 'Terracotta', desc: 'Sun-baked clay & olive groves', dark: false, radius: [4, 6, 8], bg: '#F2E6DA', bg2: '#EADBCB', sidebar: '#EADBCB', header: '#E2CFBC', card: '#FBF5EF', input: '#FFFFFF', hover: '#E2CFBC', border: '#D6BFA8', borderLight: '#E2CFBC', text: '#3A2A20', text2: '#5A4335', muted: '#84695A', faint: '#AD9686', accent: '#B5532E', accentHover: '#9C4525', accentText: '#5F6F22', accentBg: '#F3DDD2', success: '#6B7F2E', warning: '#C28A1E', danger: '#B83A2E' },
+  sakuraIndigo:    { name: 'Sakura & Indigo', desc: 'Cherry blossoms & indigo dye', dark: false, bg: '#FBEFF2', bg2: '#F6E3E8', sidebar: '#F6E3E8', header: '#F0D6DE', card: '#FFFAFB', input: '#FFFFFF', hover: '#F0D6DE', border: '#E7C6D0', borderLight: '#F0D6DE', text: '#23233F', text2: '#3D3D60', muted: '#6A6888', faint: '#9C99B3', accent: '#3D4A9E', accentHover: '#313D86', accentText: '#313D86', accentBg: '#E1E4F5', success: '#3E8A5E', warning: '#B57B1C', danger: '#C93A5E' },
+  risograph:       { name: 'Risograph', desc: 'Blue & fluoro pink ink on newsprint', dark: false, radius: [2, 3, 4], bg: '#F4F1E8', bg2: '#ECE8DC', sidebar: '#ECE8DC', header: '#E4DFD0', card: '#FBFAF5', input: '#FFFFFF', hover: '#E4DFD0', border: '#D3CDBB', borderLight: '#E4DFD0', text: '#1F2433', text2: '#3A4052', muted: '#686D7C', faint: '#9A9DA6', accent: '#0074B8', accentHover: '#00629C', accentText: '#D6336C', accentBg: '#DDEBF5', success: '#00965A', warning: '#D98200', danger: '#E0386B' },
+  seafoamCoral:    { name: 'Seafoam & Coral', desc: 'Mint shallows with a coral reef', dark: false, radius: [8, 10, 14], bg: '#E8F4F0', bg2: '#DCEEE8', sidebar: '#DCEEE8', header: '#CFE6DE', card: '#F7FCFA', input: '#FFFFFF', hover: '#CFE6DE', border: '#BBD9CE', borderLight: '#CFE6DE', text: '#1E3330', text2: '#355049', muted: '#5C7A72', faint: '#8DA8A0', accent: '#D9573F', accentHover: '#C24A34', accentText: '#B84530', accentBg: '#FBE3DD', success: '#2E9A6A', warning: '#C98A1A', danger: '#C8343A' },
+  arctic:          { name: 'Arctic', desc: 'Glacier ice & deep indigo', dark: false, bg: '#EEF3F8', bg2: '#E3EBF3', sidebar: '#E3EBF3', header: '#D8E3EE', card: '#FAFCFE', input: '#FFFFFF', hover: '#D8E3EE', border: '#C6D4E3', borderLight: '#D8E3EE', text: '#1A2433', text2: '#34435A', muted: '#5E6F86', faint: '#8E9DB1', accent: '#3B4DB8', accentHover: '#2F3F9E', accentText: '#2F3F9E', accentBg: '#E0E5F7', success: '#1F8A7A', warning: '#B8801C', danger: '#C83C4C' },
+};
+for (const [id, p] of Object.entries(UNIQUE_PALETTES)) COLOR_THEMES[id] = { ...paletteTheme(p), group: 'unique' };
+
+// Which themes count as dark (for scrollbar styling, etc.) — palette themes carry `dark`.
 const DARK_THEMES = ['dark', 'midnight', 'ocean', 'highContrast', 'glassDark', 'neon', 'nord', 'sunset', 'grunge', 'hacker'];
 
-function applyTheme(themeId) {
+let _themeVarsApplied = [];
+function applyTheme(themeId, opts) {
   const theme = COLOR_THEMES[themeId];
   if (!theme) return;
   const root = document.documentElement;
 
+  // Drop vars the previous theme set that this one doesn't define (e.g. a dark
+  // theme's --scrollbar-thumb), so nothing leaks across theme switches.
+  for (const prop of _themeVarsApplied) {
+    if (!(prop in theme.vars)) root.style.removeProperty(prop);
+  }
   // Apply all CSS custom properties
   for (const [prop, val] of Object.entries(theme.vars)) {
     root.style.setProperty(prop, val);
   }
+  _themeVarsApplied = Object.keys(theme.vars);
 
   // Mark dark/light
-  const isDark = DARK_THEMES.includes(themeId);
+  const isDark = theme.dark === true || DARK_THEMES.includes(themeId);
   // Drive native controls (the <select> dropdown popup, scrollbars, etc.) to match the
   // theme. On Windows, color-scheme — not option {background} — controls the popup color.
   root.style.colorScheme = isDark ? 'dark' : 'light';
@@ -892,18 +990,20 @@ function applyTheme(themeId) {
   // Ambient FX layer
   if (window.ThemeFx) window.ThemeFx.init(themeId);
 
-  // Optionally make Windows itself match the theme (accent, or full contrast theme).
-  maybeSyncWindows();
+  // Optionally make Windows itself match the theme (accent / tinted).
+  maybeSyncWindows(opts);
 }
 
 // ── Windows theme sync ───────────────────────────────────────────────────────
-// settings.osThemeMode = 'off' | 'accent' drives whether Windows follows the app
-// theme (see ipc/os-theme.js). 'accent' matches Windows dark/light mode + sets the
-// accent color used for highlights/selected items/links (NOT flooding surfaces) —
-// the most Windows exposes without high contrast (which would force-flatten every
-// app, incl. this one). Only the real top window pushes it — split panes (embedded)
-// share the one OS, so they skip it — and theme-change re-applies are debounced so
-// flipping theme cards doesn't spam the shell.
+// settings.osThemeMode = 'off' | 'accent' | 'tinted' drives whether Windows follows
+// the app theme (see ipc/os-theme.js). 'accent' matches Windows dark/light mode + sets
+// the accent color used for highlights/selected items/links (NOT flooding surfaces).
+// 'tinted' also colours Start, the taskbar and title bars — with deep shades of the
+// theme (its background blended with the accent), never the raw accent — the most
+// Windows exposes without high contrast (which would force-flatten every app, incl.
+// this one). Startup applies come from the top window only (split panes / the
+// desktop-mode window share the one OS); a theme the user picks in a pane does push.
+// Re-applies are debounced so flipping theme cards doesn't spam the shell.
 let _winSyncTimer = null;
 function _isDarkNow() { return document.body.classList.contains('theme-dark'); }
 // Resolve any CSS color (e.g. a theme var) to { r, g, b } via computed style.
@@ -923,20 +1023,107 @@ function resolveColorRgb(cssColor) {
 }
 function resolveAccentRgb() { return resolveColorRgb('var(--accent)'); }
 function _pushWindowsTheme(mode) {
-  if (!(window.api && window.api.osTheme)) return;
-  if (mode === 'accent') {
+  if (!(window.api && window.api.osTheme)) return Promise.resolve({ ok: false });
+  if (mode === 'accent' || mode === 'tinted') {
     const rgb = resolveAccentRgb();
-    if (rgb) { try { window.api.osTheme.apply({ ...rgb, dark: _isDarkNow() }); } catch {} }
+    if (!rgb) return Promise.resolve({ ok: false });
+    const payload = { ...rgb, dark: _isDarkNow() };
+    if (mode === 'tinted') {
+      payload.tint = {
+        bg: resolveColorRgb('var(--bg-primary)') || rgb,
+        header: resolveColorRgb('var(--bg-header)') || resolveColorRgb('var(--bg-primary)') || rgb,
+      };
+    }
+    return Promise.resolve(window.api.osTheme.apply(payload));
   }
+  return Promise.resolve({ ok: false });
 }
+
+// Progress popup for OS-theme work. Main reports osTheme:progress { op, pct, label };
+// each op's 0-100 is mapped into a slice of the bar (a mode switch = restore then
+// apply). The popup only appears if the work takes longer than a blink, then
+// fills to 100% and fades out; errors stay up a little longer.
+let _osProg = null, _osProgShowT = null, _osProgHideT = null, _osProgBound = false;
+let _osOps = 0, _osProgMap = {}, _osProgLast = { pct: 0, label: 'Starting…' };
+function _osProgEl() {
+  if (_osProg && document.body.contains(_osProg)) return _osProg;
+  _osProg = document.createElement('div');
+  _osProg.className = 'os-theme-progress';
+  _osProg.setAttribute('role', 'status');
+  _osProg.innerHTML = `
+    <div class="os-theme-progress-head"><span class="os-theme-progress-title">Updating Windows theme</span><span class="os-theme-progress-pct">0%</span></div>
+    <div class="os-theme-progress-track"><div class="os-theme-progress-fill"></div></div>
+    <div class="os-theme-progress-label">Starting…</div>`;
+  document.body.appendChild(_osProg);
+  return _osProg;
+}
+function _osProgSet(pct, label) {
+  const el = _osProgEl();
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  el.querySelector('.os-theme-progress-fill').style.width = p + '%';
+  el.querySelector('.os-theme-progress-pct').textContent = p + '%';
+  if (label) el.querySelector('.os-theme-progress-label').textContent = label;
+}
+const _osProgVisible = () => !!(_osProg && _osProg.classList.contains('show'));
+function _osProgHide(delay) {
+  clearTimeout(_osProgHideT);
+  _osProgHideT = setTimeout(() => { if (_osProg && _osOps === 0) _osProg.classList.remove('show', 'error'); }, delay);
+}
+function _bindOsProgress() {
+  if (_osProgBound || !(window.api && window.api.osTheme && window.api.osTheme.onProgress)) return;
+  _osProgBound = true;
+  window.api.osTheme.onProgress((d) => {
+    if (!d || _osOps === 0) return;
+    const [from, to] = _osProgMap[d.op] || [0, 100];
+    _osProgLast = { pct: from + (to - from) * (Number(d.pct) || 0) / 100, label: d.label };
+    if (_osProgVisible()) _osProgSet(_osProgLast.pct, _osProgLast.label);
+  });
+}
+// Run one OS-theme job (fn returns the IPC promise) with the popup around it.
+async function _runOsThemeOp(title, map, fn) {
+  _bindOsProgress();
+  _osOps++;
+  _osProgMap = map || {};
+  _osProgLast = { pct: 0, label: 'Starting…' };
+  clearTimeout(_osProgHideT);
+  const el = _osProgEl();
+  el.querySelector('.os-theme-progress-title').textContent = title;
+  el.classList.remove('error');
+  if (_osProgVisible()) _osProgSet(0, 'Starting…');
+  else {
+    clearTimeout(_osProgShowT);
+    _osProgShowT = setTimeout(() => {
+      if (_osOps === 0) return;
+      _osProgSet(_osProgLast.pct, _osProgLast.label);
+      el.classList.add('show');
+    }, 200);
+  }
+  let res;
+  try { res = await fn(); } catch (e) { res = { ok: false, error: e && e.message }; }
+  _osOps = Math.max(0, _osOps - 1);
+  if (_osOps > 0) return res;
+  clearTimeout(_osProgShowT);
+  if (res && res.ok === false && res.error && res.error !== 'Windows only') {
+    _osProgSet(100, 'Couldn’t update Windows: ' + String(res.error).split('\n')[0].slice(0, 120));
+    el.classList.add('show', 'error');
+    _osProgHide(4000);
+  } else if (_osProgVisible()) {
+    _osProgSet(100, (res && res.unchanged) ? 'Windows already matches' : 'Done');
+    _osProgHide(700);
+  }
+  return res;
+}
+
 // Re-apply the current mode when the app theme changes (debounced).
-function maybeSyncWindows() {
+function maybeSyncWindows(opts) {
   try {
-    if (window.windowSplit && window.windowSplit.EMBEDDED) return;
-    const mode = (window.dataManager && dataManager.settings && dataManager.settings.osThemeMode) || 'off';
+    if (window.windowSplit && window.windowSplit.EMBEDDED && !(opts && opts.fromUser)) return;
+    const mode = (typeof dataManager !== 'undefined' && dataManager.settings && dataManager.settings.osThemeMode) || 'off';
     if (mode === 'off' || !(window.api && window.api.osTheme)) return;
     clearTimeout(_winSyncTimer);
-    _winSyncTimer = setTimeout(() => { _pushWindowsTheme(mode); }, 350);
+    _winSyncTimer = setTimeout(() => {
+      _runOsThemeOp('Updating Windows theme', { apply: [0, 100] }, () => _pushWindowsTheme(mode));
+    }, 250);
   } catch {}
 }
 // User changed the mode in Settings: revert Windows to its real state first (clean
@@ -944,10 +1131,15 @@ function maybeSyncWindows() {
 function setWindowsThemeMode(mode) {
   dataManager.updateSettings({ osThemeMode: mode });
   if (!(window.api && window.api.osTheme)) return;
-  Promise.resolve()
-    .then(() => window.api.osTheme.restore())
-    .catch(() => {})
-    .finally(() => { if (mode !== 'off') _pushWindowsTheme(mode); });
+  clearTimeout(_winSyncTimer);
+  const on = mode !== 'off';
+  _runOsThemeOp(on ? 'Matching Windows to the app' : 'Restoring Windows colors',
+    on ? { restore: [0, 40], apply: [40, 100] } : { restore: [0, 100] },
+    async () => {
+      const r = await Promise.resolve(window.api.osTheme.restore()).catch((e) => ({ ok: false, error: e && e.message }));
+      if (!on) return r;
+      return _pushWindowsTheme(mode);
+    });
 }
 window.maybeSyncWindows = maybeSyncWindows;
 window.setWindowsThemeMode = setWindowsThemeMode;
@@ -990,8 +1182,11 @@ function renderSettings() {
       <!-- Theme Selection -->
       <div class="settings-section">
         <h3 class="settings-section-title">Color Theme</h3>
+        ${[['classic', 'App Themes', ''], ['popular', 'Editor &amp; Browser Themes', 'Ports of the most popular VS Code themes and Chrome’s Material palettes.'], ['unique', 'Signature Mixes', 'Original palettes built on unexpected color pairings: buttons in one hue, links in another.']].map(([grp, label, hint]) => `
+        <div class="settings-theme-group-title">${label}</div>
+        ${hint ? `<p class="settings-section-hint">${hint}</p>` : ''}
         <div class="settings-theme-grid">
-          ${Object.entries(COLOR_THEMES).map(([id, theme]) => {
+          ${Object.entries(COLOR_THEMES).filter(([, t]) => (t.group || 'classic') === grp).map(([id, theme]) => {
             const previewStyle = theme.style || 'standard';
             const previewRadius = theme.vars['--radius-lg'] || '12px';
             const previewCardRadius = theme.vars['--radius-md'] || '10px';
@@ -1018,7 +1213,7 @@ function renderSettings() {
               ${id === currentTheme ? '<div class="settings-theme-check">&#10003;</div>' : ''}
             </button>`;
           }).join('')}
-        </div>
+        </div>`).join('')}
       </div>
 
       <!-- Note Size -->
@@ -1071,9 +1266,9 @@ function renderSettings() {
       <!-- Make Windows itself match the app theme -->
       <div class="settings-section">
         <h3 class="settings-section-title">Windows Theme</h3>
-        <p class="settings-section-hint">Match Windows dark/light mode and the accent color to the app theme. The accent is used for highlights, selected items and links — it is <i>not</i> painted over the Start menu / taskbar / title bars (that would flood Windows with the accent color). Recoloring those surfaces isn't possible without high contrast, which flattens every app, including this one. This PC only; <b>Off</b> restores your previous Windows colors. Updates whenever you change the app theme.</p>
+        <p class="settings-section-hint">Make Windows follow the app theme on this PC. <b>Accent</b> matches dark/light mode and the highlight color (selected items, links, toggles). <b>Tinted</b> goes further: Start, the taskbar and window title bars take on deep shades of the theme, while highlights use the theme accent. Windows can't recolor its surfaces any further without high contrast, which would flatten every app. <b>Off</b> restores your previous Windows colors. Updates whenever you change the app theme.</p>
         <div class="settings-option-row">
-          ${[['off', 'Off'], ['accent', 'Accent']].map(([m, label]) => `
+          ${[['off', 'Off'], ['accent', 'Accent'], ['tinted', 'Tinted']].map(([m, label]) => `
             <button class="settings-indicator-btn ${((dataManager.settings.osThemeMode || 'off') === m) ? 'active' : ''}" data-oswin="${m}">
               <span>${label}</span>
             </button>
@@ -1192,6 +1387,13 @@ function renderSettings() {
         </div>
         <button id="settings-digikey-save" class="settings-btn">Save DigiKey Credentials</button>
         <span id="settings-digikey-status" class="settings-inline-status"></span>
+      </div>
+
+      <!-- Raspberry Pi companion (desktop-only; ipc/pi-link.js) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Raspberry Pi</h3>
+        <p class="settings-section-desc">Link an always-on Raspberry Pi running EngOrg Pi and it takes the background work off this PC: it keeps the 3D printer found (no network scans here), logs every print even while this PC is off, and keeps your calendar feeds pre-fetched so syncs are instant. It updates itself to match this app. Set it up with <code>pi/install.sh</code> from the release's <b>EngOrg-Pi.tar.gz</b>.</p>
+        <div id="settings-pi-body" class="settings-pi-body">Checking…</div>
       </div>
 
       </section>
@@ -1427,7 +1629,7 @@ function renderSettings() {
   container.querySelectorAll('.settings-theme-card').forEach(card => {
     card.addEventListener('click', () => {
       const themeId = card.dataset.theme;
-      applyTheme(themeId);
+      applyTheme(themeId, { fromUser: true });
       dataManager.updateSettings({ theme: themeId });
       window.dispatchEvent(new CustomEvent('theme-changed')); // re-render notes/sidebar with new colors
       renderSettings(); // re-render to update active state
@@ -1446,6 +1648,9 @@ function renderSettings() {
 
   // Linked Accounts hub (Cloud / GitHub / Email)
   refreshLinkedAccounts();
+
+  // Raspberry Pi companion link
+  refreshPiLink();
 
   // Replay the guided tour / What's New (onboarding.js closes Settings first)
   container.querySelector('#settings-replay-tour')?.addEventListener('click', () => window.onboarding?.replayFirstRun());
@@ -2195,6 +2400,102 @@ function accountCard({ icon, name, sub, status, statusClass, actions }) {
         <div class="acct-actions">${actions || ''}</div>
       </div>
     </div>`;
+}
+
+// ── Raspberry Pi companion (Integrations tab; desktop-only — ipc/pi-link.js) ────────────
+async function refreshPiLink() {
+  const body = document.getElementById('settings-pi-body');
+  if (!body || !window.api.pi) return;
+  let st;
+  try { st = await window.api.pi.status(); } catch (e) { body.textContent = 'Could not check the Pi link: ' + e.message; return; }
+  if (!body.isConnected) return;
+  if (!st.linked) return renderPiPairing(body);
+
+  const fmtUp = (s) => (s >= 86400 ? Math.floor(s / 86400) + ' d ' : '') + Math.floor((s % 86400) / 3600) + ' h';
+  if (!st.online) {
+    body.innerHTML = `
+      <div class="settings-pi-head"><span class="settings-pi-dot off"></span><b>${escapeHtml(st.name || 'Raspberry Pi')}</b><span class="settings-pi-meta">${escapeHtml(st.host)}:${st.port}</span></div>
+      <p class="settings-section-hint">Can't reach the Pi right now (${escapeHtml(st.error || 'offline')}). This PC is doing the work itself until it's back.</p>
+      <div class="settings-pi-actions"><button class="settings-btn settings-btn-sm" data-pi="retry">Retry</button><button class="settings-btn settings-btn-sm settings-btn-danger" data-pi="unpair">Unpair</button></div>`;
+  } else {
+    const i = st.info, sys = i.system || {}, pr = i.printer || {}, cal = i.calendar || {}, up = i.update || {};
+    const printer = !pr.enabled ? 'off (printer support is off on this PC)'
+      : !pr.online ? 'watching — printer offline'
+      : pr.currentJob ? `printing ${escapeHtml(pr.currentJob.filename || '')}${pr.status && pr.status.progress != null ? ' · ' + Math.round(pr.status.progress * 100) + '%' : ''}`
+      : `online · ${escapeHtml((pr.status && pr.status.state) || 'idle')}`;
+    const version = up.updating ? `updating to v${escapeHtml(up.updating)}…`
+      : st.protocolMismatch ? `v${escapeHtml(i.version)} — <b>needs an update</b> to talk to this app`
+      : st.behind ? `v${escapeHtml(i.version)} — behind this app (v${escapeHtml(st.appVersion)})`
+      : `v${escapeHtml(i.version)} ✓`;
+    body.innerHTML = `
+      <div class="settings-pi-head"><span class="settings-pi-dot"></span><b>${escapeHtml(i.name || st.name || 'Raspberry Pi')}</b><span class="settings-pi-meta">${escapeHtml(st.host)}:${st.port}${sys.model ? ' · ' + escapeHtml(sys.model) : ''}</span></div>
+      <div class="settings-pi-grid">
+        <span>Version</span><span>${version}</span>
+        <span>Health</span><span>up ${fmtUp(sys.uptimeSec || 0)}${sys.cpuTempC != null ? ' · ' + sys.cpuTempC + ' °C' : ''} · ${sys.memMB ? sys.memMB.free + ' MB free' : ''}</span>
+        <span>3D printer</span><span>${printer}</span>
+        <span>Calendar feeds</span><span>${cal.feeds || 0} pre-fetched${cal.errors ? ` · ${cal.errors} failing` : ''}</span>
+      </div>
+      <label class="settings-toggle-row settings-pi-auto"><input type="checkbox" class="settings-checkbox" data-pi="auto" ${i.autoUpdate !== false ? 'checked' : ''}> <span>Keep the Pi updated automatically</span></label>
+      <div class="settings-pi-actions">
+        ${(st.behind || st.protocolMismatch) && !up.updating ? '<button class="settings-btn settings-btn-sm" data-pi="update">Update Pi now</button>' : ''}
+        <button class="settings-btn settings-btn-sm" data-pi="retry">Refresh</button>
+        <button class="settings-btn settings-btn-sm" data-pi="open">Status page ↗</button>
+        <button class="settings-btn settings-btn-sm settings-btn-danger" data-pi="unpair">Unpair</button>
+      </div>
+      <span class="settings-inline-status" data-pi-status></span>`;
+  }
+  const status = (t) => { const s = body.querySelector('[data-pi-status]'); if (s) s.textContent = t; };
+  body.querySelectorAll('[data-pi]').forEach((el) => el.addEventListener(el.type === 'checkbox' ? 'change' : 'click', async () => {
+    const act = el.dataset.pi;
+    if (act === 'retry') { body.textContent = 'Checking…'; refreshPiLink(); }
+    else if (act === 'open') window.api.openExternal(`http://${st.host}:${st.port}/`);
+    else if (act === 'auto') { const r = await window.api.pi.setAutoUpdate(el.checked); status(r && r.error ? r.error : (el.checked ? 'Auto-update on' : 'Auto-update off')); }
+    else if (act === 'update') {
+      el.disabled = true; status('Asking the Pi to update…');
+      const r = await window.api.pi.update();
+      status(r.error ? r.error : r.updating ? `Updating to v${r.to} — it restarts on its own in a minute.` : r.upToDate ? `Already on the newest published build (v${r.latest}).` : 'Done.');
+      setTimeout(refreshPiLink, 20000);
+    } else if (act === 'unpair') {
+      const ok = await window._showConfirm({ title: 'Unpair Raspberry Pi?', message: 'This PC goes back to doing the printer and calendar work itself. You can pair again any time with the Pi’s code.', confirmText: 'Unpair', danger: true });
+      if (!ok) return;
+      await window.api.pi.unpair();
+      refreshPiLink();
+    }
+  }));
+}
+
+function renderPiPairing(body) {
+  body.innerHTML = `
+    <div class="settings-pi-actions"><button class="settings-btn settings-btn-sm" data-pi="find">Find Pi on this network</button><span class="settings-inline-status" data-pi-status></span></div>
+    <div class="settings-pi-found" data-pi-found></div>
+    <div class="settings-pi-pair">
+      <input type="text" class="settings-input" data-pi-host placeholder="Pi address (e.g. 192.168.0.40)">
+      <input type="text" class="settings-input settings-pi-code" data-pi-code inputmode="numeric" maxlength="6" placeholder="6-digit code">
+      <button class="settings-btn settings-btn-sm" data-pi="pair">Pair</button>
+    </div>
+    <p class="settings-section-hint">The code is shown when you install EngOrg Pi, or any time with <code>sudo engorg-pi code</code> on the Pi.</p>`;
+  const $ = (s) => body.querySelector(s);
+  const status = (t) => { $('[data-pi-status]').textContent = t; };
+  let port = 0;
+  $('[data-pi="find"]').addEventListener('click', async () => {
+    status('Looking…');
+    const list = await window.api.pi.discover();
+    status(list.length ? '' : 'No Pi answered. Check it is on the same network, or type its address below.');
+    $('[data-pi-found]').innerHTML = list.map((p, n) => `<button class="settings-pi-row" data-n="${n}"><span class="settings-pi-dot"></span><b>${escapeHtml(p.name || 'Raspberry Pi')}</b><span class="settings-pi-meta">${escapeHtml(p.host)} · v${escapeHtml(p.version || '?')}${p.paired ? ' · paired with another PC' : ''}</span></button>`).join('');
+    $('[data-pi-found]').querySelectorAll('[data-n]').forEach((b) => b.addEventListener('click', () => {
+      const p = list[+b.dataset.n];
+      $('[data-pi-host]').value = p.host; port = p.port || 0;
+      $('[data-pi-code]').focus();
+    }));
+  });
+  const pair = async () => {
+    status('Pairing…');
+    const r = await window.api.pi.pair($('[data-pi-host]').value, port, $('[data-pi-code]').value);
+    if (r.error) { status(r.error); return; }
+    refreshPiLink();
+  };
+  $('[data-pi="pair"]').addEventListener('click', pair);
+  $('[data-pi-code]').addEventListener('keydown', (e) => { if (e.key === 'Enter') pair(); });
 }
 
 async function refreshLinkedAccounts() {

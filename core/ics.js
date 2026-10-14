@@ -1,0 +1,108 @@
+// ICS calendar parsing + fetching — Electron-free so the Raspberry Pi build shares it.
+//   - normalizeIcs(text, src) → parse ICS + expand recurrences into schedule-item objects
+//   - fetchUrl(url)           → GET an ICS feed over http/https (follows redirects)
+//   - fetchFeed(url, source)  → fetch + validate + normalize
+// ipc/calendar.js (desktop) and pi/lib/calendar-cache.js (Pi) both call into this, and
+// ipc/email.js reuses normalizeIcs for invites, so all ICS parsing goes through one place.
+const https = require('https');
+const http = require('http');
+const ical = require('node-ical');
+
+const WINDOW_BACK_DAYS = 30;
+const WINDOW_FWD_DAYS = 120;
+const DAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const pad = (n) => String(n).padStart(2, '0');
+const localDate = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const localTime = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+// Build one normalized schedule-item from a start/end Date pair.
+// occurrenceKey distinguishes the instances of a *recurring* event; pass null for a
+// single event so its extId is keyed by UID alone (date-independent). Keying a single
+// event's extId by its date would change the id whenever the event moves, orphaning the
+// old copy (and, for Brightspace "- Due" deadlines, the assignment note built from it)
+// instead of updating it in place.
+function makeEvent(ev, startDt, endDt, source, occurrenceKey) {
+  const allDay = ev.datetype === 'date';
+  const uid = ev.uid || 'nouid';
+  return {
+    title: (ev.summary || 'Event').toString().slice(0, 200),
+    description: (ev.description || '').toString().replace(/\r?\n/g, ' ').slice(0, 300),
+    location: (ev.location || '').toString().slice(0, 200),
+    date: localDate(startDt),
+    day: DAYS_FULL[startDt.getDay()],
+    startTime: allDay ? null : localTime(startDt),
+    endTime: allDay || !endDt ? null : localTime(endDt),
+    allDay,
+    extId: occurrenceKey == null ? `${source}:${uid}` : `${source}:${uid}:${occurrenceKey}`,
+    source,
+  };
+}
+
+// Parse an ICS string and expand recurrences within the sync window.
+function normalizeIcs(text, source) {
+  const parsed = ical.sync.parseICS(text);
+  const now = new Date();
+  const windowStart = new Date(now.getTime() - WINDOW_BACK_DAYS * 86400000);
+  const windowEnd = new Date(now.getTime() + WINDOW_FWD_DAYS * 86400000);
+
+  const events = [];
+  for (const key of Object.keys(parsed)) {
+    const ev = parsed[key];
+    if (!ev || ev.type !== 'VEVENT' || !ev.start) continue;
+    const durationMs = ev.end ? (ev.end - ev.start) : 0;
+
+    if (ev.rrule) {
+      // Recurring: expand each occurrence, honoring EXDATE and per-instance overrides.
+      const exdates = Object.keys(ev.exdate || {}).map(k => new Date(ev.exdate[k]).getTime());
+      const occurrences = ev.rrule.between(windowStart, windowEnd, true);
+      for (const occ of occurrences) {
+        if (exdates.includes(occ.getTime())) continue;
+        const override = ev.recurrences && ev.recurrences[localDate(occ)];
+        const startDt = override ? override.start : occ;
+        const endDt = override ? override.end : new Date(occ.getTime() + durationMs);
+        events.push(makeEvent(override || ev, startDt, endDt, source, localDate(occ)));
+      }
+    } else {
+      // Single event: include if it falls within the window. Key its extId by UID only
+      // (occurrenceKey null) so moving the event updates the same item instead of
+      // orphaning it. Fall back to a date key only when the feed omitted a UID, so
+      // distinct UID-less events don't collapse onto one id.
+      if (ev.start >= windowStart && ev.start <= windowEnd) {
+        events.push(makeEvent(ev, ev.start, ev.end, source, ev.uid ? null : localDate(ev.start)));
+      }
+    }
+    if (events.length >= 2000) break; // safety cap
+  }
+  return events;
+}
+
+// Fetch an ICS feed over http/https, following a couple of redirects (webcal:// → https).
+function fetchUrl(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    let u = url.trim().replace(/^webcal:\/\//i, 'https://');
+    let parsed;
+    try { parsed = new URL(u); } catch { return reject(new Error('Invalid feed URL')); }
+    const lib = parsed.protocol === 'http:' ? http : https;
+    const req = lib.get(u, { timeout: 15000 }, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirects < 4) {
+        res.resume();
+        return resolve(fetchUrl(new URL(res.headers.location, u).href, redirects + 1));
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('Feed returned HTTP ' + res.statusCode)); }
+      let data = '';
+      res.on('data', c => { data += c; if (data.length > 8 * 1024 * 1024) req.destroy(); });
+      res.on('end', () => resolve(data));
+    });
+    req.on('error', (e) => reject(new Error('Could not reach feed: ' + e.message)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Feed request timed out')); });
+  });
+}
+
+async function fetchFeed(url, source) {
+  const text = await fetchUrl(url);
+  if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error('That URL did not return a calendar (ICS) feed.');
+  return normalizeIcs(text, source || 'feed');
+}
+
+module.exports = { normalizeIcs, fetchUrl, fetchFeed };

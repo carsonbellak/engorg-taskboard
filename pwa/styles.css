@@ -1993,6 +1993,7 @@ select.form-input option { background: var(--bg); color: var(--text); }
 
 /* Theme grid */
 .pset-theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.pset-theme-group { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin: 18px 0 4px; }
 .pset-theme {
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px;
   padding: 10px 6px 8px; border: 2px solid var(--border); border-radius: 14px;

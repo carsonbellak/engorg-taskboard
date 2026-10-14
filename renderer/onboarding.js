@@ -18,6 +18,24 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.4.0': {
+      title: "What's new",
+      intro: 'EngOrg 1.4 can hand its background work to a Raspberry Pi.',
+      slides: [
+        { emoji: '🍓', title: 'Raspberry Pi companion', body: 'Install EngOrg Pi on a Raspberry Pi 3 or newer (download EngOrg-Pi.tar.gz from the release and run pi/install.sh), then pair it in Settings → Integrations → Raspberry Pi using the 6-digit code it shows.' },
+        { emoji: '🖨️', title: 'Printer, always watched', body: 'The Pi keeps your 3D printer found even when its IP changes, so this PC never has to scan the network. It also logs every print around the clock, so you’re asked how a print went even if it finished while your PC was off.' },
+        { emoji: '⚡', title: 'Instant calendar syncs', body: 'The Pi keeps your calendar feeds pre-fetched, so syncs no longer wait on slow servers. It updates itself to match this app. If it’s ever offline, this PC just does the work itself.' },
+        { emoji: '🎨', title: 'Signature Mixes', body: 'Eighteen original themes in Settings → Appearance → Signature Mixes: Blueprint, Copper Patina, Aurora, Vaporwave, Plum & Gold, Risograph, Sakura & Indigo, Terracotta and more. Each pairs colors you wouldn’t expect. They’re in the web app too.' },
+      ],
+    },
+    '1.3.56': {
+      title: "What's new",
+      intro: 'Nineteen new themes, and Windows now keeps up with them.',
+      slides: [
+        { emoji: '🎨', title: 'Editor & browser themes', body: 'Settings → Appearance has a new “Editor & Browser Themes” section: Dracula, One Dark Pro, Monokai Pro, Tokyo Night, Catppuccin, GitHub, Night Owl, Rosé Pine, Gruvbox, Solarized, Chrome’s Material palettes and more. They’re in the web app too.' },
+        { emoji: '🪟', title: 'Windows follows your theme', body: 'Settings → Appearance → Windows Theme now updates Windows every time you change the app theme, with a small progress bar while it works. The new Tinted option also colors Start, the taskbar and title bars with deep shades of your theme.' },
+      ],
+    },
     '1.3.48': {
       title: "What's new",
       intro: 'Your schedule on your iPhone lock screen — plus class rooms and a smoother mobile app.',

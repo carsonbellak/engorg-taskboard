@@ -427,7 +427,11 @@
     let slicerInitialized = false;
 
     const emailView = new EmailView();
-    let emailInitialized = false;
+    // Start fetching mail as soon as the pointer lands on the Email tab, so the list is
+    // usually ready by the time the click switches views.
+    document.addEventListener('mouseover', (e) => {
+      if (e.target.closest && e.target.closest('.header-tab[data-view="email"]')) emailView.prefetch();
+    });
 
     function renderCurrentView() {
       if (typeof updateOrganicBack === 'function') updateOrganicBack();
@@ -436,7 +440,7 @@
         engineeringUtilities.deactivate();
       }
       // Stop email polling when leaving the email view
-      if (viewRenderer.currentView !== 'email' && emailInitialized) {
+      if (viewRenderer.currentView !== 'email' && emailView.active) {
         emailView.deactivate();
       }
       // Tear down the Ecosystem canvas when leaving it (closes panels/menus).
@@ -448,7 +452,7 @@
         return;
       }
       if (viewRenderer.currentView === 'email') {
-        if (!emailInitialized) { emailView.init(); emailInitialized = true; }
+        emailView.ensureInit();
         emailView.activate();
         return;
       }

@@ -10,6 +10,9 @@ module.exports = {
   // host/port/pairing-code). Both are localhost-network only (no cloud).
   ENGINK_MIRROR_PORT: 8770,   // WebSocket (stroke stream)
   ENGINK_DISCOVERY_PORT: 8771, // UDP (discovery broadcast/response)
+  // Raspberry Pi companion link (ipc/pi-link.js) — host/port/id + safeStorage-encrypted token.
+  // Device-local. Pi ports + protocol live in core/pi-protocol.js (shared with the Pi build).
+  PI_LINK_FILE: path.join('C:\\Assistant\\appdata', 'pi_link.json'),
   MOONRAKER_URL: 'http://192.168.0.131:7125',
   ORCASLICER_EXE: path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'OrcaSlicer', 'orca-slicer.exe'),
   ORCASLICER_RESOURCES: path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'OrcaSlicer', 'resources', 'profiles', 'Creality'),

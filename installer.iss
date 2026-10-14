@@ -76,8 +76,16 @@ Source: "state.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "moonraker.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 Source: "fluidd-server.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
 
+Source: "build-pi.js"; DestDir: "{app}"; Components: core; Flags: ignoreversion
+
 ; IPC modules
 Source: "ipc\*"; DestDir: "{app}\ipc"; Components: core; Flags: ignoreversion recursesubdirs
+
+; Electron-free shared modules (also bundled into the Raspberry Pi build)
+Source: "core\*"; DestDir: "{app}\core"; Components: core; Flags: ignoreversion recursesubdirs
+
+; Raspberry Pi companion source (build-pi.js packs it into EngOrg-Pi.tar.gz)
+Source: "pi\*"; DestDir: "{app}\pi"; Components: core; Flags: ignoreversion recursesubdirs
 
 ; Assets
 Source: "assets\*"; DestDir: "{app}\assets"; Components: core; Flags: ignoreversion recursesubdirs

@@ -1,0 +1,25 @@
+[Unit]
+Description=EngOrg Pi companion (Engineering Task Board backend)
+Documentation=https://github.com/carsonbellak/engorg-taskboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engorg
+Group=engorg
+Environment=NODE_ENV=production
+Environment=ENGORG_PI_HOME=/opt/engorg-pi
+Environment=ENGORG_PI_DATA=/opt/engorg-pi/data
+# A Pi 3 has 1 GB of RAM — keep the heap small.
+ExecStart=@NODE@ --max-old-space-size=192 /opt/engorg-pi/current/pi/server.js
+# The self-updater swaps /opt/engorg-pi/current and exits; this brings the new version up.
+Restart=always
+RestartSec=3
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/opt/engorg-pi
+
+[Install]
+WantedBy=multi-user.target

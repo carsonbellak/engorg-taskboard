@@ -95,6 +95,21 @@ const printTracker = (() => {
   async function checkPrints() {
     const active = (dataManager.getPrints() || []).filter(p => p.status === 'printing' && !p._prompting);
     if (!active.length) { stopPolling(); return; }
+    // A linked Raspberry Pi logs every job 24/7, so a print that finished while this PC was off
+    // (or that the printer has since moved past) still gets its outcome prompt.
+    if (window.api.pi) {
+      try {
+        const since = active.map(p => p.sentAt).sort()[0];
+        const r = await window.api.pi.printerJobs(since);
+        const ended = ((r && r.jobs) || []).filter(j => j.endedAt && j.filename);
+        let prompted = false;
+        for (const p of active) {
+          const j = p.gcodeFilename && ended.find(x => String(x.filename).includes(p.gcodeFilename) && Date.parse(x.endedAt) >= Date.parse(p.sentAt));
+          if (j) { p._prompting = true; prompted = true; await promptOutcome(p); }
+        }
+        if (prompted) return;
+      } catch (e) { /* Pi unavailable — fall back to the live printer state */ }
+    }
     let stats = null;
     try { const r = await window.api.printer.apiGet(baseUrl(), '/printer/objects/query?print_stats'); stats = r && r.result && r.result.status && r.result.status.print_stats; } catch (e) { return; }
     if (!stats) return;

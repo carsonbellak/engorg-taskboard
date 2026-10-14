@@ -335,6 +335,17 @@ const __api = {
     onStatus: (cb) => ipcRenderer.on('engink:status', (e, s) => cb(s)),
     removeListeners: () => { ipcRenderer.removeAllListeners('engink:message'); ipcRenderer.removeAllListeners('engink:status'); },
   },
+  // Raspberry Pi companion (pi/ build) — LAN discovery, pairing with the Pi's 6-digit code,
+  // status/version, self-update, and its 24/7 print-job log. The token never leaves main.
+  pi: {
+    discover: () => ipcRenderer.invoke('pi:discover'),
+    pair: (host, port, code) => ipcRenderer.invoke('pi:pair', host, port, code),
+    unpair: () => ipcRenderer.invoke('pi:unpair'),
+    status: () => ipcRenderer.invoke('pi:status'),
+    update: () => ipcRenderer.invoke('pi:update'),
+    setAutoUpdate: (on) => ipcRenderer.invoke('pi:setAutoUpdate', on),
+    printerJobs: (since) => ipcRenderer.invoke('pi:printerJobs', since),
+  },
   // OS theming — match Windows to the app theme. `apply` = accent mode
   // ({ r, g, b, dark }: accent on title bars/taskbar + dark/light). `applyContrast`
   // = full contrast theme from the whole palette ({ bg, bg2, text, muted, accent,
@@ -345,6 +356,7 @@ const __api = {
     applyContrast: (payload) => ipcRenderer.invoke('osTheme:applyContrast', payload),
     restore: () => ipcRenderer.invoke('osTheme:restore'),
     status: () => ipcRenderer.invoke('osTheme:status'),
+    onProgress: (cb) => ipcRenderer.on('osTheme:progress', (e, d) => cb(d)),
   }
 };
 

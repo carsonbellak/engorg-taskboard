@@ -44,8 +44,8 @@
   const config = readConfig();
   const isShell = !EMBEDDED && config.type !== 'single';
 
-  function applyThemeSafe(themeId) {
-    try { if (typeof applyTheme === 'function' && (typeof COLOR_THEMES === 'undefined' || COLOR_THEMES[themeId])) applyTheme(themeId); } catch {}
+  function applyThemeSafe(themeId, opts) {
+    try { if (typeof applyTheme === 'function' && (typeof COLOR_THEMES === 'undefined' || COLOR_THEMES[themeId])) applyTheme(themeId, opts); } catch {}
   }
 
   // Effective theme override at startup (consulted by settings.js initTheme).
@@ -147,7 +147,7 @@
 
   function setLocalTheme(themeId) {
     runtimeTheme = themeId;
-    applyThemeSafe(themeId);
+    applyThemeSafe(themeId, { fromUser: true });
     themeChanged();
     if (EMBEDDED) { try { parent.postMessage({ type: 'split-theme', index: PANE_INDEX, theme: themeId }, '*'); } catch {} }
     else { try { localStorage.setItem(LS_LOCAL_THEME, themeId); } catch {} }
@@ -155,8 +155,8 @@
 
   function clearLocalTheme() {
     runtimeTheme = null;
-    const synced = (window.dataManager && dataManager.settings && dataManager.settings.theme) || 'default';
-    applyThemeSafe(synced);
+    const synced = (typeof dataManager !== 'undefined' && dataManager.settings && dataManager.settings.theme) || 'default';
+    applyThemeSafe(synced, { fromUser: true });
     themeChanged();
     if (EMBEDDED) { try { parent.postMessage({ type: 'split-theme', index: PANE_INDEX, theme: null }, '*'); } catch {} }
     else { try { localStorage.removeItem(LS_LOCAL_THEME); } catch {} }

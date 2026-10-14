@@ -1,6 +1,7 @@
 name: Build & Release Installer
 
-# Builds EngOrg-Setup.exe with Inno Setup and publishes it:
+# Builds EngOrg-Setup.exe with Inno Setup and publishes it (on tags the Android APK and the
+# Raspberry Pi bundle EngOrg-Pi.tar.gz are attached too — jobs `android` and `pi`):
 #   • on every push to main  → the rolling "latest" GitHub Release (version 1.0.<run>)
 #   • on every v* tag push   → that version's GitHub Release (e.g. v1.1.0), stamped
 #                              with the real semver and attached as an asset.
@@ -200,6 +201,42 @@ jobs:
           cp "${{ steps.apk.outputs.name }}" EngOrg-Ink.apk
           gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && \
             gh release upload latest EngOrg-Ink.apk -R "$GITHUB_REPOSITORY" --clobber || true
+
+  # ---- Raspberry Pi: build the headless companion bundle and attach it (tags only) ----
+  # Installed Pis self-update from the newest vX.Y.Z release that carries EngOrg-Pi.tar.gz
+  # (pi/lib/updater.js); the rolling "latest" copy is the stable first-install URL.
+  pi:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build Pi bundle
+        shell: bash
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          [ "$PKG" = "$VER" ] || { echo "::error::package.json is $PKG but the tag is $GITHUB_REF_NAME"; exit 1; }
+          node build-pi.js
+
+      - name: Attach Pi bundle to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes "Automated release build."
+          gh release upload "$TAG" dist/EngOrg-Pi.tar.gz -R "$GITHUB_REPOSITORY" --clobber
+          gh release view latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 && \
+            gh release upload latest dist/EngOrg-Pi.tar.gz -R "$GITHUB_REPOSITORY" --clobber || true
 
   # ---- PWA: deploy the companion web app to Firebase Hosting on a release ----
   pwa:

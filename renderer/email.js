@@ -11,6 +11,9 @@ const EMAIL_LABELS = [
   { key: '$Label5', color: '#A855F7', name: 'Purple' },
 ];
 const EMAIL_LABEL_COLOR = (key) => (EMAIL_LABELS.find(l => l.key === key) || {}).color || '';
+// A list loaded (e.g. by a hover prefetch) within this window counts as fresh — entering
+// the view won't immediately reload it.
+const EMAIL_FRESH_MS = 15000;
 
 class EmailView {
   constructor() {
@@ -28,9 +31,25 @@ class EmailView {
     this.composeAttachments = [];
     this.built = false;
     this.shellBuilt = false;        // whether the 3-pane shell (vs the onboarding screen) is mounted
+    this._initPromise = null;
+    this._loadInFlight = false;
+    this._lastLoadAt = 0;           // when the message list last loaded successfully
   }
 
   // ── lifecycle ──
+  ensureInit() {
+    if (!this._initPromise) this._initPromise = this.init();
+    return this._initPromise;
+  }
+
+  // Warm the view before it's shown (pointer is over the Email tab): first use builds the
+  // shell and fetches mail; later, a silent refresh if the cached list has gone stale.
+  prefetch() {
+    if (!this._initPromise) { this.ensureInit(); return; }
+    if (this.active || !this.built) return;
+    if (Date.now() - this._lastLoadAt > EMAIL_FRESH_MS) this._refreshList(true);
+  }
+
   async init() {
     this._buildModals();
     this.providers = await window.api.email.listProviders().catch(() => ({}));
@@ -48,7 +67,8 @@ class EmailView {
   activate() {
     this.active = true;
     window.api.email.watch(true);            // spin up the IMAP IDLE push watchers
-    this._refreshList(true);                 // immediate catch-up on (re)entering the view
+    // Immediate catch-up on (re)entering the view — unless a hover prefetch just did it.
+    if (Date.now() - this._lastLoadAt > EMAIL_FRESH_MS) this._refreshList(true);
     if (this.pollTimer) clearInterval(this.pollTimer);
     this.pollTimer = setInterval(() => this._refreshList(true), 20000);  // fallback poll
   }
@@ -253,9 +273,11 @@ class EmailView {
   }
 
   // ── message list ──
-  async _loadMessages() {
+  async _loadMessages({ silent = false } = {}) {
     const listEl = document.getElementById('email-list');
-    listEl.innerHTML = `<div class="email-loading">Loading…</div>`;
+    // A silent refresh keeps the current list on screen instead of flashing "Loading…".
+    if (!silent || this.messages.length === 0) listEl.innerHTML = `<div class="email-loading">Loading…</div>`;
+    this._loadInFlight = true;
     try {
       if (this.selection === 'unified') {
         const { messages } = await window.api.email.listUnified({ limit: 40 });
@@ -264,18 +286,22 @@ class EmailView {
         const { messages } = await window.api.email.listMessages(this.selection, this.folder, { limit: 50 });
         this.messages = messages.map(m => ({ ...m, accountId: this.selection, folder: this.folder }));
       }
+      this._lastLoadAt = Date.now();
       this._renderList();
       this._harvestFromList();            // grow the recipient address book
       this._applyRules().catch(() => {}); // move rule-matched senders out of the inbox
     } catch (err) {
       listEl.innerHTML = `<div class="email-empty email-error">Could not load mail:<br>${this._esc(err.message)}</div>`;
+    } finally {
+      this._loadInFlight = false;
     }
   }
 
   async _refreshList(silent) {
     if (this.accounts.length === 0) return;
+    if (silent && this._loadInFlight) return;   // a load is already on its way (e.g. hover prefetch)
     if (!silent) document.getElementById('email-list').innerHTML = `<div class="email-loading">Refreshing…</div>`;
-    await this._loadMessages();
+    await this._loadMessages({ silent });
   }
 
   _renderList() {

@@ -70,6 +70,12 @@ function subnetPrefix(baseUrl) {
 
 let inFlight = null;
 
+// Optional second opinion consulted before the slow LAN scan — the desktop wires in its
+// linked Raspberry Pi here (ipc/pi-link.js), which watches the printer 24/7 and already
+// knows its address. Must resolve to a base URL or null. Unset on the Pi itself.
+let remoteResolver = null;
+function setRemoteResolver(fn) { remoteResolver = typeof fn === 'function' ? fn : null; }
+
 // Resolve the current Moonraker base URL, updating state.moonrakerUrl as a side effect.
 //   seed  — preferred URL to try first (e.g. the renderer's saved printer IP)
 //   force — skip the health check and scan immediately
@@ -82,6 +88,16 @@ function resolve({ force = false, seed = null } = {}) {
     if (!force && await healthCheck(candidate)) {
       state.moonrakerUrl = candidate;
       return candidate;
+    }
+
+    if (remoteResolver) {
+      let remote = null;
+      try { remote = await remoteResolver(); } catch {}
+      if (remote && remote !== candidate && await healthCheck(remote)) {
+        if (remote !== state.moonrakerUrl) console.log('[Moonraker] printer address from linked Pi:', remote);
+        state.moonrakerUrl = remote;
+        return remote;
+      }
     }
 
     const prefix = subnetPrefix(candidate);
@@ -102,4 +118,4 @@ function resolve({ force = false, seed = null } = {}) {
 
 function getUrl() { return state.moonrakerUrl || config.MOONRAKER_URL; }
 
-module.exports = { resolve, getUrl, healthCheck };
+module.exports = { resolve, getUrl, healthCheck, setRemoteResolver };

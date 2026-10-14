@@ -1,11 +1,12 @@
 # Engineering Task Board — LLM Navigation Guide
 
-Electron desktop app for engineering project management (task board, projects, calendar, email, 3D printing, CAD viewer, file browser, Git, Firebase sync). Companion PWA at `assistant-taskboard.web.app`.
+Electron desktop app for engineering project management (task board, projects, calendar, email, 3D printing, CAD viewer, file browser, Git, Firebase sync). Companion PWA at `assistant-taskboard.web.app`. Since **1.4.0** there is also **EngOrg Pi** (`pi/`), a minimal headless Linux build for a Raspberry Pi 3+ that takes over the always-on backend work (printer discovery and 24/7 print-job log, calendar feed cache) when the desktop links to it.
 
 **Where the detail lives** (loads automatically when you work in that folder — don't hunt for it elsewhere):
 - `renderer/CLAUDE.md` — per-module notes (ecosystem, settings, split window, tours…), views/navigation, renderer gotchas.
 - `ipc/CLAUDE.md` — per-handler notes, linked-account integrations (Gradescope/Variate/Brightspace/GitHub/Claude), desktop mode, non-obvious IPC semantics.
 - `pwa/CLAUDE.md` — PWA structure, its separate settings doc, deploy/cache-bust.
+- `pi/CLAUDE.md` — the Raspberry Pi build: what it offloads, its API, install/self-update, and how it stays current.
 - **Exact IPC channel names/signatures: grep `preload.js`** (the source of truth) — not documented here on purpose.
 
 ---
@@ -31,7 +32,17 @@ The PWA (`pwa/`) is a **reflection of the desktop app** (`renderer/` + `ipc/`). 
 - Data model / business logic (status, completion, filtering, sorting) → keep both in agreement
 - `tour.js` is the exception: mirrored **verbatim** (`renderer/tour.js` ≡ `pwa/tour.js`)
 
-Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial integrations, Engineering utilities, email. When in doubt, sync it.
+Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial integrations, Engineering utilities, email, the Raspberry Pi link. When in doubt, sync it.
+
+---
+
+## 🍓 Keep the Raspberry Pi build current
+
+`pi/` is a headless Node service (no Electron, no UI). It runs the **desktop's own Electron-free modules**, listed in `pi/manifest.json`: `config.js`, `state.js`, `moonraker.js`, `core/`. They're bundled by `build-pi.js` and never forked, so a desktop fix reaches the Pi automatically. Your side of that:
+- **Code in a manifest file must stay Electron-free.** Shared logic goes in `core/`; the `ipcMain` wrapper stays in `ipc/` (example: `ipc/calendar.js` → `core/ics.js`). If a Pi feature needs more desktop code, move it into `core/` and add it to the manifest.
+- **Changed a Pi `/api/*` shape?** Bump `PROTOCOL` in `core/pi-protocol.js`, which holds the ports, header and asset name shared by both sides.
+- **Run `node build-pi.js --check`** after touching a manifest file (the hook prints a **PI POINTER**). The pre-ship guard **blocks `release.js`** if it fails.
+- Releases ship the Pi too: CI job `pi` attaches `EngOrg-Pi.tar.gz` to each `vX.Y.Z` tag, and linked Pis self-update to it. The desktop also asks an outdated Pi to update. Details: `pi/CLAUDE.md`.
 
 ---
 
@@ -39,7 +50,7 @@ Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial 
 
 **Only when the user's latest message asks for it** (hard rule above). Everything below is *how*, never *whether*.
 
-`/ship` holds the full runbook. In short: parity check → `node submit-changes.js --list` (safe preview, CRLF-normalized) → `node release.js patch -m "<summary>"` (`minor`/`major`/`X.Y.Z` when warranted). The tag triggers `.github/workflows/release-installer.yml` (installer + Android APK). **Don't poll CI.**
+`/ship` holds the full runbook. In short: parity check → `node submit-changes.js --list` (safe preview, CRLF-normalized) → `node release.js patch -m "<summary>"` (`minor`/`major`/`X.Y.Z` when warranted). The tag triggers `.github/workflows/release-installer.yml` (installer + Android APK + Raspberry Pi bundle `EngOrg-Pi.tar.gz`). **Don't poll CI.** **1.4.0** (the Pi release) is cut with `node release.js 1.4.0` (or `minor`). `package.json` deliberately stays at the previous version until then, because `release.js` refuses an unchanged version.
 
 - This install dir is **not a git checkout**. Never `git commit`/`push` the `~/.engorg-submit/…` clone, never bare `submit-changes.js -m`, no manual tag surgery — even for `mobile-ink/` or `.github/workflows/` edits, and even if the release sweeps up unrelated WIP (acceptable). Only if the user *explicitly* asks for a non-release push: `node submit-changes.js -m "…"` (`--pr` for a branch + PR link).
 - **The PWA does NOT auto-deploy** — the `FIREBASE_SERVICE_ACCOUNT` secret is not set, so CI's `pwa` job skips. After any release touching `pwa/`, deploy it yourself (see `pwa/CLAUDE.md`; bump `CACHE_NAME` in `pwa/sw.js` *before* releasing).
@@ -52,7 +63,7 @@ Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial 
 
 ## 🤖 Dev automation (`.claude/`)
 
-- **Hooks:** editing a parity-relevant `renderer/` file flags a pending PWA mirror (editing the PWA side clears it; `node .claude/scripts/parity-ack.js <file>` if genuinely desktop-only). Prompt intent → points at the matching agent. `release.js` is **blocked** while mirrors are pending.
+- **Hooks:** editing a parity-relevant `renderer/` file flags a pending PWA mirror (editing the PWA side clears it; `node .claude/scripts/parity-ack.js <file>` if genuinely desktop-only). Prompt intent → points at the matching agent. `release.js` is **blocked** while mirrors are pending, or if `node build-pi.js --check` fails. Editing a file the Pi bundle ships prints a **PI POINTER**.
 - **Agents:** `pwa-mirror`, `ipc-feature`, `integration-builder`, `utility-builder`, `parity-auditor`. **Commands:** `/ship` (`/push`), `/mirror`, `/add-ipc`, `/new-integration`, `/new-utility`, `/parity-check`.
 - **When to delegate:** a subagent starts cold (reloads this file, re-reads the code you already have open). Delegate multi-file recipes — a new IPC channel, integration, utility, or a large mirror. **Mirror a small change (a CSS rule, one function) inline** using `parity-map.json`'s class map.
 - `.claude/parity-map.json` = source of truth for desktop↔PWA pairs + class translations — keep it current. Reference: `.claude/AUTOMATION.md`.
@@ -72,10 +83,15 @@ Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial 
 | `moonraker.js` | Moonraker URL self-healing — printer is on DHCP, so the live URL is `state.moonrakerUrl` (LAN /24 scan if `MOONRAKER_URL` is unreachable). Use it, not the config constant. |
 | `release.js` · `submit-changes.js` · `deploy-functions.js` | Shipping (above) |
 | `build-installer.js` · `installer.iss` · `build-icon.js` | Inno Setup installer build · `.ico` generator |
+| `build-pi.js` | Raspberry Pi bundle → `dist/EngOrg-Pi.tar.gz` (`--check` = stage + Electron guard + self-test only). See `pi/CLAUDE.md`. |
+
+**`core/`**: **Electron-free** modules shared by desktop main and the Pi build: `ics.js` (ICS fetch/parse; `ipc/calendar.js` + `email.js` use it) · `pi-protocol.js` (Pi ports `8780`/`8781`, `PROTOCOL`, discovery probe, asset name).
+
+**`pi/`**: EngOrg Pi service: `server.js` (HTTP API + CLI + `--selftest`), `lib/` (`printer-watch`, `calendar-cache`, `updater`, `auth`, `discovery`, `runtime-config`, `store`, `sysinfo`), `install.sh`, `engorg-pi.service`, `manifest.json`. Details: `pi/CLAUDE.md`.
 | `gradescope.js` | Standalone CLI scraper (dev tool; the app uses `ipc/gradescope.js`) |
 
 **`ipc/`** — one module per namespace, `module.exports = function register(getMainWindow)`. Details: `ipc/CLAUDE.md`.
-`data` (load/save whitelist, shell, dialogs) · `files` · `git` · `github` · `gradescope` · `variate` · `calendar` (ICS feeds) · `outlook` · `email` (+`oauth` for Microsoft) · `claude` (Anthropic key, syllabus import) · `auth` (Google) · `printer` · `slicer` · `print-history` · `kicad-importer` · `utility-store` · `engink-mirror` · `file-merger` · `ftdi` (+`ftdi_helper.py`) · `uart-programs` · `wifi-checker` · `spell` · `os-theme` · `desktop-mode` · `window` (titlebar controls) · `updates` · `release` (owner-only in-app release) · `contribute`
+`data` (load/save whitelist, shell, dialogs) · `files` · `git` · `github` · `gradescope` · `variate` · `calendar` (ICS feeds) · `outlook` · `email` (+`oauth` for Microsoft) · `claude` (Anthropic key, syllabus import) · `auth` (Google) · `printer` · `slicer` · `print-history` · `kicad-importer` · `utility-store` · `engink-mirror` · `file-merger` · `ftdi` (+`ftdi_helper.py`) · `uart-programs` · `wifi-checker` · `spell` · `os-theme` · `desktop-mode` · `window` (titlebar controls) · `updates` · `release` (owner-only in-app release) · `contribute` · `pi-link` (Raspberry Pi companion: discover/pair/status/update; feeds `calendar.js` + `moonraker.js`)
 
 **`renderer/`** — globals loaded by `<script>` tags in `index.html` (order matters, no imports). Details: `renderer/CLAUDE.md`.
 Core: `app.js` (root, tabs, sync loops) · `data.js` (`dataManager`) · `firebase-sync.js` · `taskboard.js` (`viewRenderer`) · `components/add-note-modal.js` (`ModalManager` — owns **all** modals) · `settings.js` (popup modal) · `titlebar.js` · `window-split.js`.
@@ -86,7 +102,7 @@ Engineering utilities (desktop-only): `engineering.js` (registry) · `printer.js
 
 ### Data files (`C:\Assistant\appdata\`)
 `data:save` whitelist (`ALLOWED_FILES` in `ipc/data.js`): `tasks.json`, `projects.json`, `purchases.json`, `settings.json`, `schedule.json`, `todos.json`, `archived_projects.json`, `print_history.json`.
-Written directly by main (outside the whitelist, device-local): `print_archive/`, `gradescope_attachments/`, `uart_programs/`, `spell_user.json`, `github.json`, `gradescope.json`, `variate.json`, `desktop_mode.json`, other linked-account cred files.
+Written directly by main (outside the whitelist, device-local): `print_archive/`, `gradescope_attachments/`, `uart_programs/`, `spell_user.json`, `github.json`, `gradescope.json`, `variate.json`, `desktop_mode.json`, `pi_link.json` (Pi host/id + `safeStorage` token), other linked-account cred files.
 
 ---
 
@@ -119,6 +135,7 @@ Each collection saves locally **and** uploads via `firebaseSync.upload(...)`. ID
 | `ORCASLICER_EXE` / `_RESOURCES` | `%ProgramFiles%\OrcaSlicer\…` | Slicer exe + Creality profiles |
 | `SLICER_OUTPUT_DIR` | `appdata/slicer_output` | G-code + merged-profile temp files |
 | `ENGINK_MIRROR_PORT` / `ENGINK_DISCOVERY_PORT` | `8770` / `8771` | EngInk LAN mirror (WS / UDP) |
+| `PI_LINK_FILE` | `appdata/pi_link.json` | Raspberry Pi link (Pi ports `8780`/`8781` live in `core/pi-protocol.js`, shared with the Pi) |
 | `VARIATE_APP_URL` / `VARIATE_API_URL` | Purdue StudioKit | Point Variate at another school |
 | `DIGIKEY_CLIENT_ID` / `_SECRET` | defaults | KiCad importer; overridable in Settings |
 | `UTILITY_STORE_CATALOG_URL` | raw GitHub URL | Utility Store catalog |

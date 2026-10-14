@@ -37,6 +37,9 @@ const CACHE_DIR = path.join(os.homedir(), '.engorg-submit');
 const CLONE_DIR = path.join(CACHE_DIR, repo);
 // Skip binaries/installer artifacts — this flow is for source/text changes.
 const BINARY_EXT = /\.(exe|zip|log|dll|node|wasm|bin|dat|ico|icns|png|jpe?g|gif|webp|woff2?|ttf|otf|mp4|mov|pdf|docx|xlsx|pptx)$/i;
+// Source dirs the app ships that the repo may not track yet. Only tracked top-level
+// dirs are walked, so a brand-new source dir has to be listed here to be picked up.
+const SOURCE_TOP = ['core', 'pi'];
 
 // ---- tiny arg parser ------------------------------------------------------
 function parseArgs(argv) {
@@ -127,6 +130,7 @@ function walk(absDir, rel, allowTop, out) {
 
 function syncIntoClone() {
   const allowTop = trackedTopLevel();
+  for (const d of SOURCE_TOP) allowTop.add(d);
   const files = [];
   walk(INSTALL_ROOT, '', allowTop, files);
   let copied = 0;

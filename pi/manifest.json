@@ -1,0 +1,18 @@
+{
+  "_purpose": "What build-pi.js puts in the Raspberry Pi bundle. Shared files are the desktop's OWN modules (no Pi forks), so the Pi always ships the current code. Everything listed must stay Electron-free — build-pi.js fails the build if any bundled file requires 'electron', and the bundle's --selftest must pass. Add a file here when a Pi feature starts using it.",
+  "include": [
+    "config.js",
+    "state.js",
+    "moonraker.js",
+    "core/",
+    "pi/"
+  ],
+  "exclude": [
+    "pi/CLAUDE.md",
+    "pi/manifest.json"
+  ],
+  "dependencies": [
+    "node-ical"
+  ],
+  "node": ">=20"
+}
