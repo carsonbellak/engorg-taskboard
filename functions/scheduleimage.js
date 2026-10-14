@@ -486,7 +486,7 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
       ctx.fillStyle = pal.success;
       ctx.fillRect(M, y, Math.max(barH, Math.round(trackW * ratio)), barH);
     }
-    y += Math.round(width * 0.105);
+    y += Math.round(width * 0.092);
   } else {
     // Empty day — a plain divider, no progress track.
     ctx.fillStyle = pal.border;
@@ -500,7 +500,11 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
     ctx.fillText('No scheduled items today', M, y + Math.round(width * 0.02));
   }
 
-  const rowH = Math.round(width * 0.115);
+  // Finished items drop out of the list (the header's "N of M done" + progress bar still
+  // count them) so the space goes to what's still ahead.
+  const rows = showList.filter((it) => !it.completed);
+
+  const rowH = Math.round(width * 0.105);
   const barW = Math.round(width * 0.014);
   const timeX = M + Math.round(width * 0.03);
   const textX = M + Math.round(width * 0.275);
@@ -508,9 +512,16 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
   // The 7-day strip is anchored above the dock; the list fills the space above it.
   const stripTop = height - BOTTOM_SAFE - forecastStripH(width);
   const listBottom = weather ? stripTop - Math.round(width * 0.02) : height - BOTTOM_SAFE;
-  const maxRows = Math.max(0, Math.floor((listBottom - y) / rowH));
+  // A row's ink runs from ~0.62·rowH above its baseline anchor to ~0.15·rowH below, so the
+  // last row only needs that tail of room — not a whole rowH. The "+ N more" line is
+  // reserved only when the list actually overflows.
+  const rowTail = Math.round(rowH * 0.15);
+  const moreH = Math.round(width * 0.05);
+  const fitRows = (reserve) => Math.max(0, Math.floor((listBottom - reserve - rowTail - y) / rowH) + 1);
+  let maxRows = fitRows(0);
+  if (rows.length > maxRows) maxRows = fitRows(moreH);
 
-  showList.slice(0, maxRows).forEach((it) => {
+  rows.slice(0, maxRows).forEach((it) => {
     const primary = it.completed ? pal.muted : pal.text;
     const secondary = it.completed ? pal.faint : pal.muted;
     // Accent bar.
@@ -540,10 +551,11 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
     y += rowH;
   });
 
-  if (showList.length > maxRows) {
+  if (rows.length > maxRows) {
+    // Sits just under the last row (y has advanced a full rowH past its baseline).
     ctx.fillStyle = pal.muted;
     ctx.font = `${Math.round(width * 0.036)}px Roboto`;
-    ctx.fillText(`+ ${showList.length - maxRows} more`, textX, y);
+    ctx.fillText(`+ ${rows.length - maxRows} more`, textX, y - rowH + rowTail + moreH);
   }
 
   if (weather) drawForecastStrip(ctx, { weather, top: stripTop, M, width, pal });
