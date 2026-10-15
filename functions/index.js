@@ -753,6 +753,7 @@ exports.startTimer = onRequest({ cors: true, invoker: 'public' }, async (req, re
       uid,
       label,
       durationSeconds,
+      repeat: body.repeat === true || body.repeat === 'true',
       startedAt: Timestamp.fromDate(now),
       expiresAt: Timestamp.fromDate(expiresAt),
       status: 'active',
@@ -848,21 +849,71 @@ exports.listTimers = onRequest({ cors: true, invoker: 'public' }, async (req, re
   }
 });
 
+// ===================== PUSH NOTIFICATIONS =====================
+// iOS freezes a home-screen PWA the moment it leaves the screen, so no page JS runs and
+// nothing it schedules locally fires until it is reopened. Anything the phone should
+// announce while the app is closed (timers, alarms, assignment reminders) is pushed from
+// here. Subscriptions live in pushSubscriptions/{uid}_{hash(endpoint)}.
+
+let vapidReady = false;
+function ensureVapid() {
+  if (vapidReady) return;
+  webpush.setVapidDetails(
+    'mailto:admin@assistant-taskboard.firebaseapp.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+  vapidReady = true;
+}
+
+// Sends `payload` (read by pwa/sw.js 'push': title, body, tag, url, timerId) to every
+// device the user subscribed. Dead subscriptions (404/410) are removed. `subsDocs` lets a
+// caller that already queried the user's subscriptions skip the lookup.
+async function sendPushToUser(uid, payload, subsDocs) {
+  const docs = subsDocs || (await db.collection('pushSubscriptions').where('uid', '==', uid).get()).docs;
+  if (!docs.length) return;
+  ensureVapid();
+  const body = JSON.stringify(payload);
+  await Promise.all(docs.map(async subDoc => {
+    try {
+      // urgency 'high' so an idle iPhone delivers it now rather than batching it.
+      await webpush.sendNotification(subDoc.data().subscription, body, { TTL: 3600, urgency: 'high' });
+    } catch (err) {
+      if (err.statusCode === 410 || err.statusCode === 404) {
+        await subDoc.ref.delete();
+      } else {
+        console.error('Push send error:', err.statusCode, err.body);
+      }
+    }
+  }));
+}
+
 exports.registerPushSubscription = onRequest(
   { cors: true, invoker: 'public', secrets: ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY'] },
   async (req, res) => {
     if (req.method !== 'POST') { res.status(405).json({ error: 'POST required' }); return; }
 
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
-
     try {
-      const { getAuth } = require('firebase-admin/auth');
-      const decoded = await getAuth().verifyIdToken(authHeader.split('Bearer ')[1]);
-      const uid = decoded.uid;
-      const { subscription } = req.body;
-
+      const { subscription, oldEndpoint } = req.body || {};
       if (!subscription?.endpoint) { res.status(400).json({ error: 'Invalid subscription' }); return; }
+
+      let uid = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        const { getAuth } = require('firebase-admin/auth');
+        const decoded = await getAuth().verifyIdToken(authHeader.split('Bearer ')[1]);
+        uid = decoded.uid;
+      } else if (typeof oldEndpoint === 'string' && oldEndpoint) {
+        // The service worker's 'pushsubscriptionchange' has no signed-in user. It proves
+        // ownership with the rotated-out endpoint (an unguessable capability URL we
+        // stored), and the new endpoint inherits that subscription's uid.
+        const prev = await db.collection('pushSubscriptions').where('endpoint', '==', oldEndpoint).limit(1).get();
+        if (!prev.empty) {
+          uid = prev.docs[0].data().uid;
+          await prev.docs[0].ref.delete();
+        }
+      }
+      if (!uid) { res.status(401).json({ error: 'Unauthorized' }); return; }
 
       const endpointHash = crypto.createHash('sha256').update(subscription.endpoint).digest('hex').slice(0, 16);
       await db.doc(`pushSubscriptions/${uid}_${endpointHash}`).set({
@@ -899,12 +950,6 @@ exports.fireExpiredTimers = onSchedule(
 
     if (expired.empty) return;
 
-    webpush.setVapidDetails(
-      'mailto:admin@assistant-taskboard.firebaseapp.com',
-      process.env.VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY
-    );
-
     for (const timerDoc of expired.docs) {
       const timer = timerDoc.data();
 
@@ -914,29 +959,190 @@ exports.fireExpiredTimers = onSchedule(
         expiredAt: new Date().toISOString()
       });
 
-      const subsSnap = await db.collection('pushSubscriptions')
-        .where('uid', '==', timer.uid).get();
+      // Repeating timers roll over here, not on the clients: a client that retired the
+      // timer itself would stop this push, so the phone would never hear about it.
+      // The next cycle is anchored to the old deadline, so scheduler lag adds no drift.
+      if (timer.repeat && timer.durationSeconds && timer.expiresAt) {
+        const durMs = timer.durationSeconds * 1000;
+        const prevMs = timer.expiresAt.toMillis();
+        const nextMs = prevMs + Math.max(1, Math.ceil((Date.now() - prevMs + 1) / durMs)) * durMs;
+        const nextId = `timer_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
+        await db.doc(`timers/${nextId}`).set({
+          uid: timer.uid,
+          label: timer.label || 'Timer',
+          durationSeconds: timer.durationSeconds,
+          repeat: true,
+          startedAt: Timestamp.fromMillis(nextMs - durMs),
+          expiresAt: Timestamp.fromMillis(nextMs),
+          status: 'active',
+          notificationSent: false,
+          createdAt: new Date().toISOString(),
+          createdVia: timer.createdVia || 'repeat'
+        });
+      }
 
-      if (subsSnap.empty) continue;
-
-      const payload = JSON.stringify({
+      await sendPushToUser(timer.uid, {
         title: `Timer Done: ${timer.label}`,
         body: `Your ${formatDurationShort(timer.durationSeconds)} timer has finished.`,
         timerId: timerDoc.id,
         url: '/#timers'
       });
+    }
+  }
+);
 
-      await Promise.all(subsSnap.docs.map(async subDoc => {
-        try {
-          await webpush.sendNotification(subDoc.data().subscription, payload);
-        } catch (err) {
-          if (err.statusCode === 410 || err.statusCode === 404) {
-            await subDoc.ref.delete();
-          } else {
-            console.error('Push send error:', err.statusCode, err.body);
-          }
-        }
-      }));
+// ── Alarms + assignment reminders ───────────────────────────────
+// Server twin of renderer/timers.js _checkAlarms/_checkAssignmentsDue (and the PWA's
+// pwaCheckTimersAndAlarms/pwaCheckAssignmentsDue). Times are the user's wall clock in
+// settings.timeZone, which the desktop stamps (renderer/data.js). What was already pushed
+// is tracked in pushState/{uid}, apart from the synced settings, so a client firing the
+// same alarm locally on another device never suppresses the phone's push.
+const ALARM_GRACE_MIN = 3;          // the scheduler can start late or skip a tick
+const ASSIGNMENT_ALERT_HOURS = 6;   // same window as the desktop + PWA
+const DEFAULT_TZ = 'America/New_York';
+
+function validTimeZone(tz) {
+  if (typeof tz !== 'string' || !tz) return DEFAULT_TZ;
+  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return DEFAULT_TZ; }
+}
+
+// Wall-clock reading of instant `ms` in zone `tz`.
+function zonedParts(ms, tz) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', weekday: 'short',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).formatToParts(new Date(ms));
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]));
+  return {
+    y: +p.year, mo: +p.month, d: +p.day, h: +p.hour, mi: +p.minute,
+    date: `${p.year}-${p.month}-${p.day}`,
+    minutes: (+p.hour) * 60 + (+p.minute),
+    dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday)
+  };
+}
+
+// Instant at which the wall clock in `tz` reads `date` (YYYY-MM-DD) `time` (HH:MM).
+function zonedToMs(date, time, tz) {
+  const [y, mo, d] = date.split('-').map(Number);
+  const [h, mi] = time.split(':').map(Number);
+  const target = Date.UTC(y, mo - 1, d, h, mi);
+  let ms = target;
+  for (let i = 0; i < 2; i++) {      // second pass settles DST-boundary offsets
+    const p = zonedParts(ms, tz);
+    ms += target - Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi);
+  }
+  return ms;
+}
+
+async function remindUser(uid, subs) {
+  const nowMs = Date.now();
+  const settingsRef = db.doc(`users/${uid}/data/settings`);
+  const stateRef = db.doc(`pushState/${uid}`);
+  const [settingsDoc, tasksDoc, stateDoc] = await Promise.all([
+    settingsRef.get(), db.doc(`users/${uid}/data/tasks`).get(), stateRef.get()
+  ]);
+  const settings = settingsDoc.exists ? settingsDoc.data() : {};
+  const tz = validTimeZone(settings.timeZone);
+  const now = zonedParts(nowMs, tz);
+  const state = stateDoc.exists ? stateDoc.data() : {};
+  const prevAlarms = state.alarms || {};
+  const prevAsg = state.asg || {};
+
+  // Alarms: { id, time 'HH:MM', label, days[] (empty = one-shot), enabled, lastFired }
+  const alarms = Array.isArray(settings.alarms) ? settings.alarms : [];
+  const alarmState = {};
+  const fired = [];
+  for (const a of alarms) {
+    if (!a || !a.id || !/^\d{2}:\d{2}$/.test(a.time || '')) continue;
+    if (prevAlarms[a.id]) alarmState[a.id] = prevAlarms[a.id];
+    if (alarmState[a.id] === now.date) continue;
+    // An open client that just fired a one-shot has already switched it off and
+    // stamped lastFired, so that alarm still counts as armed for today's push.
+    if (!a.enabled && a.lastFired !== now.date) continue;
+    const [h, m] = a.time.split(':').map(Number);
+    const late = now.minutes - (h * 60 + m);
+    if (late < 0 || late >= ALARM_GRACE_MIN) continue;
+    const recurring = Array.isArray(a.days) && a.days.length > 0;
+    if (recurring && !a.days.includes(now.dow)) continue;
+    alarmState[a.id] = now.date;
+    fired.push(a.id);
+    await sendPushToUser(uid, { title: '⏰ Alarm', body: a.label || 'Alarm', tag: `alarm-${a.id}`, url: '/#timers' }, subs);
+  }
+
+  // Do what an open client would have: stamp lastFired, switch one-shots off. Without
+  // this, a one-shot that fired while every app was closed would ring again tomorrow.
+  if (fired.length) {
+    await db.runTransaction(async tx => {
+      const snap = await tx.get(settingsRef);
+      const list = snap.exists && Array.isArray(snap.data().alarms) ? snap.data().alarms : null;
+      if (!list) return;
+      let changed = false;
+      const next = list.map(a => {
+        if (!a || !fired.includes(a.id) || a.lastFired === now.date) return a;
+        changed = true;
+        const recurring = Array.isArray(a.days) && a.days.length > 0;
+        return { ...a, lastFired: now.date, enabled: recurring ? a.enabled : false };
+      });
+      if (changed) tx.update(settingsRef, { alarms: next });
+    });
+  }
+
+  // Assignment reminders: once per assignment when it comes due within the window; a
+  // moved deadline changes the key and re-arms it. Tag `asg-<id>` matches the clients.
+  const tasks = tasksDoc.exists ? (tasksDoc.data().tasks || []) : [];
+  const windowMs = ASSIGNMENT_ALERT_HOURS * 3600000;
+  const asgState = {};
+  let projects = null;
+  for (const t of tasks) {
+    if (!t || t.category !== 'assignment' || t.completed || !t.dueDate) continue;
+    const date = String(t.dueDate).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const time = /^\d{2}:\d{2}/.test(t.dueTime || '') ? t.dueTime.slice(0, 5) : '23:59';
+    const key = `${date}T${time}`;
+    const dueMs = zonedToMs(date, time, tz);
+    if (dueMs < nowMs - 3600000) continue;
+    if (prevAsg[t.id] === key) { asgState[t.id] = key; continue; }
+    const left = dueMs - nowMs;
+    if (left > windowMs || left <= 0) continue;
+    asgState[t.id] = key;
+    if (!projects) {
+      const pd = await db.doc(`users/${uid}/data/projects`).get();
+      projects = pd.exists ? (pd.data().projects || []) : [];
+    }
+    const proj = projects.find(p => p.id === t.projectId);
+    const hrs = Math.floor(left / 3600000), mins = Math.round((left % 3600000) / 60000);
+    const due = new Date(dueMs).toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+    await sendPushToUser(uid, {
+      title: `📚 Due soon: ${t.title}`,
+      body: `${proj ? proj.name + ' · ' : ''}due ${due} (in ${hrs ? hrs + 'h ' : ''}${mins}m)`,
+      tag: `asg-${t.id}`,
+      url: '/'
+    }, subs);
+  }
+
+  if (JSON.stringify(alarmState) !== JSON.stringify(prevAlarms) || JSON.stringify(asgState) !== JSON.stringify(prevAsg)) {
+    await stateRef.set({ alarms: alarmState, asg: asgState, updatedAt: new Date().toISOString() });
+  }
+}
+
+exports.fireReminders = onSchedule(
+  {
+    schedule: 'every 1 minutes',
+    timeZone: 'America/New_York',
+    secrets: ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY']
+  },
+  async () => {
+    // Only users with a subscribed device can be reached, so they are the ones to scan.
+    const subsSnap = await db.collection('pushSubscriptions').get();
+    const byUid = new Map();
+    for (const d of subsSnap.docs) {
+      const uid = d.data().uid;
+      if (!uid) continue;
+      if (!byUid.has(uid)) byUid.set(uid, []);
+      byUid.get(uid).push(d);
+    }
+    for (const [uid, subs] of byUid) {
+      try { await remindUser(uid, subs); } catch (err) { console.error('fireReminders error:', uid, err); }
     }
   }
 );
