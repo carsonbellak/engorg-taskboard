@@ -15,7 +15,9 @@
 //
 // Weather (optional, from weather.js): current temp + condition icon and the day's high/
 // low sit at the right of the header, and a compact 7-day strip (day, icon, high, low) is
-// anchored at the bottom above the dock. Icons are drawn as vector shapes (no emoji).
+// anchored at the bottom above the dock. Just above the strip: today's sunrise/sunset
+// (always) and, when rain is falling or due within 3 h, a rain line saying when it's
+// expected to start/stop. Icons are drawn as vector shapes (no emoji).
 
 const path = require('path');
 const { PassThrough } = require('stream');
@@ -306,6 +308,73 @@ function drawForecastStrip(ctx, { weather, top, M, width, pal }) {
   });
 }
 
+// Sunrise/sunset glyph: a half sun on a horizon line with an up/down chevron above it.
+function drawSunEvent(ctx, cx, cy, s, up, pal) {
+  ctx.fillStyle = SUN_COLOR;
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.30, cy);
+  ctx.arc(cx, cy, s * 0.30, Math.PI, Math.PI * 2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = pal.muted;
+  ctx.fillRect(Math.round(cx - s * 0.48), Math.round(cy), Math.round(s * 0.96), Math.max(2, Math.round(s * 0.07)));
+  ctx.strokeStyle = SUN_COLOR;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(2, Math.round(s * 0.07));
+  const tip = up ? cy - s * 0.62 : cy - s * 0.42, base = up ? cy - s * 0.44 : cy - s * 0.60;
+  ctx.beginPath();
+  ctx.moveTo(cx - s * 0.14, base);
+  ctx.lineTo(cx, tip);
+  ctx.lineTo(cx + s * 0.14, base);
+  ctx.stroke();
+}
+
+// 'Rain until 4:30p' / 'Rain starting 3:15p · until 5:00p', or null.
+function rainText(rain) {
+  if (!rain) return null;
+  const when = (x) => time12(x.time) + (x.nextDay ? ' tomorrow' : '');
+  const until = rain.end ? `until ${when(rain.end)}` : 'for the rest of the day';
+  return rain.now
+    ? `${rain.word} ${until}`
+    : `${rain.word} starting ${when(rain.start)}${rain.end ? ` · ${until}` : ''}`;
+}
+
+const infoRowH = (width) => Math.round(width * 0.068);
+// Height of the rows drawWeatherInfo draws (0 when it draws none).
+function weatherInfoH(weather, width) {
+  if (!weather) return 0;
+  return ((weather.sun ? 1 : 0) + (rainText(weather.rain) ? 1 : 0)) * infoRowH(width);
+}
+
+// Rain line (if any) then the sunrise/sunset line, stacked in the `weatherInfoH` above
+// `bottom` (the top of the 7-day strip).
+function drawWeatherInfo(ctx, { weather, bottom, M, width, pal }) {
+  const rowH = infoRowH(width);
+  const iconS = Math.round(width * 0.05);
+  const textGap = Math.round(width * 0.018);
+  let y = bottom - weatherInfoH(weather, width) + Math.round(rowH * 0.62); // first baseline
+  const rt = rainText(weather.rain);
+  if (rt) {
+    drawWeatherIcon(ctx, weather.rain.word === 'Snow' ? 'snow' : 'rain', M + iconS / 2, y - Math.round(width * 0.018), iconS, pal, false);
+    ctx.fillStyle = pal.isDark ? RAIN_COLOR : pal.text;
+    ctx.font = `${Math.round(width * 0.036)}px RobotoBold`;
+    ctx.fillText(fitText(ctx, rt, width - 2 * M - iconS - textGap), M + iconS + textGap, y);
+    y += rowH;
+  }
+  if (weather.sun) {
+    const iy = y - Math.round(width * 0.008);
+    ctx.font = `${Math.round(width * 0.036)}px RobotoBold`;
+    // Sunrise at the left margin, sunset right-aligned to the right margin.
+    drawSunEvent(ctx, M + iconS / 2, iy, iconS, true, pal);
+    ctx.fillStyle = pal.text;
+    ctx.fillText(`Sunrise ${time12(weather.sun.rise)}`, M + iconS + textGap, y);
+    const setT = `Sunset ${time12(weather.sun.set)}`;
+    const rx = width - M;
+    rightText(ctx, setT, rx, y);
+    drawSunEvent(ctx, rx - ctx.measureText(setT).width - textGap - iconS / 2, iy, iconS, false, pal);
+  }
+}
+
 // Draw text right-aligned to rx (pureimage has no textAlign).
 function rightText(ctx, text, rx, y) {
   ctx.fillText(text, Math.round(rx - ctx.measureText(text).width), y);
@@ -363,7 +432,9 @@ function drawDoneScreen(ctx, { width, height, d, weekday, count, pal, weather })
     }
     const M = Math.round(width * 0.09);
     const BOTTOM_SAFE = Math.round(height * 0.14);
-    drawForecastStrip(ctx, { weather, top: height - BOTTOM_SAFE - forecastStripH(width), M, width, pal });
+    const stripTop = height - BOTTOM_SAFE - forecastStripH(width);
+    drawWeatherInfo(ctx, { weather, bottom: stripTop - Math.round(width * 0.012), M, width, pal });
+    drawForecastStrip(ctx, { weather, top: stripTop, M, width, pal });
   }
 
   // Success-colored check disc, centered below the clock zone.
@@ -509,9 +580,11 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
   const timeX = M + Math.round(width * 0.03);
   const textX = M + Math.round(width * 0.275);
   const textMaxW = width - textX - M;
-  // The 7-day strip is anchored above the dock; the list fills the space above it.
+  // The 7-day strip is anchored above the dock with the sunrise/sunset (+ rain) lines on
+  // top of it; the list fills the space above those.
   const stripTop = height - BOTTOM_SAFE - forecastStripH(width);
-  const listBottom = weather ? stripTop - Math.round(width * 0.02) : height - BOTTOM_SAFE;
+  const infoBottom = stripTop - Math.round(width * 0.012);
+  const listBottom = weather ? infoBottom - weatherInfoH(weather, width) - Math.round(width * 0.02) : height - BOTTOM_SAFE;
   // A row's ink runs from ~0.62·rowH above its baseline anchor to ~0.15·rowH below, so the
   // last row only needs that tail of room — not a whole rowH. The "+ N more" line is
   // reserved only when the list actually overflows.
@@ -558,7 +631,10 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
     ctx.fillText(`+ ${rows.length - maxRows} more`, textX, y - rowH + rowTail + moreH);
   }
 
-  if (weather) drawForecastStrip(ctx, { weather, top: stripTop, M, width, pal });
+  if (weather) {
+    drawWeatherInfo(ctx, { weather, bottom: infoBottom, M, width, pal });
+    drawForecastStrip(ctx, { weather, top: stripTop, M, width, pal });
+  }
 
   return encodePng(img);
 }
