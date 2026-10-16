@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.4.1': {
+      title: "What's new",
+      intro: 'Your phone now hears about things even when the web app is closed.',
+      slides: [
+        { emoji: '🔔', title: 'Alerts with the app closed', body: 'Alarms, assignment due-soon reminders and repeating timers are now sent from the cloud, so they reach your iPhone while the home-screen web app is closed. Before, they only appeared when you opened it. Tap “Enable” on the web app’s alerts banner once to turn them on.' },
+        { emoji: '☀️', title: 'UV on your lock screen', body: 'The lock-screen schedule wallpaper now shows the day’s max UV index under sunrise and sunset, colored from green to purple by how strong it is.' },
+      ],
+    },
     '1.4.0': {
       title: "What's new",
       intro: 'EngOrg 1.4 can hand its background work to a Raspberry Pi.',

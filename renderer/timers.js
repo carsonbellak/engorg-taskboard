@@ -562,11 +562,8 @@ function _handleTimerExpiry(t) {
   if (!t || !t.id || _notifiedTimers.has(t.id)) return;
   _notifiedTimers.add(t.id);
   _onTimerExpired(t.label || 'Timer');
-  if (t.repeat && t.durationSeconds) {
-    // Roll over to a fresh countdown and retire the finished one.
-    _createTimer(t.label || 'Timer', t.durationSeconds, { repeat: true }).catch(() => {});
-    try { firebaseSync.db.doc(`timers/${t.id}`).update({ status: 'expired' }); } catch {}
-  }
+  // Repeating timers roll over on the server (functions/ fireExpiredTimers). Retiring
+  // one here first would stop its push, so the phone would never hear it finish.
 }
 
 function _checkAlarms() {

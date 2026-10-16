@@ -424,6 +424,12 @@ async function getApiToken() {
   return token;
 }
 
+// True once this device's push subscription is registered with the server. From then on
+// the server (functions/ fireReminders, fireExpiredTimers) delivers alarms and assignment
+// reminders even while iOS has the PWA frozen, so the in-page watcher only beeps instead
+// of posting a second copy of the same notification.
+let pushReady = false;
+
 async function subscribeToPush(uid) {
   try {
     const reg = await navigator.serviceWorker.ready;
@@ -435,11 +441,12 @@ async function subscribeToPush(uid) {
       });
     }
     const idToken = await auth.currentUser.getIdToken();
-    await fetch('/api/registerPushSubscription', {
+    const r = await fetch('/api/registerPushSubscription', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription: sub.toJSON() })
     });
+    pushReady = r.ok;
   } catch (err) {
     console.warn('Push subscription failed:', err);
   }
@@ -495,7 +502,6 @@ let editingAlarmId = null;
 let alarmDayDraft = [];
 let stopwatch = { running: false, startTs: 0, accumulated: 0, laps: [] };
 let swInterval = null;
-const notifiedTimerIds = new Set();
 let editingScheduleId = null;
 let editingPurchaseId = null;
 let calendarMonth = new Date();
@@ -3752,26 +3758,20 @@ function pwaTimerBeep(freq, count, gap, dur, vol) {
     osc.onended = () => { try { ctx.close(); } catch {} };
   } catch {}
 }
-function pwaFireNotify(title, body) {
+async function pwaFireNotify(title, body, tag) {
+  // The server push already covers this device (see pushReady); posting here too would
+  // show the alert twice.
+  if (pushReady) return;
   try {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(title, { body });
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const opts = { body, tag, icon: '/icon-192.svg', data: { url: '/#timers' } };
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null;
+    if (reg) await reg.showNotification(title, opts); else new Notification(title, opts);
   } catch {}
 }
 async function pwaCheckTimersAndAlarms() {
-  const now = Date.now();
-  // Repeating timers: when one elapses, roll it over.
-  for (const t of (timers.active || [])) {
-    const expMs = t.expiresAt ? (t.expiresAt.getTime ? t.expiresAt.getTime() : +new Date(t.expiresAt)) : 0;
-    if (expMs && expMs <= now && t.id && !notifiedTimerIds.has(t.id)) {
-      notifiedTimerIds.add(t.id);
-      if (t.repeat && t.durationSeconds) {
-        try {
-          await pwaStartTimer(t.label || 'Timer', t.durationSeconds, true);
-          await db.collection('timers').doc(t.id).update({ status: 'expired' });
-        } catch {}
-      }
-    }
-  }
+  // Repeating timers roll over on the server (functions/ fireExpiredTimers), which also
+  // pushes the "done" alert, so there is nothing to do for timers here.
   // Alarms
   if (!data.settings) return;
   const alarms = Array.isArray(data.settings.alarms) ? data.settings.alarms : [];
@@ -3788,7 +3788,7 @@ async function pwaCheckTimersAndAlarms() {
     a.lastFired = today;
     if (!recurring) a.enabled = false;
     changed = true;
-    pwaFireNotify('⏰ Alarm', a.label || 'Alarm');
+    pwaFireNotify('⏰ Alarm', a.label || 'Alarm', `alarm-${a.id}`);
     pwaTimerBeep(740, 6, 0.45, 0.34, 0.25);
   }
   if (changed) {
@@ -3798,8 +3798,8 @@ async function pwaCheckTimersAndAlarms() {
 }
 // Assignment reminders (mirrors renderer/timers.js _checkAssignmentsDue): one
 // notification per assignment once it's due within ASSIGNMENT_ALERT_HOURS while the
-// PWA is open. Shown through the service worker with the same `asg-<id>` tag the
-// server push (functions/ notifyDueAssignments) uses, so the two never stack.
+// PWA is open. Only a fallback for a device without push: once pushReady, the server
+// (functions/ fireReminders) sends these with the same `asg-<id>` tag, app open or not.
 const ASSIGNMENT_ALERT_HOURS = 6;
 const ASG_ALERT_LS = 'engorg_asgAlerted';
 let lastAsgCheck = 0;
@@ -3807,6 +3807,7 @@ async function pwaCheckAssignmentsDue() {
   const nowMs = Date.now();
   if (nowMs - lastAsgCheck < 60000) return;
   lastAsgCheck = nowMs;
+  if (pushReady) return;
   if (!Array.isArray(data.tasks) || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   let fired = {};
   try { fired = JSON.parse(localStorage.getItem(ASG_ALERT_LS) || '{}') || {}; } catch (e) {}

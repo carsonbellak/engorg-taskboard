@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v28';
+const CACHE_NAME = 'engorg-v29';
 // VAPID public key — must match the value set in Firebase secrets and app.js
 const VAPID_PUBLIC_KEY = 'BDmHi7C-yoOita_aL7JFADc18CiVCcn0Jw43XPIQZ_4Bu4J279M1PgRnktePqsJh_-UGkhikhwnnUOdUsBEeQhM';
 const ASSETS = [
@@ -78,16 +78,19 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
+// No signed-in user here, so the server matches the old endpoint to carry the uid over.
+// Without this a rotated subscription would go silent until the PWA is next opened.
 self.addEventListener('pushsubscriptionchange', event => {
+  const oldEndpoint = event.oldSubscription && event.oldSubscription.endpoint;
   event.waitUntil(
-    self.registration.pushManager.subscribe({
+    (event.newSubscription ? Promise.resolve(event.newSubscription) : self.registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: VAPID_PUBLIC_KEY
-    }).then(sub =>
+    })).then(sub =>
       fetch('/api/registerPushSubscription', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subscription: sub.toJSON() })
+        body: JSON.stringify({ subscription: sub.toJSON(), oldEndpoint })
       })
     )
   );
