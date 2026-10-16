@@ -39,7 +39,8 @@ function parseCoord(v, lim) {
 }
 
 // → { current: { temp, kind, label, night }, today: { hi, lo }, days: [{ date, hi, lo, kind }],
-//     sun: { rise, set } ('HH:MM', the wallpaper's day) | null, rain: see rainOutlook() | null }
+//     sun: { rise, set } ('HH:MM', the wallpaper's day) | null, uv: the day's max UV index | null,
+//     rain: see rainOutlook() | null }
 // with `days` starting at `date` (the wallpaper's day), or null.
 async function fetchWeather({ lat, lon, units, date }) {
   let la = parseCoord(lat, 90), lo = parseCoord(lon, 180);
@@ -55,7 +56,7 @@ async function fetchWeather({ lat, lon, units, date }) {
     const url = 'https://api.open-meteo.com/v1/forecast'
       + `?latitude=${la}&longitude=${lo}`
       + '&current=temperature_2m,weather_code,is_day,precipitation'
-      + '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset'
+      + '&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset,uv_index_max'
       + '&minutely_15=precipitation&forecast_minutely_15=96&past_minutely_15=1'
       + `&temperature_unit=${unit}&timezone=auto&past_days=1&forecast_days=8`;
     try {
@@ -97,6 +98,7 @@ function shape(data, date) {
     today: { hi: days[0].hi, lo: days[0].lo },
     days,
     sun: rise && set ? { rise, set } : null,
+    uv: d.uv_index_max && Number.isFinite(d.uv_index_max[i]) ? Math.round(d.uv_index_max[i]) : null,
     // The rain alert is about "now", so only on the wallpaper for the location's today.
     rain: typeof cur.time === 'string' && cur.time.slice(0, 10) === days[0].date
       ? rainOutlook(data.minutely_15, cur, curDesc.kind)

@@ -15,8 +15,9 @@
 //
 // Weather (optional, from weather.js): current temp + condition icon and the day's high/
 // low sit at the right of the header, and a compact 7-day strip (day, icon, high, low) is
-// anchored at the bottom above the dock. Today's sunrise/sunset times sit, unlabeled
-// (just a rising/setting-sun glyph), to the left of the header weather. When rain is
+// anchored at the bottom above the dock. Today's sunrise/sunset times (unlabeled, just a
+// rising/setting-sun glyph) and max UV index sit in a column left of the header weather,
+// spread to the same height as the temp + high/low stack. When rain is
 // falling or due within 3 h, a rain line saying when it starts/stops is centered under the
 // strip, in the gap between the lock screen's flashlight and camera buttons. Icons are
 // drawn as vector shapes (no emoji).
@@ -218,10 +219,10 @@ function drawCloud(ctx, cx, cy, s, color) {
   ctx.fillRect(Math.round(cx - s * 0.20), Math.round(cy + s * 0.06), Math.round(s * 0.44), Math.round(s * 0.20));
 }
 
-function drawSun(ctx, cx, cy, s) {
-  ctx.fillStyle = SUN_COLOR;
+function drawSun(ctx, cx, cy, s, color = SUN_COLOR) {
+  ctx.fillStyle = color;
   disc(ctx, cx, cy, s * 0.22);
-  ctx.strokeStyle = SUN_COLOR;
+  ctx.strokeStyle = color;
   ctx.lineCap = 'round';
   ctx.lineWidth = Math.max(2, Math.round(s * 0.07));
   for (let i = 0; i < 8; i++) {
@@ -339,23 +340,58 @@ function rainText(rain) {
   return rain.end ? `${rain.word} from ${when(rain.start)} to ${when(rain.end)}` : `${rain.word} from ${when(rain.start)} on`;
 }
 
-// Sunrise over sunset, as a two-line column whose right edge is `rightX` and whose
-// bottom line sits on baseline `y` (the weekday line). Unlabeled — the glyph says which.
+// WHO UV-index scale colors (low · moderate · high · very high · extreme).
+function uvColor(uv) {
+  if (uv <= 2) return '#4CAF50';
+  if (uv <= 5) return SUN_COLOR;
+  if (uv <= 7) return '#F18B00';
+  if (uv <= 10) return '#E53935';
+  return '#B567A4';
+}
+
+// Rows of the sun column: sunrise, sunset, then the day's max UV (each when known).
+function sunRows(weather) {
+  const rows = [];
+  if (weather.sun) {
+    rows.push({ text: time12(weather.sun.rise), glyph: 'rise' });
+    rows.push({ text: time12(weather.sun.set), glyph: 'set' });
+  }
+  if (Number.isFinite(weather.uv)) rows.push({ text: `UV ${weather.uv}`, glyph: 'uv' });
+  return rows;
+}
+
+const SUN_FONT = (width) => Math.round(width * 0.031);
+const CAP = 0.711; // Roboto cap height / font size
+
+// Width of the sun column (0 when there is nothing to show). Leaves ctx.font changed.
+function sunColumnW(ctx, weather, width) {
+  const rows = sunRows(weather);
+  if (!rows.length) return 0;
+  ctx.font = `${SUN_FONT(width)}px RobotoBold`;
+  return Math.round(width * 0.04) + Math.round(width * 0.012) + Math.max(...rows.map((r) => ctx.measureText(r.text).width));
+}
+
+// Sunrise, sunset and max UV as a column whose right edge is `rightX`, spread so the first
+// row's cap top sits at `top` and the last row's baseline at `bottom` — i.e. the same
+// height as the weather stack beside it. Unlabeled times; the glyph says which.
 // Returns the column's width, or 0 (and draws nothing) when it won't fit right of `minX`.
-function drawSunTimes(ctx, { sun, rightX, y, minX, width, pal }) {
-  if (!sun) return 0;
-  ctx.font = `${Math.round(width * 0.031)}px RobotoBold`;
-  const rise = time12(sun.rise), set = time12(sun.set);
-  const iconS = Math.round(width * 0.04), gap = Math.round(width * 0.012);
-  const textW = Math.max(ctx.measureText(rise).width, ctx.measureText(set).width);
-  const colW = iconS + gap + textW;
+function drawSunTimes(ctx, { weather, rightX, top, bottom, minX, width, pal }) {
+  const rows = sunRows(weather);
+  const colW = sunColumnW(ctx, weather, width);
+  if (!colW) return 0;
   const x = rightX - colW;
   if (x < minX) return 0;
-  const lineH = Math.round(width * 0.043);
-  [[rise, true, y - lineH], [set, false, y]].forEach(([t, up, by]) => {
-    drawSunEvent(ctx, x + iconS / 2, by - Math.round(width * 0.004), iconS, up, pal);
+  const iconS = Math.round(width * 0.04);
+  const cap = SUN_FONT(width) * CAP;
+  const first = top + cap;
+  const step = rows.length > 1 ? (bottom - first) / (rows.length - 1) : 0;
+  rows.forEach((r, i) => {
+    const by = Math.round(rows.length > 1 ? first + i * step : bottom);
+    const gx = x + iconS / 2;
+    if (r.glyph === 'uv') drawSun(ctx, gx, by - cap / 2, iconS * 0.9, uvColor(weather.uv));
+    else drawSunEvent(ctx, gx, by - Math.round(width * 0.004), iconS, r.glyph === 'rise', pal);
     ctx.fillStyle = pal.sub;
-    rightText(ctx, t, rightX, by);
+    rightText(ctx, r.text, rightX, by);
   });
   return colW;
 }
@@ -433,14 +469,12 @@ function drawDoneScreen(ctx, { width, height, d, weekday, count, pal, weather })
       const tt = `${weather.current.temp}°`;
       const gap = Math.round(width * 0.025);
       // Measure the sun column first so the whole group (sun · icon · temp) is centered.
-      const sunW = weather.sun ? (() => {
-        ctx.font = `${Math.round(width * 0.031)}px RobotoBold`;
-        const tw = Math.max(ctx.measureText(time12(weather.sun.rise)).width, ctx.measureText(time12(weather.sun.set)).width);
-        return Math.round(width * 0.04) + Math.round(width * 0.012) + tw + Math.round(width * 0.05);
-      })() : 0;
+      const colW = sunColumnW(ctx, weather, width);
+      const sunW = colW ? colW + Math.round(width * 0.05) : 0;
       ctx.font = `${Math.round(width * 0.09)}px RobotoBold`;
       const x0 = cx - (sunW + iconS + gap + ctx.measureText(tt).width) / 2 + sunW;
-      if (sunW) drawSunTimes(ctx, { sun: weather.sun, rightX: x0 - Math.round(width * 0.05), y: baseY, minX: 0, width, pal });
+      // Spans the icon + temp group: icon top down to the temp's baseline.
+      if (sunW) drawSunTimes(ctx, { weather, rightX: x0 - Math.round(width * 0.05), top: baseY - Math.round(width * 0.032) - iconS / 2, bottom: baseY, minX: 0, width, pal });
       ctx.font = `${Math.round(width * 0.09)}px RobotoBold`; // drawSunTimes changed it
       drawWeatherIcon(ctx, weather.current.kind, x0 + iconS / 2, baseY - Math.round(width * 0.032), iconS, pal, weather.current.night);
       ctx.fillStyle = pal.text;
@@ -549,15 +583,20 @@ async function renderScheduleWallpaper({ date, events, tasks, projects, theme, w
         y - Math.round(width * 0.026), iconS, pal, weather.current.night);
       wxLeft = rightX - tw - Math.round(width * 0.02) - iconS;
     }
-    // Sunrise/sunset just left of today's weather, clear of the weekday name.
+    // Sunrise/sunset/UV just left of today's weather, clear of the weekday name, and as
+    // tall as the stack beside it: temp's cap top down to the high/low baseline.
+    const hlY = y + Math.round(width * 0.052);
     ctx.font = `${Math.round(width * 0.072)}px RobotoBold`;
     const dayEnd = M + ctx.measureText(weekday).width + Math.round(width * 0.03);
-    drawSunTimes(ctx, { sun: weather.sun, rightX: wxLeft - Math.round(width * 0.035), y, minX: dayEnd, width, pal });
+    const sunRight = wxLeft - Math.round(width * 0.035);
+    const sunW = drawSunTimes(ctx, { weather, rightX: sunRight, top: y - Math.round(width * 0.072 * CAP), bottom: hlY, minX: dayEnd, width, pal });
     ctx.fillStyle = pal.muted;
     ctx.font = `${Math.round(width * 0.040)}px Roboto`;
     const hl = `H ${weather.today.hi}°  L ${weather.today.lo}°`;
     wxW = ctx.measureText(hl).width + Math.round(width * 0.04);
-    rightText(ctx, hl, rightX, y + Math.round(width * 0.052));
+    // The column's last row shares the date line, so the date text stops short of it too.
+    if (sunW) wxW = Math.max(wxW, rightX - (sunRight - sunW) + Math.round(width * 0.03));
+    rightText(ctx, hl, rightX, hlY);
   }
 
   // Header: weekday + date + completion count.
