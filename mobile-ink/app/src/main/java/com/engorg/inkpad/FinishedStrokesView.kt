@@ -39,12 +39,17 @@ class FinishedStrokesView(context: Context) : View(context) {
         val highlighter: Boolean,
         val shape: ShapeSpec?,
         val brush: Brush = Brush.PEN, // ink style (freehand only; shapes always draw pen-style)
+        val fine: List<Path> = emptyList(), // shape detail drawn thinner than the outline (axis tick marks)
     )
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
 
     /** Actions in the floating menu over a selection (or the lone Paste pill after an empty tap). */
-    enum class MenuAction(val label: String) { CUT("Cut"), COPY("Copy"), PASTE("Paste"), DUPLICATE("Duplicate"), DELETE("Delete") }
+    enum class MenuAction(val label: String) {
+        CUT("Cut"), COPY("Copy"), PASTE("Paste"), DUPLICATE("Duplicate"), COLOR("Color"), DELETE("Delete"),
+        // Second row, shown when a single table is selected.
+        ROW_ADD("+ Row"), ROW_DEL("− Row"), COL_ADD("+ Col"), COL_DEL("− Col"), BORDER("Border"),
+    }
 
     companion object {
         const val PAGE_W = 816f   // 8.5in * 96
@@ -292,6 +297,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var vertexHandles: List<PointF>? = null
     private var lasso: List<PointF>? = null
     private var selMenu: List<MenuAction> = emptyList()
+    private var tableMenu: List<MenuAction> = emptyList()
     private var pasteMenuPage = -1
     private val pasteMenuAt = PointF()
     private val menuHits = ArrayList<Pair<MenuAction, RectF>>()   // screen-space, rebuilt every draw
@@ -322,10 +328,10 @@ class FinishedStrokesView(context: Context) : View(context) {
     fun docHeight(): Float = if (pages.isEmpty()) PAGE_H else pages.size * (PAGE_H + GAP) - GAP
     fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
-    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>) {
-        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; invalidate()
+    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>, tableMenu: List<MenuAction> = emptyList()) {
+        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; this.tableMenu = tableMenu; invalidate()
     }
-    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); pasteMenuPage = -1; menuHits.clear(); invalidate() }
+    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); pasteMenuPage = -1; menuHits.clear(); invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
 
     /** Show a lone "Paste" pill anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
@@ -351,12 +357,20 @@ class FinishedStrokesView(context: Context) : View(context) {
         return r
     }
 
+    /** Where the rotate knob sits on screen (centered under the selection box), or null. */
+    fun rotateHandleScreen(): PointF? {
+        val r = selectionScreenRect() ?: return null
+        return PointF(r.centerX(), r.bottom + dpf(30f))
+    }
+
+    /** Erase whole strokes near the tip. Tables are skipped, so erasing writing inside a cell never
+     *  deletes the grid (select the table and Delete it instead). */
     fun eraseNear(page: Int, x: Float, y: Float, radius: Float): Boolean {
         if (page < 0 || page >= pages.size) return false
         val r2 = radius * radius
         val recs = pages[page].recs
         val before = recs.size
-        recs.removeAll { rec -> rec.points.any { val dx = it.x - x; val dy = it.y - y; dx * dx + dy * dy <= r2 } }
+        recs.removeAll { rec -> rec.shape?.type != ShapeType.TABLE && rec.points.any { val dx = it.x - x; val dy = it.y - y; dx * dx + dy * dy <= r2 } }
         val changed = recs.size != before
         if (changed) invalidate()
         return changed
@@ -385,6 +399,12 @@ class FinishedStrokesView(context: Context) : View(context) {
                 }
                 for (p in rec.paths) canvas.drawPath(p, strokePaint)
                 strokePaint.pathEffect = null   // never leak the dash onto the next rec / freehand ink
+                if (rec.fine.isNotEmpty()) {
+                    // Tick marks: solid and about half the outline weight.
+                    strokePaint.strokeWidth = (rec.widthPx * 0.5f).coerceAtLeast(0.6f)
+                    strokePaint.strokeCap = Paint.Cap.ROUND
+                    for (p in rec.fine) canvas.drawPath(p, strokePaint)
+                }
             } else {
                 strokePaint.pathEffect = null
                 drawInk(canvas, rec.points, rec.paths.firstOrNull(), rec.color, rec.widthPx, rec.brush, rec.highlighter, strokePaint)
@@ -514,8 +534,27 @@ class FinishedStrokesView(context: Context) : View(context) {
                 canvas.drawCircle(hx, hy, dpf(9f), handleFill); canvas.drawCircle(hx, hy, dpf(9f), handleStroke)
             }
         }
-        // Sit the menu clear of the corner handles' touch zones (above the box, or below if no room).
-        if (selMenu.isNotEmpty()) drawMenu(canvas, selMenu, rect.centerX(), rect.top - dpf(28f), rect.bottom + dpf(28f))
+        // Rotate knob: a stalk down from the box to a circle holding a circular-arrow glyph.
+        rotateHandleScreen()?.let { k ->
+            val kr = dpf(11f)
+            canvas.drawLine(k.x, rect.bottom, k.x, k.y - kr, handleStroke)
+            canvas.drawCircle(k.x, k.y, kr, handleFill); canvas.drawCircle(k.x, k.y, kr, handleStroke)
+            val ar = kr * 0.5f
+            canvas.drawArc(k.x - ar, k.y - ar, k.x + ar, k.y + ar, -60f, 280f, false, handleStroke)
+            val tipA = Math.toRadians(220.0)
+            val tx0 = k.x + ar * cos(tipA).toFloat(); val ty0 = k.y + ar * sin(tipA).toFloat()
+            canvas.drawLine(tx0, ty0, tx0 + ar * 0.55f, ty0 - ar * 0.1f, handleStroke)
+            canvas.drawLine(tx0, ty0, tx0 + ar * 0.1f, ty0 + ar * 0.55f, handleStroke)
+        }
+        // Sit the menu clear of the corner handles' touch zones (above the box, or below — past the
+        // rotate knob — if there's no room).
+        if (selMenu.isNotEmpty()) {
+            val main = drawMenu(canvas, selMenu, rect.centerX(), rect.top - dpf(28f), rect.bottom + dpf(52f))
+            if (tableMenu.isNotEmpty()) {
+                if (main.bottom <= rect.top) drawMenu(canvas, tableMenu, rect.centerX(), main.top - dpf(6f), main.bottom + dpf(6f))
+                else drawMenu(canvas, tableMenu, rect.centerX(), -Float.MAX_VALUE, main.bottom + dpf(6f))
+            }
+        }
     }
 
     /**
@@ -523,7 +562,7 @@ class FinishedStrokesView(context: Context) : View(context) {
      * [belowY] when there's no room above), clamped on-screen so it stays reachable when zoomed in.
      * Records each button's padded hit rect in [menuHits].
      */
-    private fun drawMenu(canvas: Canvas, actions: List<MenuAction>, cx: Float, aboveY: Float, belowY: Float) {
+    private fun drawMenu(canvas: Canvas, actions: List<MenuAction>, cx: Float, aboveY: Float, belowY: Float): RectF {
         menuText.textSize = dpf(14f)
         val padH = dpf(14f); val h = dpf(40f); val margin = dpf(8f)
         val widths = actions.map { menuText.measureText(it.label) + padH * 2f }
@@ -532,6 +571,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         if (top < margin) top = belowY
         top = top.coerceIn(margin, (height - h - margin).coerceAtLeast(margin))
         var left = (cx - total / 2f).coerceIn(margin, (width - total - margin).coerceAtLeast(margin))
+        val bounds = RectF(left, top, left + total, top + h)
         val rr = h / 2f
         canvas.drawRoundRect(left + dpf(1f), top + dpf(2f), left + total + dpf(1f), top + h + dpf(2f), rr, rr, menuShadow)
         menuPaint.color = menuBg
@@ -546,5 +586,6 @@ class FinishedStrokesView(context: Context) : View(context) {
             menuHits.add(a to RectF(left, top - dpf(4f), left + w, top + h + dpf(4f)))
             left += w
         }
+        return bounds
     }
 }

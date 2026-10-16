@@ -18,6 +18,16 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.0': {
+      title: "What's new",
+      intro: 'EngInk on the tablet gets tables, better selection editing and more axes.',
+      slides: [
+        { emoji: '🔄', title: 'Edit what you select', body: 'Lasso some ink in EngInk, then tap Color to recolor it, drag the round knob under the box to rotate it, or drag it past the top or bottom edge to carry it to another page. To get Cut, Copy and Paste anywhere, hold the select tool still for a second.' },
+        { emoji: '📏', title: 'Hold for a straight line', body: 'Finish a stroke and keep the pen still for a moment. It snaps into a straight line, and it levels out when you’re close to horizontal or vertical.' },
+        { emoji: '▦', title: 'Tables', body: 'The new table tool draws a grid with or without an outer border. Select a table to add or remove rows and columns, or to turn its border on or off.' },
+        { emoji: '📈', title: 'More axes', body: 'The shapes menu now has 1- and 2-quadrant 2D axes and an 8-octant 3D axis, plus a Hashed axes checkbox for tick marks. Tick marks are smaller and thinner, and the 3D axes have them too.' },
+      ],
+    },
     '1.4.1': {
       title: "What's new",
       intro: 'Your phone now hears about things even when the web app is closed.',

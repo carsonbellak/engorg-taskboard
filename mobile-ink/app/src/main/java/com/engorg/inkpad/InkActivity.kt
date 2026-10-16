@@ -59,9 +59,14 @@ class InkActivity : ComponentActivity() {
     private var smoothing = 0.1f    // 0 = off, 1 = max; the slider spans a deliberately gentle range
     private var pendingShape: ShapeType? = null
     private var pendingShapeDashed = false   // arm shapes with a dashed outline (e.g. system boundaries)
+    private var pendingShapeHashed = true    // tick marks on the axes shapes
+    private var tableRows = 3
+    private var tableCols = 3
+    private var tableBorder = true
 
     private lateinit var colorButton: Button
     private var shapeButton: ImageButton? = null
+    private var tableButton: ImageButton? = null
     private var brushButton: ImageButton? = null
     private var pageLabel: TextView? = null
     private var mirrorButton: ImageButton? = null
@@ -97,9 +102,19 @@ class InkActivity : ComponentActivity() {
         override val smoothing get() = this@InkActivity.smoothing
         override val pendingShape get() = this@InkActivity.pendingShape
         override val pendingShapeDashed get() = this@InkActivity.pendingShapeDashed
+        override val pendingShapeHashed get() = this@InkActivity.pendingShapeHashed
+        override val pendingTableRows get() = tableRows
+        override val pendingTableCols get() = tableCols
+        override val pendingTableBorder get() = tableBorder
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
         override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
         override fun onShapeCommitted() { clearPendingShape(); this@InkActivity.tool = Tool.SELECT; updateTools() }
+        override fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit) {
+            val loc = IntArray(2); pane.getLocationInWindow(loc)
+            val w = dp(270)
+            val px = (loc[0] + x - w / 2f).toInt().coerceIn(0, (window.decorView.width - w).coerceAtLeast(0))
+            colorPopup(onPick).showAtLocation(pane, Gravity.NO_GRAVITY, px, (loc[1] + y).toInt())
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,8 +127,13 @@ class InkActivity : ComponentActivity() {
         brushSize = ip.getFloat("brushSize", brushSize).coerceIn(minBrush, maxBrush)
         brushColor = ip.getInt("brushColor", brushColor)
         smoothing = ip.getFloat("smoothing", smoothing).coerceIn(0f, 1f)
-        brush = runCatching { Brush.valueOf(ip.getString("brush", "PEN") ?: "PEN") }.getOrDefault(Brush.PEN)
+        // Every session starts on the plain Pen brush (the brush menu still switches it per session).
+        brush = Brush.PEN
         pendingShapeDashed = ip.getBoolean("shapeDashed", false)
+        pendingShapeHashed = ip.getBoolean("shapeHashed", true)
+        tableRows = ip.getInt("tableRows", 3).coerceIn(1, 20)
+        tableCols = ip.getInt("tableCols", 3).coerceIn(1, 20)
+        tableBorder = ip.getBoolean("tableBorder", true)
 
         store = NotebookStore(filesDir)
 
@@ -441,10 +461,10 @@ class InkActivity : ComponentActivity() {
         setOnClickListener { onClick(this) }
     }
 
-    private fun shapePreview(type: ShapeType, px: Int, dashed: Boolean = false): Bitmap {
+    private fun shapePreview(type: ShapeType, px: Int, dashed: Boolean = false, configure: (ShapeSpec) -> Unit = {}): Bitmap {
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bmp)
-        val spec = ShapeSpec.make(type, px / 2f, px / 2f, px * 0.30f)
+        val spec = ShapeSpec.make(type, px / 2f, px / 2f, px * 0.30f).also(configure)
         val paint = android.graphics.Paint().apply {
             isAntiAlias = true; style = android.graphics.Paint.Style.STROKE; color = Color.WHITE
             strokeWidth = px * 0.055f; strokeJoin = android.graphics.Paint.Join.ROUND
@@ -572,6 +592,7 @@ class InkActivity : ComponentActivity() {
             addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
             addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
             addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
+            addView(iconBtn(Icons.TABLE) { showTableMenu(it) }.also { tableButton = it })
             addView(sep())
             addView(colorButton)
             addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
@@ -596,7 +617,10 @@ class InkActivity : ComponentActivity() {
     }
 
     private fun showShapeMenu(anchor: View) {
-        val types = listOf(ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE, ShapeType.AXES2D, ShapeType.AXES3D)
+        val types = listOf(
+            ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE,
+            ShapeType.AXES2D_1Q, ShapeType.AXES2D_2Q, ShapeType.AXES2D, ShapeType.AXES3D, ShapeType.AXES3D_8,
+        )
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -605,7 +629,7 @@ class InkActivity : ComponentActivity() {
             }
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
-        val grid = GridLayout(this).apply { columnCount = 4 }
+        val grid = GridLayout(this).apply { columnCount = 5 }
         val popup = PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
 
         // "Dashed" toggle — flips the armed-shape style and re-renders every preview so the grid shows
@@ -616,8 +640,13 @@ class InkActivity : ComponentActivity() {
         val dashToggle = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; stateListAnimator = null
             setPadding(dp(10), dp(7), dp(10), dp(7))
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(4), dp(4), dp(4), dp(6)) }
             addView(dashIcon); addView(dashLabel)
+        }
+        // "Hashed axes" checkbox: tick (scale) marks on the axes shapes.
+        val hashBox = android.widget.CheckBox(this).apply {
+            text = "Hashed axes"; textSize = 12f; setTextColor(onSurface)
+            buttonTintList = ColorStateList.valueOf(accent)
+            isChecked = pendingShapeHashed
         }
         fun refreshDash() {
             val on = pendingShapeDashed
@@ -625,10 +654,16 @@ class InkActivity : ComponentActivity() {
             dashToggle.background = pill(if (on) accent else light)
             dashIcon.setImageBitmap(dashLineIcon(dp(30), dp(14), fg, on))
             dashLabel.setTextColor(fg)
-            for ((t, b) in shapeButtons) { b.setImageBitmap(shapePreview(t, dp(30), on)); b.setColorFilter(onSurface) }
+            for ((t, b) in shapeButtons) { b.setImageBitmap(shapePreview(t, dp(30), on) { it.hashed = pendingShapeHashed }); b.setColorFilter(onSurface) }
         }
         dashToggle.setOnClickListener { pendingShapeDashed = !pendingShapeDashed; saveBrushPref(); refreshDash() }
-        col.addView(dashToggle)
+        hashBox.setOnCheckedChangeListener { _, checked -> pendingShapeHashed = checked; saveBrushPref(); refreshDash() }
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(4), dp(4), dp(4), dp(6)) }
+            addView(dashToggle, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(hashBox, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(10) })
+        })
 
         for (type in types) {
             val btn = ImageButton(this).apply {
@@ -661,17 +696,96 @@ class InkActivity : ComponentActivity() {
 
     /** Arm a shape so the next stroke you draw becomes it (fitted to your stroke) instead of spawning. */
     private fun armShape(type: ShapeType) {
+        clearPendingShape()
         pendingShape = type
         tool = Tool.PEN; panes.forEach { it.onToolChanged() }; updateTools()
-        shapeButton?.background = pill(accent); shapeButton?.setColorFilter(AppTheme.onAccent())
-        val name = type.name.lowercase().replaceFirstChar { it.uppercase() }
-        val prefix = if (pendingShapeDashed) "dashed " else ""
-        Toast.makeText(this, "Draw a $prefix$name", Toast.LENGTH_SHORT).show()
+        val btn = if (type == ShapeType.TABLE) tableButton else shapeButton
+        btn?.background = pill(accent); btn?.setColorFilter(AppTheme.onAccent())
+        val prefix = if (pendingShapeDashed && type != ShapeType.TABLE) "dashed " else ""
+        val msg = if (type == ShapeType.TABLE) "Drag out the table (or tap to drop one)" else "Draw a $prefix${shapeLabel(type)}"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
     private fun clearPendingShape() {
         if (pendingShape == null) return
         pendingShape = null
-        shapeButton?.background = pill(light); shapeButton?.setColorFilter(onSurface)
+        for (b in listOf(shapeButton, tableButton)) { b?.background = pill(light); b?.setColorFilter(onSurface) }
+    }
+
+    private fun shapeLabel(t: ShapeType) = when (t) {
+        ShapeType.LINE -> "line"; ShapeType.ARROW -> "arrow"; ShapeType.RECT -> "rectangle"
+        ShapeType.ELLIPSE -> "ellipse"; ShapeType.TRIANGLE -> "triangle"
+        ShapeType.AXES2D_1Q -> "1-quadrant axis"; ShapeType.AXES2D_2Q -> "2-quadrant axis"; ShapeType.AXES2D -> "4-quadrant axis"
+        ShapeType.AXES3D -> "3D axis"; ShapeType.AXES3D_8 -> "8-octant 3D axis"; ShapeType.TABLE -> "table"
+    }
+
+    /**
+     * Table tool: pick rows x columns, then a bordered or borderless grid; the next drag (or tap)
+     * places it. Select a table afterwards to add/remove rows and columns or toggle its border.
+     */
+    private fun showTableMenu(anchor: View) {
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+        }
+        val popup = PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
+        val tiles = ArrayList<Pair<Boolean, ImageView>>()
+        fun refreshPreviews() {
+            for ((b, iv) in tiles) iv.setImageBitmap(shapePreview(ShapeType.TABLE, dp(56)) { it.rows = tableRows; it.cols = tableCols; it.border = b })
+        }
+        fun stepper(label: String, isRows: Boolean): View {
+            fun get() = if (isRows) tableRows else tableCols
+            val value = TextView(this).apply { text = get().toString(); textSize = 15f; setTextColor(onSurface); gravity = Gravity.CENTER; minWidth = dp(30) }
+            fun step(glyph: String, d: Int) = TextView(this).apply {
+                text = glyph; textSize = 18f; setTextColor(onSurface); gravity = Gravity.CENTER
+                background = pill(light); layoutParams = LinearLayout.LayoutParams(dp(38), dp(34))
+                setOnClickListener {
+                    val n = (get() + d).coerceIn(1, 20)
+                    if (isRows) tableRows = n else tableCols = n
+                    value.text = n.toString(); saveBrushPref(); refreshPreviews()
+                }
+            }
+            return LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(4), 0, dp(4))
+                addView(TextView(this@InkActivity).apply { text = label; textSize = 13f; setTextColor(muted) }, LinearLayout.LayoutParams(dp(72), WRAP_CONTENT))
+                addView(step("\u2212", -1)); addView(value); addView(step("+", 1))
+            }
+        }
+        col.addView(stepper("Rows", true))
+        col.addView(stepper("Columns", false))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(6), 0, 0) }
+        for ((b, name) in listOf(true to "Bordered", false to "No border")) {
+            val on = b == tableBorder
+            val iv = ImageView(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(56), dp(56))
+                setColorFilter(if (on) AppTheme.onAccent() else onSurface)
+            }
+            tiles.add(b to iv)
+            row.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                background = pill(if (on) accent else light); stateListAnimator = null
+                setPadding(dp(8), dp(6), dp(8), dp(6))
+                layoutParams = LinearLayout.LayoutParams(dp(92), WRAP_CONTENT).apply { setMargins(dp(4), 0, dp(4), 0) }
+                addView(iv)
+                addView(TextView(this@InkActivity).apply {
+                    text = name; textSize = 11f; gravity = Gravity.CENTER
+                    setTextColor(if (on) AppTheme.onAccent() else onSurface)
+                })
+                setOnClickListener {
+                    // A borderless 1x1 table would have no lines at all.
+                    if (!b && tableRows + tableCols < 3) { Toast.makeText(this@InkActivity, "Add a row or column first", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+                    tableBorder = b; saveBrushPref(); popup.dismiss(); armShape(ShapeType.TABLE)
+                }
+            })
+        }
+        col.addView(row)
+        refreshPreviews()
+        popup.showAsDropDown(anchor, 0, dp(6))
     }
 
     private fun showSizePopup(anchor: View) {
@@ -749,7 +863,10 @@ class InkActivity : ComponentActivity() {
         else -> "Strong · ${(smoothing * 100).roundToInt()}%"
     }
 
-    private fun showColorPicker(anchor: View, onPick: (Int) -> Unit) {
+    private fun showColorPicker(anchor: View, onPick: (Int) -> Unit) = colorPopup(onPick).showAsDropDown(anchor, 0, dp(6))
+
+    /** The palette grid as a popup (shown under the color button, or at a selection's menu). */
+    private fun colorPopup(onPick: (Int) -> Unit): PopupWindow {
         val pad = dp(10)
         val grid = GridLayout(this).apply {
             columnCount = 5
@@ -766,14 +883,15 @@ class InkActivity : ComponentActivity() {
             layoutParams = GridLayout.LayoutParams().apply { width = sz; height = sz; setMargins(m, m, m, m) }
             setOnClickListener { onPick(c); popup.dismiss() }
         })
-        popup.showAsDropDown(anchor, 0, dp(6))
+        return popup
     }
 
     private fun saveBrushPref() {
         getSharedPreferences(INK_PREFS, MODE_PRIVATE).edit()
             .putFloat("brushSize", brushSize).putInt("brushColor", brushColor)
             .putFloat("smoothing", smoothing).putString("brush", brush.name)
-            .putBoolean("shapeDashed", pendingShapeDashed).apply()
+            .putBoolean("shapeDashed", pendingShapeDashed).putBoolean("shapeHashed", pendingShapeHashed)
+            .putInt("tableRows", tableRows).putInt("tableCols", tableCols).putBoolean("tableBorder", tableBorder).apply()
         InkSettings.markChanged(this)
     }
 
