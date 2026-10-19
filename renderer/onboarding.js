@@ -18,6 +18,13 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.1': {
+      title: "What's new",
+      intro: 'Post notes straight from your iPhone home screen.',
+      slides: [
+        { emoji: '🗒️', title: 'Quick Note widget', body: 'A sticky-note widget for your iPhone, built with the free Scriptable app. Tap it, fill in the title, project, priority and due date, then hit Post and the note lands on your board. To set it up, open the web app on your phone, go to Settings → Scriptable, tap the code box to copy the script, then tap Copy widget token.' },
+      ],
+    },
     '1.5.0': {
       title: "What's new",
       intro: 'EngInk on the tablet gets tables, better selection editing and more axes.',

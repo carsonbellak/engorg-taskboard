@@ -1554,6 +1554,16 @@ function renderSettings() {
         </div>
       </div>
 
+      <!-- Quick Note widget (Scriptable, iOS) -->
+      <div class="settings-section">
+        <h3 class="settings-section-title">Quick Note widget</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">A sticky-note widget for your iPhone home screen, made with the free <strong>Scriptable</strong> app. Tap it, fill in the note, hit Post, and it lands on your board. Easiest from the phone: web app → Settings → <strong>Widget</strong>. From here, copy the token and send it to your phone; the widget asks for it on first tap.</p>
+        <button id="settings-widget-token" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Copy widget token</button>
+        <button id="settings-widget-script" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600;margin-left:8px">Copy script</button>
+        <span id="settings-widget-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>
+        <p style="font-size:12px;color:var(--text-muted);margin:10px 0 0">The token is private: anyone with it can add notes to your board.</p>
+      </div>
+
       </section>
       <section class="settings-tab-panel" data-panel="about">
       <div class="settings-section">
@@ -2028,6 +2038,56 @@ function renderSettings() {
       status.textContent = `Error: ${err.message}`;
       status.style.color = 'var(--danger)';
     }
+  });
+
+  // Quick Note widget — copy the long-lived API token the Scriptable widget authenticates with
+  document.getElementById('settings-widget-token').addEventListener('click', async () => {
+    const btn = document.getElementById('settings-widget-token');
+    const status = document.getElementById('settings-widget-status');
+    if (typeof firebase === 'undefined' || !firebase.auth().currentUser) {
+      status.textContent = 'Sign in first to get your API token';
+      status.style.color = 'var(--danger)';
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const idToken = await firebase.auth().currentUser.getIdToken();
+      const resp = await fetch('https://assistant-taskboard.firebaseapp.com/api/generateApiToken', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${idToken}` }
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const { token } = await resp.json();
+      if (!token) throw new Error('No token returned');
+      await navigator.clipboard.writeText(token);
+      status.textContent = 'Copied! Send it to your phone and paste it into the widget.';
+      status.style.color = 'var(--success, #22C55E)';
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`;
+      status.style.color = 'var(--danger)';
+    }
+    btn.disabled = false;
+  });
+
+  // Quick Note widget — copy the Scriptable script (hosted with the PWA at /scriptable/quick-note.js)
+  document.getElementById('settings-widget-script').addEventListener('click', async () => {
+    const btn = document.getElementById('settings-widget-script');
+    const status = document.getElementById('settings-widget-status');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('https://assistant-taskboard.web.app/scriptable/quick-note.js', { cache: 'no-cache' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const src = await resp.text();
+      // The hosting catch-all rewrite answers a missing file with index.html — don't copy that.
+      if (!src.includes('icon-glyph')) throw new Error('script not deployed yet');
+      await navigator.clipboard.writeText(src);
+      status.textContent = 'Script copied. Paste it into a new Scriptable script on your phone.';
+      status.style.color = 'var(--success, #22C55E)';
+    } catch (err) {
+      status.textContent = `Error: ${err.message}`;
+      status.style.color = 'var(--danger)';
+    }
+    btn.disabled = false;
   });
 
   document.getElementById('settings-build-installer').addEventListener('click', async () => {

@@ -1985,6 +1985,26 @@ select.form-input option { background: var(--bg); color: var(--text); }
 }
 .pset-wp-steps li { margin-bottom: 4px; }
 .pset-wp-steps b { color: var(--text); }
+
+/* Scriptable setup — tap-to-copy code box */
+.pset-code {
+  display: block; width: 100%; margin-top: 14px; padding: 0; text-align: left; cursor: pointer;
+  background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; font-family: inherit; color: var(--text); transition: border-color .15s;
+}
+.pset-code.copied { border-color: var(--success, #22C55E); }
+.pset-code-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; color: var(--text-secondary);
+}
+.pset-code-hint { color: var(--accent); }
+.pset-code.copied .pset-code-hint { color: var(--success, #22C55E); }
+.pset-code-body {
+  margin: 0; padding: 10px 12px; max-height: 220px; overflow: auto;
+  font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre; color: var(--text-secondary); -webkit-overflow-scrolling: touch;
+}
 .pset-tab.active { background: var(--bg-card); color: var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.15); }
 
 .pset-section { margin-bottom: 22px; }

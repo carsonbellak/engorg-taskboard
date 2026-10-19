@@ -3073,7 +3073,7 @@ function closePwaSettings() {
 function renderPwaSettings() {
   const body = document.getElementById('settings-body');
   if (!body) return;
-  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['wallpaper', 'Wallpaper'], ['about', 'About']];
+  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['wallpaper', 'Wallpaper'], ['widget', 'Scriptable'], ['about', 'About']];
   let html = `<div class="pset-tabs">` + tabs.map(([id, label]) =>
     `<button class="pset-tab${id === _psetTab ? ' active' : ''}" data-ptab="${id}">${label}</button>`).join('') + `</div>`;
   html += `<div class="pset-panel">`;
@@ -3081,6 +3081,7 @@ function renderPwaSettings() {
   else if (_psetTab === 'hotbar') html += psetHotbar();
   else if (_psetTab === 'notes') html += psetNotes();
   else if (_psetTab === 'wallpaper') html += psetWallpaper();
+  else if (_psetTab === 'widget') html += psetWidget();
   else html += psetAbout();
   html += `</div>`;
   body.innerHTML = html;
@@ -3193,6 +3194,57 @@ function psetWallpaper() {
   </div>`;
 }
 
+function psetWidget() {
+  return `<div class="pset-section">
+    <h3 class="pset-h3">Scriptable setup</h3>
+    <p class="pset-hint">A sticky-note Quick Note widget for your iPhone home screen, made with the free <b>Scriptable</b> app. Tap it, fill in the note, hit Post, and it lands on your board.</p>
+    <ol class="pset-wp-steps">
+      <li>Install <b>Scriptable</b> from the App Store.</li>
+      <li>Tap the code box below to copy it. In Scriptable tap <b>+</b>, paste, and name it <b>Quick Note</b>.</li>
+      <li>Long-press your home screen &rarr; <b>+</b> &rarr; <b>Scriptable</b> &rarr; add a widget. Long-press it &rarr; <b>Edit Widget</b> &rarr; Script: <b>Quick Note</b>. Optional Parameter: <b>yellow</b>, <b>green</b>, <b>blue</b>, <b>red</b>, <b>purple</b> or <b>orange</b>.</li>
+      <li>Tap <b>Copy widget token</b>, then tap the widget. It picks the token up from your clipboard; tap <b>Connect</b>.</li>
+    </ol>
+    <div class="pset-code" id="pset-widget-code" role="button" tabindex="0" aria-label="Copy the Quick Note script">
+      <div class="pset-code-head"><span>quick-note.js</span><span class="pset-code-hint" id="pset-widget-code-hint">Tap to copy</span></div>
+      <pre class="pset-code-body" id="pset-widget-code-body">Loading script…</pre>
+    </div>
+    <button class="btn-primary-full" id="pset-widget-token" style="margin-top:12px">Copy widget token</button>
+    <p class="pset-hint" style="margin-top:8px">The token is private: anyone with it can add notes to your board. Keep it to your own devices.</p>
+  </div>`;
+}
+
+let _scriptableSrc = null;
+async function loadScriptableSrc() {
+  if (_scriptableSrc) return _scriptableSrc;
+  const r = await fetch('/scriptable/quick-note.js', { cache: 'no-cache' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const t = await r.text();
+  // The hosting catch-all rewrite answers a missing file with index.html — don't show that.
+  if (!t.includes('icon-glyph')) throw new Error('not deployed');
+  return (_scriptableSrc = t);
+}
+
+// iOS only allows clipboard writes inside the tap itself, so async content goes in as a
+// ClipboardItem promise (Safari resolves it after the gesture); writeText is the fallback.
+async function copyAsync(btn, label, getText) {
+  const done = (msg) => { btn.textContent = msg; setTimeout(() => { btn.textContent = label; }, 2000); };
+  btn.disabled = true;
+  try {
+    const textP = Promise.resolve().then(getText);
+    if (window.ClipboardItem && navigator.clipboard?.write) {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/plain': textP.then(t => { if (!t) throw new Error('empty'); return new Blob([t], { type: 'text/plain' }); })
+      })]);
+    } else {
+      await navigator.clipboard.writeText(await textP);
+    }
+    done('Copied!');
+  } catch (e) {
+    done('Error — tap to retry');
+  }
+  btn.disabled = false;
+}
+
 function psetAbout() {
   const email = auth.currentUser?.email || '';
   return `<div class="pset-section">
@@ -3298,6 +3350,35 @@ function bindPsetEvents() {
     const v = document.getElementById('pset-wp-url').value;
     if (v) window.open(v, '_blank');
   });
+
+  // Quick Note widget (Scriptable)
+  const wTok = body.querySelector('#pset-widget-token');
+  if (wTok) wTok.addEventListener('click', () => {
+    if (!auth.currentUser) { wTok.textContent = 'Sign in first'; return; }
+    copyAsync(wTok, 'Copy widget token', getApiToken);
+  });
+  const wCode = body.querySelector('#pset-widget-code');
+  if (wCode) {
+    const codeBody = document.getElementById('pset-widget-code-body');
+    const hint = document.getElementById('pset-widget-code-hint');
+    loadScriptableSrc()
+      .then(t => { codeBody.textContent = t; })
+      .catch(() => { codeBody.textContent = 'Couldn’t load the script. Check your connection and reopen this tab.'; });
+    // Text is already loaded, so the copy runs inside the tap (iOS requires that).
+    wCode.addEventListener('click', async () => {
+      if (!_scriptableSrc) return;
+      try { await navigator.clipboard.writeText(_scriptableSrc); }
+      catch (e) {
+        const sel = window.getSelection(), range = document.createRange();
+        range.selectNodeContents(codeBody); sel.removeAllRanges(); sel.addRange(range);
+        try { document.execCommand('copy'); } catch (_) {}
+        sel.removeAllRanges();
+      }
+      hint.textContent = 'Copied!';
+      wCode.classList.add('copied');
+      setTimeout(() => { hint.textContent = 'Tap to copy'; wCode.classList.remove('copied'); }, 1800);
+    });
+  }
 
   // Account
   const signout = body.querySelector('#pset-signout');
