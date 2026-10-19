@@ -124,7 +124,9 @@ class InkActivity : ComponentActivity() {
         override val pendingTableCols get() = tableCols
         override val pendingTableBorder get() = tableBorder
         override val pendingSolid get() = this@InkActivity.pendingSolid
-        override fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit) = showSolidBuilder(params, "Apply", onApply)
+        override fun editSolid(params: SolidParams, fill: SolidFill, view: FloatArray, onApply: (SolidParams, SolidFill) -> Unit) =
+            showSolidBuilder(params, "Apply", fill, view) { p, f -> onApply(p, f ?: fill) }
+        override fun editFill(color: Int, onApply: (Int) -> Unit) = showFillDialog(color, onApply)
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
         override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
         override fun onShapeCommitted() { clearPendingShape(); this@InkActivity.tool = Tool.SELECT; updateTools() }
@@ -692,10 +694,10 @@ class InkActivity : ComponentActivity() {
 
     private fun showShapeMenu(anchor: View) {
         val types = listOf(
-            ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE,
+            ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE, ShapeType.TRAPEZOID,
             ShapeType.AXES2D_1Q, ShapeType.AXES2D_2Q, ShapeType.AXES2D, ShapeType.AXES3D, ShapeType.AXES3D_8,
         )
-        val solids = listOf(SolidParams.box(), SolidParams.cylinder(), SolidParams.cone(), SolidParams.sphere(), SolidParams.pyramid())
+        val solids = listOf(SolidParams.box(), SolidParams.cylinder(), SolidParams.cone(), SolidParams.sphere(), SolidParams.pyramid(), SolidParams.trapezoid())
         val solidButtons = ArrayList<Pair<SolidParams, ImageButton>>()
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -767,7 +769,7 @@ class InkActivity : ComponentActivity() {
             background = pill(light); stateListAnimator = null
             setPadding(dp(12), dp(10), dp(12), dp(10))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { setMargins(dp(4), dp(4), dp(4), dp(2)) }
-            setOnClickListener { popup.dismiss(); showSolidBuilder(lastCustomSolid(), "Draw it") { p -> saveCustomSolid(p); armSolid(p) } }
+            setOnClickListener { popup.dismiss(); showSolidBuilder(lastCustomSolid(), "Draw it") { p, _ -> saveCustomSolid(p); armSolid(p) } }
         })
         refreshDash()
         popup.showAsDropDown(anchor, 0, dp(6))
@@ -813,8 +815,11 @@ class InkActivity : ComponentActivity() {
      * The 3D solid builder: family, n-fold symmetry (sides, or faces for the regular solids), round
      * base, and proportions, with a live preview and its face/edge/vertex count. [onDone] gets the result.
      */
-    private fun showSolidBuilder(initial: SolidParams, doneLabel: String, onDone: (SolidParams) -> Unit) {
+    private fun showSolidBuilder(initial: SolidParams, doneLabel: String, initialFill: SolidFill? = null, view: FloatArray? = null,
+                                 onDone: (SolidParams, SolidFill?) -> Unit) {
         val p = initial.copy()
+        val fill = initialFill?.copy()
+        val picked = HashSet<Int>()
         val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
         val pad = dp(20)
         val col = LinearLayout(this).apply {
@@ -828,7 +833,16 @@ class InkActivity : ComponentActivity() {
         }
         col.addView(TextView(this).apply { text = "3D solid"; setTextColor(AppTheme.text); textSize = 17f; setTypeface(null, android.graphics.Typeface.BOLD) })
         val preview = ImageView(this).apply { setColorFilter(onSurface) }
-        col.addView(preview, LinearLayout.LayoutParams(dp(150), dp(150)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(6) })
+        // Editing a solid on the page: a live picture you can turn and tap faces on, with its colors and water.
+        lateinit var refreshFill: () -> Unit
+        val live = fill?.let { f -> SolidPreviewView(this, p, f, view ?: Solid.defaultView(), picked) { r -> if (!picked.remove(r)) picked.add(r); refreshFill() } }
+        if (live != null) {
+            col.addView(live, LinearLayout.LayoutParams(dp(230), dp(210)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(6) })
+            col.addView(TextView(this).apply {
+                text = "Drag to turn it · tap faces to pick them"; textSize = 11.5f; gravity = Gravity.CENTER
+                setTextColor(muted)
+            }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        } else col.addView(preview, LinearLayout.LayoutParams(dp(150), dp(150)).apply { gravity = Gravity.CENTER_HORIZONTAL; topMargin = dp(6) })
         val readout = TextView(this).apply { textSize = 13f; setTextColor(AppTheme.text); gravity = Gravity.CENTER }
         col.addView(readout, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) })
 
@@ -856,7 +870,8 @@ class InkActivity : ComponentActivity() {
             k to chip(k.label) {
                 if (p.kind == k) return@chip
                 p.kind = k
-                p.height = when (k) { SolidKind.FRUSTUM -> 0.8f; SolidKind.ANTIPRISM -> 0.6f; SolidKind.PRISM -> if (p.sides == 4 && !p.round) SolidParams.CUBE_H else 1f; else -> 1f }
+                p.height = when (k) { SolidKind.FRUSTUM -> 0.8f; SolidKind.ANTIPRISM, SolidKind.TRAPEZOID -> 0.6f; SolidKind.PRISM -> if (p.sides == 4 && !p.round) SolidParams.CUBE_H else 1f; else -> 1f }
+                if (k == SolidKind.TRAPEZOID) { p.top = 0.55f; p.depth = 0.6f }
                 if (k == SolidKind.PLATONIC && p.sides !in SolidParams.PLATONIC_FACES) p.sides = 6
                 if (k != SolidKind.PLATONIC) p.sides = p.sides.coerceIn(3, 24)
                 refresh()
@@ -909,18 +924,104 @@ class InkActivity : ComponentActivity() {
         val (topBox, topSync) = slider("TOP SIZE", 0.05f, 0.95f, { p.top }, { p.top = it }) { "${(it * 100).roundToInt()}% of base" }
         col.addView(heightBox); col.addView(depthBox); col.addView(topBox)
 
+        // Fill + water (only when editing a solid that's on the page).
+        if (fill != null && live != null) {
+            col.addView(heading("FILL"))
+            val fillHint = TextView(this).apply { textSize = 12f; setTextColor(muted) }
+            col.addView(fillHint)
+            var opacity = (fill.faces.values.firstOrNull { it != 0 } ?: fill.all).let { if (it == 0) 0.6f else Color.alpha(it) / 255f }
+            fun withA(c: Int) = Color.argb((opacity * 255).roundToInt().coerceIn(0, 255), Color.red(c), Color.green(c), Color.blue(c))
+            fun paint(c: Int?) {
+                val v = c?.let { withA(it) } ?: 0
+                if (picked.isEmpty()) { fill.all = v; fill.faces.clear() } else picked.forEach { fill.faces[it] = v }
+                live.invalidate()
+            }
+            val swatches = listOf(
+                Color.rgb(0x16, 0x1A, 0x22), Color.rgb(0x8A, 0x92, 0x9E), Color.rgb(0xEC, 0xEC, 0xEC), Color.rgb(0x29, 0x47, 0xC9),
+                Color.rgb(0x1E, 0x88, 0xE5), Color.rgb(0x00, 0xAC, 0xC1), Color.rgb(0x2E, 0x7D, 0x32), Color.rgb(0x7C, 0xB3, 0x42),
+                Color.rgb(0xF9, 0xA8, 0x25), Color.rgb(0xF5, 0x7C, 0x00), Color.rgb(0xB7, 0x1C, 0x1C), Color.rgb(0xE9, 0x1E, 0x63), Color.rgb(0x8E, 0x24, 0xAA),
+            )
+            val swatchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+            swatchRow.addView(TextView(this).apply {
+                text = "None"; textSize = 12f; gravity = Gravity.CENTER; setTextColor(onSurface)
+                background = pill(light); setPadding(dp(10), dp(6), dp(10), dp(6))
+                layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(6) }
+                setOnClickListener { paint(null) }
+            })
+            for (c in swatches) swatchRow.addView(View(this).apply {
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c); setStroke(dp(1), Color.argb(0x40, 0x80, 0x80, 0x80)) }
+                layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { rightMargin = dp(6) }
+                setOnClickListener { paint(c) }
+            })
+            col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(swatchRow); setPadding(0, dp(6), 0, dp(2)) })
+            // Opacity: also re-tints whatever is picked (or every face) as you slide.
+            val opLabel = heading("OPACITY")
+            val opValue = TextView(this).apply { textSize = 12f; setTextColor(muted) }
+            col.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
+                addView(opLabel, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)); addView(opValue)
+            })
+            col.addView(SeekBar(this).apply {
+                max = 100; progress = (opacity * 100).roundToInt()
+                opValue.text = "$progress%"
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar?, pr: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        opacity = pr / 100f; opValue.text = "$pr%"
+                        if (picked.isEmpty()) {
+                            if (fill.all != 0) fill.all = withA(fill.all)
+                            for (k in fill.faces.keys.toList()) fill.faces[k]?.let { if (it != 0) fill.faces[k] = withA(it) }
+                        } else picked.forEach { r -> val cur = fill.colorOf(r); if (cur != 0) fill.faces[r] = withA(cur) }
+                        live.invalidate()
+                    }
+                    override fun onStartTrackingTouch(sb: SeekBar?) {}
+                    override fun onStopTrackingTouch(sb: SeekBar?) {}
+                })
+            })
+            val pickRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            pickRow.addView(chip("Pick all faces") { picked.clear(); for (i in 0 until Solid(p).regionCount()) picked.add(i); refreshFill() }.also { styleChip(it, false) })
+            pickRow.addView(chip("Clear picks") { picked.clear(); refreshFill() }.also { styleChip(it, false) })
+            col.addView(pickRow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
+
+            // Water: how full the solid is; the surface stays level with the page as the solid turns.
+            val wLabel = heading("WATER")
+            val wValue = TextView(this).apply { textSize = 12f; setTextColor(muted) }
+            col.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.BOTTOM
+                addView(wLabel, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)); addView(wValue)
+            })
+            col.addView(SeekBar(this).apply {
+                max = 100; progress = (fill.water * 100).roundToInt()
+                wValue.text = if (progress == 0) "Empty" else "$progress% full"
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar?, pr: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        fill.water = pr / 100f; wValue.text = if (pr == 0) "Empty" else "$pr% full"; live.invalidate()
+                    }
+                    override fun onStartTrackingTouch(sb: SeekBar?) {}
+                    override fun onStopTrackingTouch(sb: SeekBar?) {}
+                })
+            })
+            refreshFill = {
+                fillHint.text = if (picked.isEmpty()) "No faces picked: a color fills every face." else "${picked.size} face${if (picked.size == 1) "" else "s"} picked: a color fills just those."
+                live.invalidate()
+            }
+            refreshFill()
+        } else refreshFill = {}
+
         // Actions
         col.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) }
             addView(chip("Cancel") { dialog.dismiss() }.also { styleChip(it, false) })
-            addView(chip(doneLabel) { dialog.dismiss(); onDone(p.copy()) }.also { styleChip(it, true) })
+            addView(chip(doneLabel) { dialog.dismiss(); onDone(p.copy(), fill) }.also { styleChip(it, true) })
         })
 
+        var lastKey = p.key()
         refresh = {
             for ((k, v) in kindChips) styleChip(v, p.kind == k)
             val platonic = p.kind == SolidKind.PLATONIC
-            val sphere = p.kind == SolidKind.SPHERE
+            val sphere = p.kind == SolidKind.SPHERE || p.kind == SolidKind.TRAPEZOID   // no sides to choose
             symHeading.visibility = if (sphere) View.GONE else View.VISIBLE
             symHeading.text = if (platonic) "FACES  (REGULAR SOLIDS)" else "SIDES  (n-FOLD SYMMETRY)"
             sidesRow.visibility = if (platonic || sphere) View.GONE else View.VISIBLE
@@ -929,14 +1030,78 @@ class InkActivity : ComponentActivity() {
             sidesValue.text = if (p.isRound) "∞" else "${p.sides}"
             roundChip.visibility = if (p.kind.roundable) View.VISIBLE else View.GONE
             styleChip(roundChip, p.isRound)
-            topBox.visibility = if (p.kind == SolidKind.FRUSTUM) View.VISIBLE else View.GONE
+            topBox.visibility = if (p.kind == SolidKind.FRUSTUM || p.kind == SolidKind.TRAPEZOID) View.VISIBLE else View.GONE
             heightSync(); depthSync(); topSync()
             val counts = p.counts()
             readout.text = p.label.replaceFirstChar { it.uppercase() } +
                 (counts?.let { (f, e, v) -> "\n$f faces · $e edges · $v vertices" } ?: "\ncurved surface")
             preview.setImageBitmap(solidPreview(p, dp(150), fill = 0.42f))
+            // A different shape has different faces: per-face colors and picks no longer line up.
+            if (p.key() != lastKey) { lastKey = p.key(); fill?.faces?.clear(); picked.clear(); refreshFill() }
+            live?.params = p; live?.invalidate()
         }
         refresh()
+        dialog.show()
+    }
+
+    /** Fill color + opacity for a closed 2D shape ([current] = its fill, 0 = none). */
+    private fun showFillDialog(current: Int, onApply: (Int) -> Unit) {
+        val pad = dp(20)
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
+            setPadding(pad, pad, pad, dp(16))
+        }
+        val dialog = Dialog(this).apply {
+            setContentView(col, ViewGroup.LayoutParams(dp(340), WRAP_CONTENT))
+            window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+        col.addView(TextView(this).apply { text = "Fill"; setTextColor(AppTheme.text); textSize = 17f; setTypeface(null, android.graphics.Typeface.BOLD) })
+        var color = if (current != 0) Color.rgb(Color.red(current), Color.green(current), Color.blue(current)) else 0
+        var opacity = if (current != 0) Color.alpha(current) / 255f else 0.5f
+        val sample = View(this)
+        fun result() = if (color == 0) 0 else Color.argb((opacity * 255).roundToInt().coerceIn(0, 255), Color.red(color), Color.green(color), Color.blue(color))
+        fun paintSample() {
+            sample.background = GradientDrawable().apply {
+                cornerRadius = dp(10).toFloat(); setColor(result()); setStroke(dp(2), AppTheme.text)
+            }
+        }
+        col.addView(sample, LinearLayout.LayoutParams(MATCH_PARENT, dp(44)).apply { topMargin = dp(12) })
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        row.addView(TextView(this).apply {
+            text = "None"; textSize = 12f; setTextColor(onSurface); background = pill(light); setPadding(dp(10), dp(6), dp(10), dp(6))
+            layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(6) }
+            setOnClickListener { color = 0; paintSample() }
+        })
+        for (c in palette.toList() + customColors) row.addView(View(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(c); setStroke(dp(1), Color.argb(0x40, 0x80, 0x80, 0x80)) }
+            layoutParams = LinearLayout.LayoutParams(dp(28), dp(28)).apply { rightMargin = dp(6) }
+            setOnClickListener { color = c; paintSample() }
+        })
+        col.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(row); setPadding(0, dp(12), 0, 0) })
+        val opValue = TextView(this).apply { textSize = 12f; setTextColor(muted); text = "${(opacity * 100).roundToInt()}%" }
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, dp(2))
+            addView(TextView(this@InkActivity).apply { text = "OPACITY"; textSize = 11f; setTextColor(muted); setTypeface(null, android.graphics.Typeface.BOLD) }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            addView(opValue)
+        })
+        col.addView(SeekBar(this).apply {
+            max = 100; progress = (opacity * 100).roundToInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, pr: Int, fromUser: Boolean) { if (fromUser) { opacity = pr / 100f; opValue.text = "$pr%"; paintSample() } }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+        })
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) }
+            addView(iconBtn(Icons.CLOSE) { dialog.dismiss() })
+            addView(View(this@InkActivity), LinearLayout.LayoutParams(dp(8), 1))
+            addView(iconBtn(Icons.CHECK, active = true) { dialog.dismiss(); onApply(result()) })
+        })
+        paintSample()
         dialog.show()
     }
 
@@ -948,7 +1113,7 @@ class InkActivity : ComponentActivity() {
 
     private fun shapeLabel(t: ShapeType) = when (t) {
         ShapeType.LINE -> "line"; ShapeType.ARROW -> "arrow"; ShapeType.RECT -> "rectangle"
-        ShapeType.ELLIPSE -> "ellipse"; ShapeType.TRIANGLE -> "triangle"
+        ShapeType.ELLIPSE -> "ellipse"; ShapeType.TRIANGLE -> "triangle"; ShapeType.TRAPEZOID -> "trapezoid"
         ShapeType.AXES2D_1Q -> "1-quadrant axis"; ShapeType.AXES2D_2Q -> "2-quadrant axis"; ShapeType.AXES2D -> "4-quadrant axis"
         ShapeType.AXES3D -> "3D axis"; ShapeType.AXES3D_8 -> "8-octant 3D axis"; ShapeType.TABLE -> "table"
         ShapeType.SOLID -> pendingSolid?.label ?: "solid"

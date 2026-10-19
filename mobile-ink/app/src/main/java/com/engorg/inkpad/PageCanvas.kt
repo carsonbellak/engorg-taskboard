@@ -70,8 +70,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         fun onShapeCommitted()
         /** Show the palette near pane-local ([x],[y]) and report the picked color. */
         fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit)
-        /** Open the 3D solid builder on [params] and report the edited shape. */
-        fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit)
+        /** Open the 3D solid builder on [params] (with its paint and current view) and report the edited shape. */
+        fun editSolid(params: SolidParams, fill: SolidFill, view: FloatArray, onApply: (SolidParams, SolidFill) -> Unit)
+        /** Pick a fill color (with opacity) for a 2D shape; 0 = no fill. */
+        fun editFill(color: Int, onApply: (Int) -> Unit)
     }
 
     /**
@@ -361,12 +363,19 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val fine = parts.filter { it.fine }.map { FinishedStrokesView.buildStraightPath(it.pts) }
         val hidden = parts.filter { it.hidden }.map { FinishedStrokesView.buildStraightPath(it.pts) }
         val pts = ArrayList<PointF>(); parts.forEach { pts.addAll(it.pts) }
-        return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec, Brush.PEN, fine, hidden)
+        val fills = spec.fills().map { f ->
+            val path = android.graphics.Path()
+            for (poly in f.polys) if (poly.size >= 3) {
+                path.moveTo(poly[0].x, poly[0].y); for (k in 1 until poly.size) path.lineTo(poly[k].x, poly[k].y); path.close()
+            }
+            FinishedStrokesView.FillPath(path, f.color, f.edge)
+        }
+        return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec, Brush.PEN, fine, hidden, fills)
     }
 
     /** [base] rebuilt in [color] (geometry reused — recs are immutable). */
     private fun recolored(base: FinishedStrokesView.Rec, color: Int): FinishedStrokesView.Rec =
-        FinishedStrokesView.Rec(base.paths, base.points, color, base.widthPx, base.highlighter, base.shape, base.brush, base.fine, base.hidden)
+        FinishedStrokesView.Rec(base.paths, base.points, color, base.widthPx, base.highlighter, base.shape, base.brush, base.fine, base.hidden, base.fills)
 
     /** Convert the captured screen samples to page-local points on the page the stroke started on. */
     private fun samplesToPage(): Pair<Int, ArrayList<PointF>>? {
@@ -415,6 +424,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             ShapeType.LINE, ShapeType.ARROW -> arrayListOf(PointF(a.x, a.y), PointF(b.x, b.y))
             ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TABLE -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
             ShapeType.TRIANGLE -> arrayListOf(PointF((minX + maxX) / 2f, minY), PointF(maxX, maxY), PointF(minX, maxY))
+            ShapeType.TRAPEZOID -> { val w = maxX - minX; arrayListOf(PointF(minX, maxY), PointF(maxX, maxY), PointF(maxX - w * 0.2f, minY), PointF(minX + w * 0.2f, minY)) }
             ShapeType.AXES2D, ShapeType.AXES3D, ShapeType.AXES3D_8 -> arrayListOf(PointF(a.x, a.y), PointF(b.x, b.y))
             // Partial-quadrant axes fit the box you drew: origin bottom-left (1Q) or mid-left (2Q).
             ShapeType.AXES2D_1Q -> arrayListOf(PointF(minX, maxY), PointF(maxX, minY))
@@ -523,6 +533,17 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (graphPane != null) {
                     closeGraph()
                     if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER) { mode = Mode.NONE; tapDown = null; return true }
+                }
+                // A graph card's Edit button (bottom left) opens it, whatever tool is in hand.
+                run {
+                    val h = hitTest(event.getX(idx), event.getY(idx))
+                    if (!h.onPage) return@run
+                    val g = finishedView.pages[h.page].recs.lastOrNull { r ->
+                        r.shape?.type == ShapeType.GRAPH && graphBox(r)?.let { GraphCardRenderer.editButtonRect(it).contains(h.x, h.y) } == true
+                    } ?: return@run
+                    mode = Mode.NONE; activePointerId = -1; tapDown = null
+                    openGraph(g, h.page)
+                    return true
                 }
                 tapDown = if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER) PointF(event.getX(idx), event.getY(idx)) else null
                 tapDownAt = event.eventTime
@@ -665,6 +686,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun selectedTable(): FinishedStrokesView.Rec? =
         selRecs.singleOrNull()?.takeIf { it.shape?.type == ShapeType.TABLE }
 
+    /** The lone selected closed 2D shape (enables Fill). */
+    private fun selectedFillable(): FinishedStrokesView.Rec? =
+        selRecs.singleOrNull()?.takeIf { r -> r.shape?.let { it.type.fillable && it.solid == null } == true }
+
     /** The lone selected graph card (enables Edit graph). */
     private fun selectedGraph(): FinishedStrokesView.Rec? =
         selRecs.singleOrNull()?.takeIf { r -> r.shape?.let { it.type == ShapeType.GRAPH && it.graph != null } == true }
@@ -692,6 +717,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.SOLID_EDIT,
         ) else if (selectedGraph() != null) listOf(
             FinishedStrokesView.MenuAction.GRAPH_EDIT,
+        ) else if (selectedFillable() != null) listOf(
+            FinishedStrokesView.MenuAction.FILL,
         ) else emptyList()
         finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
     }
@@ -1049,8 +1076,21 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             }
             FinishedStrokesView.MenuAction.SOLID_EDIT -> {
                 val rec = selectedSolid() ?: return
-                host.editSolid(rec.shape!!.solid!!.params.copy()) { p ->
-                    if (selectedSolid() === rec) editSolid { s -> p.copyInto(s.solid!!.params) }
+                val sol = rec.shape!!.solid!!
+                host.editSolid(sol.params.copy(), sol.fill.copy(), sol.r.copyOf()) { p, f ->
+                    if (selectedSolid() === rec) editSolid { s -> p.copyInto(s.solid!!.params); s.solid!!.fill = f }
+                }
+            }
+            FinishedStrokesView.MenuAction.FILL -> {
+                val rec = selectedFillable() ?: return
+                host.editFill(rec.shape!!.fillColor) { c ->
+                    if (selectedFillable() !== rec) return@editFill
+                    val spec = rec.shape!!.clone(); spec.fillColor = c
+                    undoPushedThisGesture = false; pushUndo()
+                    val n = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
+                    replaceRec(rec, n); selRecs[0] = n
+                    selBox = recBounds(selRecs); refreshSelectionOverlay(); savePage(selPage)
+                    mirror?.pageEdited(this, selPage)
                 }
             }
         }
@@ -1377,6 +1417,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (rec.shape.rot != 0f) o.put("r", rec.shape.rot.toDouble()).put("pv", JSONArray().put(rec.shape.pivot.x.toDouble()).put(rec.shape.pivot.y.toDouble()))
                 rec.shape.solid?.let { o.put("sd", it.params.toJson()).put("sr", Solid.rToJson(it.r)).put("sz", it.size.toDouble()) }
                 rec.shape.graph?.let { o.put("g", it.toJson()) }
+                if (rec.shape.fillColor != 0) o.put("fc", rec.shape.fillColor)
+                rec.shape.solid?.fill?.takeIf { !it.isEmpty }?.let { o.put("sf", it.toJson()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
             } else {
@@ -1453,13 +1495,14 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     val spec = (ShapeSpec.legacySolid(type, verts) ?: ShapeSpec(type, verts)).apply {
                         this.dashed = dashed
                         if (type == ShapeType.SOLID) o.optJSONObject("sd")?.let { sd ->
-                            solid = Solid(SolidParams.fromJson(sd), Solid.rFromJson(o.optJSONArray("sr")), o.optDouble("sz", 50.0).toFloat().coerceIn(2f, 4000f))
+                            solid = Solid(SolidParams.fromJson(sd), Solid.rFromJson(o.optJSONArray("sr")), o.optDouble("sz", 50.0).toFloat().coerceIn(2f, 4000f), SolidFill.fromJson(o.optJSONObject("sf")))
                         }
                         hashed = !o.optBoolean("nh", false)
                         rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)
                         rot = o.optDouble("r", 0.0).toFloat()
                         o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
                         if (type == ShapeType.GRAPH) graph = GraphCard.fromJson(o.optJSONObject("g"))
+                        fillColor = o.optInt("fc", 0)
                     }
                     if (spec.type == ShapeType.SOLID && spec.solid == null) continue
                     if (spec.type == ShapeType.GRAPH && spec.graph == null) continue

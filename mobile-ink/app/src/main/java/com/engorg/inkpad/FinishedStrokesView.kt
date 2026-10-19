@@ -41,7 +41,11 @@ class FinishedStrokesView(context: Context) : View(context) {
         val brush: Brush = Brush.PEN, // ink style (freehand only; shapes always draw pen-style)
         val fine: List<Path> = emptyList(), // shape detail drawn thinner than the outline (axis tick marks)
         val hidden: List<Path> = emptyList(), // a 3D solid's back edges, always drawn dashed
+        val fills: List<FillPath> = emptyList(), // painted areas under the outline, back to front
     )
+
+    /** A painted area of a shape (page-local path) and its outline color (0 = none). */
+    class FillPath(val path: Path, val color: Int, val edge: Int = 0)
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
 
@@ -54,6 +58,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         VIEW_ISO("Iso"), VIEW_FRONT("Front"), VIEW_TOP("Top"), VIEW_SIDE("Side"), SOLID_EDIT("Edit shape"),
         // Second row, shown when a single graph card is selected.
         GRAPH_EDIT("Edit graph"),
+        // Second row, shown when a single closed 2D shape is selected.
+        FILL("Fill"),
     }
 
     companion object {
@@ -312,6 +318,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private fun dpf(v: Float) = v * density
 
     private val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
+    private val fillPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
     private val paperPaint = Paint().apply { isAntiAlias = true }
     private val pagePaint = Paint().apply { isAntiAlias = true }
     private val shadowPaint = Paint().apply { isAntiAlias = true; color = Color.argb(50, 0, 0, 0) }
@@ -425,13 +432,28 @@ class FinishedStrokesView(context: Context) : View(context) {
                     strokePaint.pathEffect = null
                     strokePaint.strokeCap = Paint.Cap.ROUND
                 }
-                for (p in rec.paths) canvas.drawPath(p, strokePaint)
+                val solidDash = strokePaint.pathEffect
                 if (rec.hidden.isNotEmpty()) {
-                    // Hidden edges: dashed whatever the outline style, like a drafting hidden line.
+                    // Hidden edges first (dashed whatever the outline style, like a drafting hidden line),
+                    // so an opaque face fill covers them and a see-through one lets them show.
                     strokePaint.pathEffect = dashEffect(rec.widthPx)
                     strokePaint.strokeCap = Paint.Cap.BUTT
                     for (p in rec.hidden) canvas.drawPath(p, strokePaint)
+                    strokePaint.pathEffect = solidDash
+                    strokePaint.strokeCap = if (rec.shape.dashed) Paint.Cap.BUTT else Paint.Cap.ROUND
                 }
+                if (rec.fills.isNotEmpty()) {
+                    for (f in rec.fills) {
+                        fillPaint.color = f.color; canvas.drawPath(f.path, fillPaint)
+                        if (f.edge != 0) {
+                            val c = strokePaint.color; val w = strokePaint.strokeWidth; val pe = strokePaint.pathEffect
+                            strokePaint.color = f.edge; strokePaint.strokeWidth = (rec.widthPx * 0.7f).coerceAtLeast(0.6f); strokePaint.pathEffect = null
+                            canvas.drawPath(f.path, strokePaint)
+                            strokePaint.color = c; strokePaint.strokeWidth = w; strokePaint.pathEffect = pe
+                        }
+                    }
+                }
+                for (p in rec.paths) canvas.drawPath(p, strokePaint)
                 strokePaint.pathEffect = null   // never leak the dash onto the next rec / freehand ink
                 if (rec.fine.isNotEmpty()) {
                     // Tick marks: solid and about half the outline weight.

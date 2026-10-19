@@ -1,5 +1,6 @@
 package com.engorg.inkpad
 
+import android.graphics.Color
 import android.graphics.PointF
 import org.json.JSONArray
 import org.json.JSONObject
@@ -21,6 +22,8 @@ import kotlin.math.sqrt
 enum class SolidKind(val label: String, val roundable: Boolean) {
     PRISM("Prism", true), PYRAMID("Pyramid", true), FRUSTUM("Frustum", true), BIPYRAMID("Bipyramid", true),
     ANTIPRISM("Antiprism", false), SPHERE("Sphere", false), PLATONIC("Platonic", false),
+    /** A prism whose cross-section is a trapezoid ([SolidParams.top] = top edge ÷ bottom edge). */
+    TRAPEZOID("Trapezoid", false),
 }
 
 /**
@@ -46,6 +49,7 @@ class SolidParams(
     /** Sides actually built: round = a fine polygon; platonic = a valid face count. */
     val n: Int get() = when {
         kind == SolidKind.PLATONIC -> PLATONIC_FACES.minByOrNull { abs(it - sides) } ?: 6
+        kind == SolidKind.TRAPEZOID -> 4
         isRound -> 64
         else -> sides.coerceIn(3, 24)
     }
@@ -58,6 +62,7 @@ class SolidParams(
         SolidKind.ANTIPRISM -> "${polyName(n)} antiprism"
         SolidKind.SPHERE -> if (height == 1f && depth == 1f) "sphere" else "ellipsoid"
         SolidKind.PLATONIC -> PLATONIC_NAMES[n] ?: "polyhedron"
+        SolidKind.TRAPEZOID -> "trapezoidal prism"
     }
 
     /** Faces · edges · vertices, for the builder's readout (round solids count their curved parts). */
@@ -96,6 +101,30 @@ class SolidParams(
         fun cone() = SolidParams(SolidKind.PYRAMID, 6, round = true, height = 1.1f)
         fun sphere() = SolidParams(SolidKind.SPHERE)
         fun pyramid() = SolidParams(SolidKind.PYRAMID, 4, height = 0.8f)
+        fun trapezoid() = SolidParams(SolidKind.TRAPEZOID, 4, height = 0.6f, depth = 0.6f, top = 0.55f)
+    }
+}
+
+/**
+ * Paint on a solid: one color for every face ([all]), per-face colors ([faces], keyed by face region;
+ * 0 = left unfilled), and water filling [water] (0–1) of its volume. Colors carry their own alpha.
+ */
+class SolidFill(var all: Int = 0, val faces: HashMap<Int, Int> = HashMap(), var water: Float = 0f, var waterColor: Int = WATER) {
+    fun copy() = SolidFill(all, HashMap(faces), water, waterColor)
+    val isEmpty: Boolean get() = all == 0 && faces.isEmpty() && water <= 0f
+    fun colorOf(region: Int): Int = faces[region] ?: all
+
+    fun toJson(): JSONObject = JSONObject().put("a", all).put("w", water.toDouble()).put("wc", waterColor)
+        .put("f", JSONObject().apply { for ((k, v) in faces) put(k.toString(), v) })
+
+    companion object {
+        val WATER = Color.argb(0x8C, 0x3B, 0x8E, 0xEA)
+        fun fromJson(o: JSONObject?): SolidFill {
+            if (o == null) return SolidFill()
+            val f = HashMap<Int, Int>()
+            o.optJSONObject("f")?.let { j -> for (k in j.keys()) k.toIntOrNull()?.let { f[it] = j.optInt(k) } }
+            return SolidFill(o.optInt("a", 0), f, o.optDouble("w", 0.0).toFloat().coerceIn(0f, 1f), o.optInt("wc", WATER))
+        }
     }
 }
 
@@ -109,9 +138,173 @@ class SolidParams(
  * the viewer and dashed when both face away; the facets of a curved surface only draw their
  * silhouette. So the dashed lines move correctly as the solid turns.
  */
-class Solid(val params: SolidParams, val r: FloatArray = defaultView(), var size: Float = 50f) {
+class Solid(val params: SolidParams, val r: FloatArray = defaultView(), var size: Float = 50f, var fill: SolidFill = SolidFill()) {
 
-    fun copy() = Solid(params.copy(), r.copyOf(), size)
+    fun copy() = Solid(params.copy(), r.copyOf(), size, fill.copy())
+
+    // ---------------- fills and water ----------------
+
+    /** Face regions you can color: each flat face on its own, a curved surface's facets together. */
+    fun regionCount(): Int = regionIndex(fillMesh(params)).let { if (it.isEmpty()) 0 else it.max() + 1 }
+
+    private class Proj(val x: FloatArray, val y: FloatArray, val z: FloatArray)
+
+    /** Model points → page (x right, y down) and view depth (z toward the viewer) for center ([cx],[cy]). */
+    private fun project(pts: List<FloatArray>, cx: Float, cy: Float): Proj {
+        val n = pts.size
+        val x = FloatArray(n); val y = FloatArray(n); val z = FloatArray(n)
+        for (i in 0 until n) {
+            val p = pts[i]
+            x[i] = cx + size * (r[0] * p[0] + r[1] * p[1] + r[2] * p[2])
+            y[i] = cy - size * (r[3] * p[0] + r[4] * p[1] + r[5] * p[2])
+            z[i] = size * (r[6] * p[0] + r[7] * p[1] + r[8] * p[2])
+        }
+        return Proj(x, y, z)
+    }
+
+    /** Does the polygon (page coords, from outward CCW model order) face the viewer? */
+    private fun facing(xs: FloatArray, ys: FloatArray, idx: IntArray): Boolean {
+        var nz = 0f
+        for (k in idx.indices) { val a = idx[k]; val b = idx[(k + 1) % idx.size]; nz += (xs[a] - xs[b]) * (-ys[a] - ys[b]) }
+        return nz > 0f
+    }
+
+    /**
+     * Everything painted on the solid, in drawing order (back to front): colored faces facing away,
+     * the water, then colored faces facing the viewer. The water's surface stays level with the page
+     * however the solid is turned, and holds [SolidFill.water] of the volume.
+     */
+    fun fills(cx: Float, cy: Float): List<ShapeSpec.Fill> {
+        if (fill.isEmpty) return emptyList()
+        val m = fillMesh(params)
+        val reg = regionIndex(m)
+        val pr = project(m.v, cx, cy)
+        class G(val polys: ArrayList<List<PointF>>, val color: Int, var depth: Float, var count: Int)
+        val back = HashMap<Int, G>(); val front = HashMap<Int, G>()
+        for ((f, fc) in m.faces.withIndex()) {
+            val c = fill.colorOf(reg[f]); if (Color.alpha(c) == 0) continue
+            val map = if (facing(pr.x, pr.y, fc)) front else back
+            val g = map.getOrPut(reg[f]) { G(ArrayList(), c, 0f, 0) }
+            g.polys.add(fc.map { PointF(pr.x[it], pr.y[it]) })
+            g.depth += fc.sumOf { pr.z[it].toDouble() }.toFloat() / fc.size; g.count++
+        }
+        val out = ArrayList<ShapeSpec.Fill>()
+        back.values.sortedBy { it.depth / it.count }.forEach { out.add(ShapeSpec.Fill(it.polys, it.color)) }
+        if (fill.water > 0.001f) out.addAll(waterFills(m, cx, cy))
+        front.values.sortedBy { it.depth / it.count }.forEach { out.add(ShapeSpec.Fill(it.polys, it.color)) }
+        return out
+    }
+
+    private fun waterFills(m: Mesh, cx: Float, cy: Float): List<ShapeSpec.Fill> {
+        val polys = water(m, fill.water)
+        if (polys.isEmpty()) return emptyList()
+        val wc = fill.waterColor
+        val backP = ArrayList<List<PointF>>(); val frontP = ArrayList<List<PointF>>(); var cap: List<PointF>? = null
+        for ((k, poly) in polys.withIndex()) {
+            val pr = project(poly, cx, cy)
+            val idx = IntArray(poly.size) { it }
+            val pts = idx.map { PointF(pr.x[it], pr.y[it]) }
+            if (k == polys.size - 1 && capLast) cap = pts
+            else if (facing(pr.x, pr.y, idx)) frontP.add(pts) else backP.add(pts)
+        }
+        val out = ArrayList<ShapeSpec.Fill>()
+        if (backP.isNotEmpty()) out.add(ShapeSpec.Fill(backP, wc))
+        cap?.let {
+            val surface = Color.argb((Color.alpha(wc) * 0.75f).toInt(), Color.red(wc), Color.green(wc), Color.blue(wc))
+            out.add(ShapeSpec.Fill(listOf(it), surface, Color.argb(0xE0, (Color.red(wc) * 0.6f).toInt(), (Color.green(wc) * 0.6f).toInt(), (Color.blue(wc) * 0.75f).toInt())))
+        }
+        if (frontP.isNotEmpty()) out.add(ShapeSpec.Fill(frontP, wc))
+        return out
+    }
+
+    private var capLast = false
+
+    /**
+     * The water: the solid cut by a level plane (perpendicular to the page's "down") placed so the
+     * part below holds [level] of the volume. Returns its faces in model coordinates (outward CCW),
+     * with the water surface last when there is one.
+     */
+    private fun water(m: Mesh, level: Float): List<List<FloatArray>> {
+        capLast = false
+        val up = floatArrayOf(r[3], r[4], r[5])    // the page's "up", in model coordinates
+        val polys = m.faces.map { fc -> fc.map { m.v[it] } }
+        if (level >= 0.999f) return polys
+        var lo = Float.MAX_VALUE; var hi = -Float.MAX_VALUE
+        for (p in m.v) { val h = dot(up, p); lo = min(lo, h); hi = max(hi, h) }
+        val total = volume(polys)
+        if (total <= 0f) return emptyList()
+        var a = lo; var b = hi
+        repeat(40) {
+            val mid = (a + b) / 2
+            if (volume(cut(polys, up, mid)) / total < level) a = mid else b = mid
+        }
+        val out = cut(polys, up, (a + b) / 2)
+        capLast = out.isNotEmpty()
+        return out
+    }
+
+    /** Clip each face to dot(up, p) ≤ h and close the cut with a cap polygon (appended last). */
+    private fun cut(polys: List<List<FloatArray>>, up: FloatArray, h: Float): List<List<FloatArray>> {
+        val out = ArrayList<List<FloatArray>>()
+        val capPts = ArrayList<FloatArray>()
+        for (poly in polys) {
+            val res = ArrayList<FloatArray>()
+            for (k in poly.indices) {
+                val p = poly[k]; val q = poly[(k + 1) % poly.size]
+                val dp = dot(up, p) - h; val dq = dot(up, q) - h
+                if (dp <= 0f) res.add(p)
+                if ((dp < 0f && dq > 0f) || (dp > 0f && dq < 0f)) {
+                    val t = dp / (dp - dq)
+                    val x = floatArrayOf(p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t)
+                    res.add(x); capPts.add(x)
+                } else if (dp == 0f) capPts.add(p)
+            }
+            if (res.size >= 3) out.add(res)
+        }
+        if (capPts.size >= 3) {
+            val c = FloatArray(3); for (p in capPts) for (i in 0..2) c[i] += p[i] / capPts.size
+            // Basis (e1, e2) in the plane with e1 × e2 = up, so CCW in it faces up (outward).
+            val e1 = if (abs(up[0]) < 0.9f) cross(up, floatArrayOf(1f, 0f, 0f)) else cross(up, floatArrayOf(0f, 1f, 0f))
+            norm(e1)
+            val e2 = cross(up, e1)
+            val sorted = capPts.sortedBy { p -> val d = sub(p, c); atan2(dot(d, e2), dot(d, e1)) }
+            val uniq = ArrayList<FloatArray>()
+            for (p in sorted) if (uniq.isEmpty() || dist(uniq.last(), p) > 1e-5f) uniq.add(p)
+            if (uniq.size >= 3 && dist(uniq.first(), uniq.last()) <= 1e-5f) uniq.removeAt(uniq.size - 1)
+            if (uniq.size >= 3) out.add(uniq)
+        }
+        return out
+    }
+
+    /** Volume of a closed polyhedron given as outward CCW polygons. */
+    private fun volume(polys: List<List<FloatArray>>): Float {
+        var v = 0f
+        for (poly in polys) for (k in 1 until poly.size - 1) v += dot(poly[0], cross(poly[k], poly[k + 1]))
+        return v / 6f
+    }
+
+    /** The colorable region under page point ([x], [y]) on the side facing the viewer, or −1. */
+    fun regionAt(cx: Float, cy: Float, x: Float, y: Float): Int {
+        val m = fillMesh(params); val reg = regionIndex(m); val pr = project(m.v, cx, cy)
+        var best = -1; var bestZ = -Float.MAX_VALUE
+        for ((f, fc) in m.faces.withIndex()) {
+            if (!facing(pr.x, pr.y, fc)) continue
+            var inside = false; var j = fc.size - 1
+            for (i in fc.indices) {
+                val ax = pr.x[fc[i]]; val ay = pr.y[fc[i]]; val bx = pr.x[fc[j]]; val by = pr.y[fc[j]]
+                if ((ay > y) != (by > y) && x < (bx - ax) * (y - ay) / ((by - ay) + 1e-9f) + ax) inside = !inside
+                j = i
+            }
+            if (inside) { val z = fc.sumOf { pr.z[it].toDouble() }.toFloat() / fc.size; if (z > bestZ) { bestZ = z; best = reg[f] } }
+        }
+        return best
+    }
+
+    /** The front-facing polygons of [region] (for highlighting a picked face). */
+    fun regionPolys(cx: Float, cy: Float, region: Int): List<List<PointF>> {
+        val m = fillMesh(params); val reg = regionIndex(m); val pr = project(m.v, cx, cy)
+        return m.faces.withIndex().filter { (f, fc) -> reg[f] == region && facing(pr.x, pr.y, fc) }.map { (_, fc) -> fc.map { PointF(pr.x[it], pr.y[it]) } }
+    }
 
     /** Orbit: yaw about the screen's vertical axis, then pitch about its horizontal axis (degrees). */
     fun orbit(base: FloatArray, yawDeg: Float, pitchDeg: Float) {
@@ -230,8 +423,9 @@ class Solid(val params: SolidParams, val r: FloatArray = defaultView(), var size
 
     class Edge(val a: Int, val b: Int, val f1: Int, val f2: Int, val smooth: Boolean)
 
-    /** A convex polyhedron: vertices, outward CCW faces, and each edge with its two faces. */
-    class Mesh(val v: List<FloatArray>, val faces: List<IntArray>, val edges: List<Edge>)
+    /** A convex polyhedron: vertices, outward CCW faces, each edge with its two faces, and each face's
+     *  smoothing group (−1 = a flat face of its own; faces sharing a group ≥ 0 form one curved surface). */
+    class Mesh(val v: List<FloatArray>, val faces: List<IntArray>, val edges: List<Edge>, val group: IntArray = IntArray(faces.size) { -1 })
 
     companion object {
         /** A gentle three-quarter view: the front, right side and top all show, and no edges overlap. */
@@ -294,9 +488,54 @@ class Solid(val params: SolidParams, val r: FloatArray = defaultView(), var size
                 }
                 SolidKind.PLATONIC -> return hull(platonic(n).map { floatArrayOf(it[0], it[1] * hh, it[2] * p.depth) })
                 SolidKind.SPHERE -> {}
+                SolidKind.TRAPEZOID -> {
+                    // Trapezoid cross-section (bottom 2 wide, top 2·top wide) extruded front to back.
+                    val t = p.top.coerceIn(0.05f, 1f); val d = p.depth
+                    val f0 = v.size
+                    for (z in floatArrayOf(d, -d)) {
+                        v.add(floatArrayOf(-1f, -hh, z)); v.add(floatArrayOf(1f, -hh, z)); v.add(floatArrayOf(t, hh, z)); v.add(floatArrayOf(-t, hh, z))
+                    }
+                    face(-1, f0, f0 + 1, f0 + 2, f0 + 3); face(-1, f0 + 4, f0 + 5, f0 + 6, f0 + 7)
+                    for (k in 0 until 4) { val k2 = (k + 1) % 4; face(-1, f0 + k, f0 + k2, f0 + 4 + k2, f0 + 4 + k) }
+                }
             }
             orient(v, faces)
-            return Mesh(v, faces, edgesOf(faces, group))
+            return Mesh(v, faces, edgesOf(faces, group), group.toIntArray())
+        }
+
+        /** The mesh fills and water are computed on (a sphere gets a fine lat-long mesh). */
+        @Synchronized
+        fun fillMesh(p: SolidParams): Mesh = if (p.kind != SolidKind.SPHERE) mesh(p) else cache.getOrPut("fill/" + p.key()) { sphereMesh(p) }
+
+        private fun sphereMesh(p: SolidParams): Mesh {
+            val v = ArrayList<FloatArray>(); val faces = ArrayList<IntArray>()
+            val lat = 16; val lon = 32
+            v.add(floatArrayOf(0f, p.height, 0f))
+            for (i in 1 until lat) {
+                val th = PI * i / lat
+                for (j in 0 until lon) {
+                    val ph = 2 * PI * j / lon
+                    v.add(floatArrayOf((sin(th) * cos(ph)).toFloat(), (cos(th) * p.height).toFloat(), (sin(th) * sin(ph) * p.depth).toFloat()))
+                }
+            }
+            v.add(floatArrayOf(0f, -p.height, 0f))
+            val south = v.size - 1
+            fun at(i: Int, j: Int) = 1 + (i - 1) * lon + (j % lon)
+            for (j in 0 until lon) faces.add(intArrayOf(0, at(1, j), at(1, j + 1)))
+            for (i in 1 until lat - 1) for (j in 0 until lon) faces.add(intArrayOf(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)))
+            for (j in 0 until lon) faces.add(intArrayOf(south, at(lat - 1, j + 1), at(lat - 1, j)))
+            orient(v, faces)
+            return Mesh(v, faces, emptyList(), IntArray(faces.size) { 0 })
+        }
+
+        /** Face → colorable region: flat faces one each, a smoothing group as one, numbered in face order. */
+        fun regionIndex(m: Mesh): IntArray {
+            val out = IntArray(m.faces.size); val byGroup = HashMap<Int, Int>(); var next = 0
+            for (f in m.faces.indices) {
+                val g = m.group.getOrElse(f) { -1 }
+                out[f] = if (g < 0) next++ else byGroup.getOrPut(g) { next++ }
+            }
+            return out
         }
 
         /** Flip any face whose normal points at the solid's centroid (convex ⇒ it's inward). */
@@ -427,6 +666,7 @@ class Solid(val params: SolidParams, val r: FloatArray = defaultView(), var size
         }
 
         private fun norm(a: FloatArray) { val l = sqrt(dot(a, a)); if (l > 0f) for (i in 0..2) a[i] /= l }
+        private fun dist(a: FloatArray, b: FloatArray) = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2]))
         private fun dot(a: FloatArray, b: FloatArray) = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
         private fun sub(a: FloatArray, b: FloatArray) = floatArrayOf(a[0] - b[0], a[1] - b[1], a[2] - b[2])
         private fun cross(a: FloatArray, b: FloatArray) = floatArrayOf(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])

@@ -20,10 +20,13 @@ import kotlin.math.sin
  */
 enum class ShapeType {
     LINE, ARROW, RECT, ELLIPSE, TRIANGLE, AXES2D_1Q, AXES2D_2Q, AXES2D, AXES3D, AXES3D_8, TABLE,
-    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID, GRAPH;
+    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID, GRAPH, TRAPEZOID;
 
     /** Verts a saved shape must have (a SOLID's one is its center; a legacy box had a depth handle). */
-    val vertCount: Int get() = when (this) { SOLID -> 1; TRIANGLE, BOX -> 3; else -> 2 }
+    val vertCount: Int get() = when (this) { SOLID -> 1; TRIANGLE, BOX -> 3; TRAPEZOID -> 4; else -> 2 }
+
+    /** Closed outlines that can be filled with a color. */
+    val fillable: Boolean get() = this == RECT || this == ELLIPSE || this == TRIANGLE || this == TRAPEZOID
 }
 
 /**
@@ -53,12 +56,26 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     var solid: Solid? = null
     /** A GRAPH's card. Immutable, so clones share it (and its computed geometry). */
     var graph: GraphCard? = null
+    /** A closed 2D shape's fill (ARGB, 0 = none). A solid's paint lives in its [Solid.fill]. */
+    var fillColor = 0
 
     fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }), dashed).also {
         it.hashed = hashed; it.rows = rows; it.cols = cols; it.border = border
         it.rot = rot; it.pivot.set(pivot.x, pivot.y)
         it.solid = solid?.copy()
         it.graph = graph
+        it.fillColor = fillColor
+    }
+
+    /** An area painted under the outline: [polys] filled together in [color], outlined in [edge] (0 = no edge). */
+    class Fill(val polys: List<List<PointF>>, val color: Int, val edge: Int = 0)
+
+    /** What to paint under the outline, back to front (a solid's faces and water, or a 2D fill). */
+    fun fills(): List<Fill> {
+        solid?.let { return it.fills(verts[0].x, verts[0].y) }
+        if (!type.fillable || (fillColor ushr 24) == 0) return emptyList()
+        val outline = parts().firstOrNull()?.pts ?: return emptyList()
+        return listOf(Fill(listOf(outline), fillColor))
     }
 
     /**
@@ -76,17 +93,37 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
 
     /** Move handle [i] to page point ([x],[y]). */
     fun setHandle(i: Int, x: Float, y: Float) {
+        if (type == ShapeType.TRAPEZOID) { verts[i].set(x, y); keepTrapezoid(i); return }
         if (rot == 0f) { verts[i].set(x, y); return }
         val a = Math.toRadians(-rot.toDouble()); val c = cos(a).toFloat(); val s = sin(a).toFloat()
         val dx = x - pivot.x; val dy = y - pivot.y
         verts[i].set(pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c)
     }
 
+    /**
+     * A trapezoid's verts are bottom-left, bottom-right, top-right, top-left. After a drag, line the
+     * top edge back up parallel to the bottom, at the height of the top corner that moved (or the
+     * top-left one when a bottom corner moved), so it stays a trapezoid.
+     */
+    private fun keepTrapezoid(moved: Int) {
+        val a = verts[0]; val b = verts[1]
+        var dx = b.x - a.x; var dy = b.y - a.y
+        val len = hypot(dx, dy); if (len < 1e-3f) return
+        dx /= len; dy /= len
+        val nx = -dy; val ny = dx
+        val ref = verts[if (moved >= 2) moved else 3]
+        val ht = (ref.x - a.x) * nx + (ref.y - a.y) * ny
+        for (k in 2..3) {
+            val s = (verts[k].x - a.x) * dx + (verts[k].y - a.y) * dy
+            verts[k].set(a.x + dx * s + nx * ht, a.y + dy * s + ny * ht)
+        }
+    }
+
     /** Scale a solid's size by [k] (a 2D resize maps onto a uniform 3D one, so it keeps its proportions). */
     fun scaleSolid(k: Float) { solid?.let { it.size = (it.size * k).coerceIn(2f, 4000f) } }
 
     /** Line, arrow and triangle are pure point shapes — rotating them just rotates their verts. */
-    val rotatesByVerts: Boolean get() = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.TRIANGLE
+    val rotatesByVerts: Boolean get() = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.TRIANGLE || type == ShapeType.TRAPEZOID
 
     /** Rotate the whole shape by [deg] about page point ([cx],[cy]). */
     fun rotateBy(deg: Float, cx: Float, cy: Float) {
@@ -136,6 +173,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
             listOf(Part(ellipse(cx, cy, abs(verts[1].x - verts[0].x) / 2f, abs(verts[1].y - verts[0].y) / 2f)))
         }
         ShapeType.TRIANGLE -> listOf(Part(closed(listOf(verts[0], verts[1], verts[2]))))
+        ShapeType.TRAPEZOID -> listOf(Part(closed(listOf(verts[0], verts[1], verts[2], verts[3]))))
         ShapeType.AXES2D -> axes2d(verts[0], verts[1], left = true, down = true, ticks = hashed)
         ShapeType.AXES2D_2Q -> axes2d(verts[0], verts[1], left = false, down = true, ticks = hashed)
         ShapeType.AXES2D_1Q -> axes2d(verts[0], verts[1], left = false, down = false, ticks = hashed)
@@ -160,6 +198,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
                 ShapeType.LINE, ShapeType.ARROW -> arrayListOf(PointF(cx - s, cy + s * 0.4f), PointF(cx + s, cy - s * 0.4f))
                 ShapeType.RECT, ShapeType.ELLIPSE -> arrayListOf(PointF(cx - s, cy - s * 0.72f), PointF(cx + s, cy + s * 0.72f))
                 ShapeType.TRIANGLE -> arrayListOf(PointF(cx, cy - s), PointF(cx + s, cy + s), PointF(cx - s, cy + s))
+                ShapeType.TRAPEZOID -> arrayListOf(PointF(cx - s, cy + s * 0.6f), PointF(cx + s, cy + s * 0.6f), PointF(cx + s * 0.55f, cy - s * 0.6f), PointF(cx - s * 0.55f, cy - s * 0.6f))
                 ShapeType.AXES2D -> arrayListOf(PointF(cx, cy), PointF(cx + s, cy - s))
                 ShapeType.AXES2D_2Q -> arrayListOf(PointF(cx - s, cy), PointF(cx + s, cy - s))
                 ShapeType.AXES2D_1Q -> arrayListOf(PointF(cx - s, cy + s), PointF(cx + s, cy - s))

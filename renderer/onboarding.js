@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.10': {
+      title: "What's new",
+      intro: 'EngInk shapes can be filled — even with water.',
+      slides: [
+        { emoji: '🎨', title: 'Fill shapes', body: 'Select a rectangle, ellipse, triangle or trapezoid and tap Fill to pick a color and opacity. For 3D solids, open Edit shape: drag the picture to turn it, tap faces to pick them, then choose a color and opacity. With no faces picked, the color fills every face.' },
+        { emoji: '💧', title: 'Water', body: 'Edit shape has a Water slider from empty to full. Turn the solid on the page and the water settles level, like it would under gravity.' },
+        { emoji: '⏢', title: 'Trapezoids', body: 'The shapes menu has a trapezoid, and its corners stay parallel as you drag them, plus a trapezoidal prism in the 3D solids row. Graphs on the page follow your theme again and have an Edit button in the corner.' },
+      ],
+    },
     '1.5.9': {
       title: "What's new",
       intro: 'The EngInk grapher now lives on your notebook page.',

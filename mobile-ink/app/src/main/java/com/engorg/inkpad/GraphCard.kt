@@ -95,7 +95,11 @@ object GraphCardRenderer {
     private fun theme(dark: Boolean) = cardColors(dark).let { Theme(it.first, it.second) }
 
     /** Background and ink of a graph on light or dark paper (shared with the live window, GraphPane). */
-    fun cardColors(dark: Boolean): Pair<Int, Int> = if (dark) Color.rgb(0x1F, 0x23, 0x2B) to Color.rgb(0xE5, 0xE7, 0xEB) else Color.WHITE to Color.rgb(0x1F, 0x29, 0x37)
+    @Suppress("UNUSED_PARAMETER")
+    fun cardColors(dark: Boolean): Pair<Int, Int> = AppTheme.surface to AppTheme.text   // follow the app's theme
+
+    /** Where a card's Edit button sits (page units), bottom left. */
+    fun editButtonRect(box: RectF): RectF = RectF(box.left + 8f, box.bottom - 8f - 26f, box.left + 8f + 66f, box.bottom - 8f)
 
     /** Width of the expression list on a card [boxW] page units wide (the live window matches it). */
     fun legendWidth(boxW: Float): Float = (boxW * 0.34f).coerceIn(min(150f, boxW * 0.5f), boxW * 0.5f)
@@ -172,6 +176,15 @@ object GraphCardRenderer {
             r3.draw(c, if (ready) card.scene3 else null, card.yaw, card.pitch, card.range, plot, Render3D.Style(t.bg, t.ink, unit))
         } else draw2d(c, card, plot, t, if (ready) card.scene2 else null)
         if (leg != null) drawLegend(c, card, leg, t)
+        // The Edit button (not in exports: [sync] is only set when rendering a PDF / snapshot).
+        if (!sync) {
+            val b = editButtonRect(box)
+            fill.color = AppTheme.accent; c.drawRoundRect(b, 13f, 13f, fill)
+            text.textSize = 12.5f; text.textAlign = Paint.Align.CENTER; text.color = AppTheme.onAccent()
+            text.typeface = android.graphics.Typeface.DEFAULT_BOLD
+            c.drawText("✎  Edit", b.centerX(), b.centerY() + 4.5f, text)
+            text.typeface = null
+        }
         c.restore()
         line.style = Paint.Style.STROKE; line.pathEffect = null
         line.color = alpha(t.ink, 0x38); line.strokeWidth = 1f
