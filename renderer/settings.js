@@ -1556,8 +1556,8 @@ function renderSettings() {
 
       <!-- Quick Note widget (Scriptable, iOS) -->
       <div class="settings-section">
-        <h3 class="settings-section-title">Quick Note widget</h3>
-        <p class="settings-toggle-desc" style="margin-bottom:12px">A sticky-note widget for your iPhone home screen, made with the free <strong>Scriptable</strong> app. Tap it, fill in the note, hit Post, and it lands on your board. Easiest from the phone: web app → Settings → <strong>Widget</strong>. From here, copy the token and send it to your phone; the widget asks for it on first tap.</p>
+        <h3 class="settings-section-title">iPhone widgets</h3>
+        <p class="settings-toggle-desc" style="margin-bottom:12px">Two ways to add notes from your iPhone home screen, both set up from the phone: web app → Settings → <strong>Widgets</strong>. The <strong>Shortcuts widget</strong> asks for each part of the note in pop-ups right on the home screen, without opening an app. The <strong>sticky-note widget</strong> (free <strong>Scriptable</strong> app) looks like one of your notes and opens Scriptable to fill it in. For the sticky note you can also copy the token and script here and send them to your phone.</p>
         <button id="settings-widget-token" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:none;background:var(--accent);color:#fff;cursor:pointer;font-size:14px;font-weight:600">Copy widget token</button>
         <button id="settings-widget-script" class="settings-btn" style="padding:8px 20px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);cursor:pointer;font-size:14px;font-weight:600;margin-left:8px">Copy script</button>
         <span id="settings-widget-status" style="margin-left:12px;font-size:13px;color:var(--text-muted)"></span>

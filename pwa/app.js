@@ -3073,7 +3073,7 @@ function closePwaSettings() {
 function renderPwaSettings() {
   const body = document.getElementById('settings-body');
   if (!body) return;
-  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['wallpaper', 'Wallpaper'], ['widget', 'Scriptable'], ['about', 'About']];
+  const tabs = [['appearance', 'Appearance'], ['hotbar', 'Hotbar'], ['notes', 'Notes'], ['wallpaper', 'Wallpaper'], ['widget', 'Widgets'], ['about', 'About']];
   let html = `<div class="pset-tabs">` + tabs.map(([id, label]) =>
     `<button class="pset-tab${id === _psetTab ? ' active' : ''}" data-ptab="${id}">${label}</button>`).join('') + `</div>`;
   html += `<div class="pset-panel">`;
@@ -3194,10 +3194,62 @@ function psetWallpaper() {
   </div>`;
 }
 
+// Values for the Shortcuts-widget guide's copy rows. The two URLs carry the user's API
+// token, so they're filled in after getApiToken() resolves.
+const _widgetCopy = {
+  title: 'Title?',
+  desc: 'Description? (type skip for none)',
+  projectNames: 'projectNames',
+  project: 'Project?',
+  priority: 'Priority?',
+  categoryNames: 'categoryNames',
+  category: 'Category?',
+  due: 'Due? e.g. friday, tomorrow, Apr 20, or skip',
+  posted: 'Posted ✓',
+  k_title: 'title', k_description: 'description', k_projectName: 'projectName',
+  k_priority: 'priority', k_categoryName: 'categoryName', k_dueDate: 'dueDate',
+};
+
+function wcopy(id, shown) {
+  return `<button type="button" class="pset-copy" data-copyid="${id}">
+    <span class="pset-copy-val" id="pset-copy-${id}">${escapeHtml(shown != null ? shown : (_widgetCopy[id] || 'Loading…'))}</span>
+    <span class="pset-copy-btn">Copy</span></button>`;
+}
+
 function psetWidget() {
+  const keyRow = (id, from) => `<div class="pset-copy-key">${wcopy(id)}<span class="pset-copy-from">&larr; ${from}</span></div>`;
   return `<div class="pset-section">
-    <h3 class="pset-h3">Scriptable setup</h3>
-    <p class="pset-hint">A sticky-note Quick Note widget for your iPhone home screen, made with the free <b>Scriptable</b> app. Tap it, fill in the note, hit Post, and it lands on your board.</p>
+    <h3 class="pset-h3">Type on the home screen (Shortcuts widget)</h3>
+    <p class="pset-hint">Build one shortcut, then add Apple&rsquo;s <b>Shortcuts</b> widget. Tapping it asks for each part of the note in small pop-ups right over your home screen (title, description, project, priority, category, due date) and posts it. No app opens. Takes about 5 minutes; tap any grey box to copy it.</p>
+    <ol class="pset-wp-steps pset-guide">
+      <li>Open <b>Shortcuts</b>, tap <b>+</b>, and rename the new shortcut <b>New Note</b>.</li>
+      <li>Add <b>Ask for Input</b> and set its prompt to:${wcopy('title')}</li>
+      <li>Add another <b>Ask for Input</b>. Prompt:${wcopy('desc')}</li>
+      <li>Add <b>Get Contents of URL</b> and paste this as the URL. It fetches your projects and categories:${wcopy('listUrl')}</li>
+      <li>Add <b>Get Dictionary Value</b>. Key:${wcopy('projectNames')}</li>
+      <li>Add <b>Choose from List</b>. Tap <b>Show More</b> and set Prompt to:${wcopy('project')}</li>
+      <li>Add <b>List</b> and change its items to <b>High</b>, <b>Medium</b> and <b>Low</b>. Then add <b>Choose from List</b> with prompt:${wcopy('priority')}</li>
+      <li>Add <b>Get Dictionary Value</b> with key:${wcopy('categoryNames')}Then tap its <b>Dictionary</b> field and pick <b>Contents of URL</b> (from step 4).</li>
+      <li>Add <b>Text</b>. Type <b>None</b>, start a new line, then insert the <b>Dictionary Value</b> from step 8 (tap it in the bar above the keyboard).</li>
+      <li>Add <b>Split Text</b> (leave it on New Lines). Then add <b>Choose from List</b> with prompt:${wcopy('category')}</li>
+      <li>Add <b>Ask for Input</b>. Prompt:${wcopy('due')}</li>
+      <li>Add <b>Get Contents of URL</b> and paste:${wcopy('addUrl')}Tap <b>Show More</b>: set Method to <b>POST</b> and Request Body to <b>JSON</b>. Add six <b>Text</b> fields with these keys. For each value, tap <b>Select Variable</b> and then tap the action it comes from:
+        <div class="pset-keys">
+          ${keyRow('k_title', 'Title (step 2)')}
+          ${keyRow('k_description', 'Description (step 3)')}
+          ${keyRow('k_projectName', 'Project (step 6)')}
+          ${keyRow('k_priority', 'Priority (step 7)')}
+          ${keyRow('k_categoryName', 'Category (step 10)')}
+          ${keyRow('k_dueDate', 'Due (step 11)')}
+        </div></li>
+      <li>Optional: add <b>Show Notification</b> with text:${wcopy('posted')}</li>
+      <li>Tap <b>Done</b>. Long-press your home screen &rarr; <b>+</b> &rarr; <b>Shortcuts</b> &rarr; add the widget, then long-press it &rarr; <b>Edit Widget</b> &rarr; pick <b>New Note</b>.</li>
+    </ol>
+    <p class="pset-hint" style="margin-top:8px">The two links contain your private token: anyone with them can add notes to your board.</p>
+  </div>
+  <div class="pset-section">
+    <h3 class="pset-h3">Sticky-note widget (Scriptable)</h3>
+    <p class="pset-hint">Looks like one of your sticky notes on the home screen, made with the free <b>Scriptable</b> app. Tapping it opens Scriptable to fill in the note and hit Post.</p>
     <ol class="pset-wp-steps">
       <li>Install <b>Scriptable</b> from the App Store.</li>
       <li>Tap the code box below to copy it. In Scriptable tap <b>+</b>, paste, and name it <b>Quick Note</b>.</li>
@@ -3350,6 +3402,47 @@ function bindPsetEvents() {
     const v = document.getElementById('pset-wp-url').value;
     if (v) window.open(v, '_blank');
   });
+
+  // Shortcuts-widget guide: fill the token URLs, then tap any grey box to copy it.
+  if (body.querySelector('.pset-guide')) {
+    const setUrl = (id, val) => {
+      _widgetCopy[id] = val;
+      const el = document.getElementById('pset-copy-' + id);
+      if (el) el.textContent = val;
+    };
+    if (_widgetCopy.listUrl) {
+      setUrl('listUrl', _widgetCopy.listUrl); setUrl('addUrl', _widgetCopy.addUrl);
+    } else if (!auth.currentUser) {
+      setUrl('listUrl', ''); setUrl('addUrl', '');
+      document.getElementById('pset-copy-listUrl').textContent = 'Sign in first';
+      document.getElementById('pset-copy-addUrl').textContent = 'Sign in first';
+    } else {
+      getApiToken().then(token => {
+        if (!token) throw new Error('no token');
+        setUrl('listUrl', `${location.origin}/api/listProjects?token=${token}`);
+        setUrl('addUrl', `${location.origin}/api/addNote?token=${token}`);
+      }).catch(() => {
+        document.getElementById('pset-copy-listUrl').textContent = 'Couldn’t get your token. Reopen this tab.';
+        document.getElementById('pset-copy-addUrl').textContent = 'Couldn’t get your token. Reopen this tab.';
+      });
+    }
+    body.querySelectorAll('[data-copyid]').forEach(btn => btn.addEventListener('click', async () => {
+      const text = _widgetCopy[btn.dataset.copyid];
+      if (!text) return;
+      try { await navigator.clipboard.writeText(text); }
+      catch (e) {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch (_) {}
+        ta.remove();
+      }
+      const label = btn.querySelector('.pset-copy-btn');
+      label.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { label.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
+    }));
+  }
 
   // Quick Note widget (Scriptable)
   const wTok = body.querySelector('#pset-widget-token');
