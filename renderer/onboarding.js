@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.6': {
+      title: "What's new",
+      intro: 'EngInk on the tablet has a built-in graphing calculator.',
+      slides: [
+        { emoji: '📈', title: 'Graph a function', body: 'Tap the graph button on the EngInk toolbar to open a Desmos-style window: type expressions on the left and see them graphed on the right. Drag the header to move it, any edge or corner to resize it, and the bar in the middle to resize the list. It graphs y = f(x), x = g(y), equations like x² + y² = 9, inequalities with shading, polar r = f(θ), parametric (x(t), y(t)), points and sliders.' },
+        { emoji: '∫', title: 'Higher-level math', body: 'The ƒ(x) button lists every function: trig and hyperbolic functions and their inverses, logs, derivatives (d/dx, f′(x)), integrals, sums, products and limits, piecewise functions, gamma, erf, zeta, Bessel, Airy, Lambert W, elliptic integrals and statistics distributions. Tap a curve to trace it, and tap the gray dots to read off roots, extrema and intersections.' },
+        { emoji: '🖋️', title: 'Add it to your notes', body: 'Add to page drops the current view onto your notebook page as ink, with labeled axes. It lands selected, so you can drag it into place.' },
+      ],
+    },
     '1.5.5': {
       title: "What's new",
       intro: 'EngInk on the tablet can now draw 3D solids.',

@@ -75,6 +75,7 @@ object InkSettings {
             if (ink.contains("brushColor")) o.put("brushColor", ink.getInt("brushColor", 0))
             if (ink.contains("smoothing")) o.put("smoothing", ink.getFloat("smoothing", 0.1f).toDouble())
             if (ink.contains("brush")) o.put("brush", ink.getString("brush", "PEN"))
+            if (ink.contains("customColors")) o.put("customColors", ink.getString("customColors", "[]"))
             EmailPrefs.savedEmail(ctx)?.let { o.put("savedEmail", it) }
             o.put("nbPaper", nbPaper(ctx))
             o.put("nbCover", nbCover(ctx))
@@ -104,6 +105,7 @@ object InkSettings {
             if (o.has("brushColor")) inkE.putInt("brushColor", o.getInt("brushColor"))
             if (o.has("smoothing")) inkE.putFloat("smoothing", o.getDouble("smoothing").toFloat())
             if (o.has("brush")) inkE.putString("brush", o.optString("brush", "PEN"))
+            if (o.has("customColors")) inkE.putString("customColors", o.optString("customColors", "[]"))
             inkE.apply()
             if (o.has("savedEmail")) o.optString("savedEmail").takeIf { it.isNotBlank() }?.let { EmailPrefs.setSavedEmail(ctx, it) }
             val nbE = nb(ctx).edit()

@@ -50,6 +50,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         CUT("Cut"), COPY("Copy"), PASTE("Paste"), DUPLICATE("Duplicate"), COLOR("Color"), DELETE("Delete"),
         // Second row, shown when a single table is selected.
         ROW_ADD("+ Row"), ROW_DEL("− Row"), COL_ADD("+ Col"), COL_DEL("− Col"), BORDER("Border"),
+        // Second row, shown when a single 3D solid is selected: snap to a standard view, or reshape it.
+        VIEW_ISO("Iso"), VIEW_FRONT("Front"), VIEW_TOP("Top"), VIEW_SIDE("Side"), SOLID_EDIT("Edit shape"),
     }
 
     companion object {
@@ -299,6 +301,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var lasso: List<PointF>? = null
     private var selMenu: List<MenuAction> = emptyList()
     private var tableMenu: List<MenuAction> = emptyList()
+    private var orbit = false   // a lone 3D solid is selected: show the orbit knob
     private var pasteMenuPage = -1
     private val pasteMenuAt = PointF()
     private val menuHits = ArrayList<Pair<MenuAction, RectF>>()   // screen-space, rebuilt every draw
@@ -329,10 +332,10 @@ class FinishedStrokesView(context: Context) : View(context) {
     fun docHeight(): Float = if (pages.isEmpty()) PAGE_H else pages.size * (PAGE_H + GAP) - GAP
     fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
-    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>, tableMenu: List<MenuAction> = emptyList()) {
-        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; this.tableMenu = tableMenu; invalidate()
+    fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>, tableMenu: List<MenuAction> = emptyList(), orbit: Boolean = false) {
+        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; this.tableMenu = tableMenu; this.orbit = orbit; invalidate()
     }
-    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); pasteMenuPage = -1; menuHits.clear(); invalidate() }
+    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); orbit = false; pasteMenuPage = -1; menuHits.clear(); invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
 
     /** Show a lone "Paste" pill anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
@@ -361,7 +364,14 @@ class FinishedStrokesView(context: Context) : View(context) {
     /** Where the rotate knob sits on screen (centered under the selection box), or null. */
     fun rotateHandleScreen(): PointF? {
         val r = selectionScreenRect() ?: return null
-        return PointF(r.centerX(), r.bottom + dpf(30f))
+        return PointF(if (orbit) r.centerX() - dpf(24f) else r.centerX(), r.bottom + dpf(30f))
+    }
+
+    /** Where the 3D orbit knob sits (beside the rotate knob), or null when no lone solid is selected. */
+    fun orbitHandleScreen(): PointF? {
+        if (!orbit) return null
+        val r = selectionScreenRect() ?: return null
+        return PointF(r.centerX() + dpf(24f), r.bottom + dpf(30f))
     }
 
     /** Erase whole strokes near the tip. Tables are skipped, so erasing writing inside a cell never
@@ -552,6 +562,16 @@ class FinishedStrokesView(context: Context) : View(context) {
             val tx0 = k.x + ar * cos(tipA).toFloat(); val ty0 = k.y + ar * sin(tipA).toFloat()
             canvas.drawLine(tx0, ty0, tx0 + ar * 0.55f, ty0 - ar * 0.1f, handleStroke)
             canvas.drawLine(tx0, ty0, tx0 + ar * 0.1f, ty0 + ar * 0.55f, handleStroke)
+        }
+        // Orbit knob (3D rotate): a little globe, an equator and a meridian inside a circle.
+        orbitHandleScreen()?.let { k ->
+            val kr = dpf(11f)
+            canvas.drawLine(k.x, rect.bottom, k.x, k.y - kr, handleStroke)
+            canvas.drawCircle(k.x, k.y, kr, handleFill); canvas.drawCircle(k.x, k.y, kr, handleStroke)
+            val gr = kr * 0.6f
+            canvas.drawCircle(k.x, k.y, gr, handleStroke)
+            canvas.drawOval(k.x - gr, k.y - gr * 0.38f, k.x + gr, k.y + gr * 0.38f, handleStroke)
+            canvas.drawOval(k.x - gr * 0.38f, k.y - gr, k.x + gr * 0.38f, k.y + gr, handleStroke)
         }
         // Sit the menu clear of the corner handles' touch zones (above the box, or below — past the
         // rotate knob — if there's no room).

@@ -30,6 +30,7 @@ import kotlin.math.floor
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /** The active tool. Shared across every open pane via [PageCanvas.Host]. */
 enum class Tool { PEN, HIGHLIGHTER, ERASER, SELECT }
@@ -56,17 +57,21 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val brushSize: Float
         val brush: Brush
         val smoothing: Float   // 0f (off) .. 1f (max lag/leash)
+        val eraserSize: Float  // eraser reach (radius), page units
         val pendingShape: ShapeType?
         val pendingShapeDashed: Boolean   // draw the armed shape with a dashed outline
         val pendingShapeHashed: Boolean   // tick marks on the armed axes shape
         val pendingTableRows: Int
         val pendingTableCols: Int
         val pendingTableBorder: Boolean
+        val pendingSolid: SolidParams?   // what an armed SOLID will be
         fun onPaneFocused(pane: PageCanvas)
         fun onPageChanged(pane: PageCanvas)
         fun onShapeCommitted()
         /** Show the palette near pane-local ([x],[y]) and report the picked color. */
         fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit)
+        /** Open the 3D solid builder on [params] and report the edited shape. */
+        fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit)
     }
 
     /**
@@ -97,7 +102,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private var undoPushedThisGesture = false
     private var addArmed = false
 
-    private val eraserRadius = 13f
+    private val eraserRadius get() = host.eraserSize
 
     private class Sample(val x: Float, val y: Float)
     private val samples = ArrayList<Sample>()
@@ -147,8 +152,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private var selPage = -1
     private val selRecs = ArrayList<FinishedStrokesView.Rec>()
     private var selBox: RectF? = null
-    private enum class Grab { NONE, MOVE, RESIZE, VERTEX, LASSO, ROTATE }
+    private enum class Grab { NONE, MOVE, RESIZE, VERTEX, LASSO, ROTATE, ORBIT }
     private var grab = Grab.NONE
+    private val orbitStart = PointF()        // screen point an ORBIT drag began at
     private var moveStartPage = -1          // page the selection was on when the drag began
     private var rotCx = 0f; private var rotCy = 0f   // rotation center (page-local on selPage)
     private var rotStartAngle = 0f
@@ -411,11 +417,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             // Partial-quadrant axes fit the box you drew: origin bottom-left (1Q) or mid-left (2Q).
             ShapeType.AXES2D_1Q -> arrayListOf(PointF(minX, maxY), PointF(maxX, minY))
             ShapeType.AXES2D_2Q -> arrayListOf(PointF(minX, (minY + maxY) / 2f), PointF(maxX, minY))
-            // 3D solids fill the box you drew (a box's depth runs to its top-right corner).
-            ShapeType.BOX -> ShapeSpec.boxVerts(minX, minY, maxX, maxY)
-            ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
+            ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
         }
-        val spec = ShapeSpec(type, verts, host.pendingShapeDashed).apply {
+        // A solid fills the box you drew, in its default three-quarter view.
+        val spec = (if (type == ShapeType.SOLID) ShapeSpec.solidIn(host.pendingSolid ?: SolidParams.box(), minX, minY, maxX, maxY)
+            else ShapeSpec(type, verts)).apply {
+            dashed = host.pendingShapeDashed
             hashed = host.pendingShapeHashed
             if (type == ShapeType.TABLE) { rows = host.pendingTableRows; cols = host.pendingTableCols; border = host.pendingTableBorder }
         }
@@ -640,6 +647,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun selectedTable(): FinishedStrokesView.Rec? =
         selRecs.singleOrNull()?.takeIf { it.shape?.type == ShapeType.TABLE }
 
+    /** The lone selected 3D solid, if that's what's selected (enables the orbit knob + view menu). */
+    private fun selectedSolid(): FinishedStrokesView.Rec? =
+        selRecs.singleOrNull()?.takeIf { it.shape?.solid != null }
+
     private fun refreshSelectionOverlay() {
         val box = selBox
         if (box == null || selRecs.isEmpty()) { finishedView.clearSelection(); return }
@@ -653,8 +664,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.ROW_ADD, FinishedStrokesView.MenuAction.ROW_DEL,
             FinishedStrokesView.MenuAction.COL_ADD, FinishedStrokesView.MenuAction.COL_DEL,
             FinishedStrokesView.MenuAction.BORDER,
+        ) else if (selectedSolid() != null) listOf(
+            FinishedStrokesView.MenuAction.VIEW_ISO, FinishedStrokesView.MenuAction.VIEW_FRONT,
+            FinishedStrokesView.MenuAction.VIEW_TOP, FinishedStrokesView.MenuAction.VIEW_SIDE,
+            FinishedStrokesView.MenuAction.SOLID_EDIT,
         ) else emptyList()
-        finishedView.setSelection(selPage, box, handles, menu, tableMenu)
+        finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
     }
 
     /** Snapshot the selection so a move/resize/rotate/vertex drag can build from (and revert to) it. */
@@ -677,6 +692,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     rotStartAngle = atan2(h.y - rotCy, h.x - rotCx)
                     return
                 }
+            }
+            finishedView.orbitHandleScreen()?.let { k ->
+                if (hypot(sx - k.x, sy - k.y) <= handleR) { startGrab(Grab.ORBIT); orbitStart.set(sx, sy); return }
             }
             if (selRecs.size == 1 && selRecs[0].shape != null) {
                 val hs = selRecs[0].shape!!.handles
@@ -715,7 +733,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     selBox = recBounds(selRecs); refreshSelectionOverlay()
                 }
             }
-            Grab.MOVE, Grab.RESIZE, Grab.VERTEX, Grab.ROTATE -> revertGrab()
+            Grab.MOVE, Grab.RESIZE, Grab.VERTEX, Grab.ROTATE, Grab.ORBIT -> revertGrab()
             else -> {}
         }
         grab = Grab.NONE
@@ -772,6 +790,16 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 applyRotationToSelection(deg)
                 selBox = recBounds(selRecs); refreshSelectionOverlay()
             }
+            Grab.ORBIT -> {
+                // Trackball feel: drag sideways to spin it about the vertical, up/down to tip it.
+                // ~180 dp of drag is a quarter turn.
+                val perDp = 0.5f / resources.displayMetrics.density
+                val base = dragStartRecs[0]; val spec = base.shape!!.clone()
+                spec.solid!!.orbit(base.shape.solid!!.r, (sx - orbitStart.x) * perDp, (sy - orbitStart.y) * perDp)
+                val newRec = buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
+                replaceRec(selRecs[0], newRec); selRecs[0] = newRec
+                selBox = recBounds(selRecs); refreshSelectionOverlay()
+            }
             else -> {}
         }
     }
@@ -817,7 +845,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun endSelect() {
         when (grab) {
             Grab.LASSO -> finishLasso()
-            Grab.MOVE, Grab.RESIZE, Grab.VERTEX, Grab.ROTATE -> {
+            Grab.MOVE, Grab.RESIZE, Grab.VERTEX, Grab.ROTATE, Grab.ORBIT -> {
                 selBox = recBounds(selRecs); refreshSelectionOverlay()
                 if (selPage >= 0) { savePage(selPage); mirror?.pageEdited(this, selPage) }
                 if (moveStartPage >= 0 && moveStartPage != selPage) { savePage(moveStartPage); mirror?.pageEdited(this, moveStartPage) }
@@ -928,6 +956,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 val spec = base.shape.clone()
                 for (v in spec.verts) { f[0] = v.x; f[1] = v.y; m.mapPoints(f); v.set(f[0], f[1]) }
                 if (spec.rot != 0f) { f[0] = spec.pivot.x; f[1] = spec.pivot.y; m.mapPoints(f); spec.pivot.set(f[0], f[1]) }
+                if (spec.solid != null) {
+                    val mv = FloatArray(9); m.getValues(mv)
+                    spec.scaleSolid(sqrt(abs(mv[Matrix.MSCALE_X] * mv[Matrix.MSCALE_Y] - mv[Matrix.MSKEW_X] * mv[Matrix.MSKEW_Y])))
+                }
                 buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
             } else {
                 val np = base.points.map { f[0] = it.x; f[1] = it.y; m.mapPoints(f); PointF(f[0], f[1]) }
@@ -977,7 +1009,28 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.ROW_ADD, FinishedStrokesView.MenuAction.ROW_DEL,
             FinishedStrokesView.MenuAction.COL_ADD, FinishedStrokesView.MenuAction.COL_DEL,
             FinishedStrokesView.MenuAction.BORDER -> editTable(a)
+            FinishedStrokesView.MenuAction.VIEW_ISO -> editSolid { it.solid!!.setView(Solid.isoView()) }
+            FinishedStrokesView.MenuAction.VIEW_FRONT -> editSolid { it.solid!!.setView(Solid.frontView()) }
+            FinishedStrokesView.MenuAction.VIEW_TOP -> editSolid { it.solid!!.setView(Solid.topView()) }
+            FinishedStrokesView.MenuAction.VIEW_SIDE -> editSolid { it.solid!!.setView(Solid.sideView()) }
+            FinishedStrokesView.MenuAction.SOLID_EDIT -> {
+                val rec = selectedSolid() ?: return
+                host.editSolid(rec.shape!!.solid!!.params.copy()) { p ->
+                    if (selectedSolid() === rec) editSolid { s -> p.copyInto(s.solid!!.params) }
+                }
+            }
         }
+    }
+
+    /** Change the lone selected solid in place (as one undo step), keeping its center. */
+    private fun editSolid(change: (ShapeSpec) -> Unit) {
+        val rec = selectedSolid() ?: return
+        val spec = rec.shape!!.clone(); change(spec)
+        undoPushedThisGesture = false; pushUndo()   // a menu tap is its own gesture
+        val n = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
+        replaceRec(rec, n); selRecs[0] = n
+        selBox = recBounds(selRecs); refreshSelectionOverlay(); savePage(selPage)
+        mirror?.pageEdited(this, selPage)
     }
 
     /** Repaint every selected stroke/shape in [color] (keeps it selected). */
@@ -1047,6 +1100,46 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         selBox = recBounds(selRecs); refreshSelectionOverlay()
         finishedView.invalidate(); savePage(page)
         mirror?.pageEdited(this, page)
+    }
+
+    /**
+     * Drop a graph exported by the grapher ([GraphInk] strokes in a [w]×[h] box, y down) onto the
+     * page in view, centered on what's visible, as ordinary ink + line/ellipse/rect shapes. It
+     * lands selected (undoable as one step) so it can be dragged or resized straight away.
+     */
+    fun insertGraph(items: List<GraphInk>, w: Float, h: Float) {
+        if (finishedView.pages.isEmpty() || items.isEmpty()) return
+        val page = currentPage()
+        val pw = FinishedStrokesView.PAGE_W; val ph = FinishedStrokesView.PAGE_H
+        // Shrink to fit the page if needed.
+        val k = min(1f, min(pw * 0.92f / w, ph * 0.92f / h))
+        val bw = w * k; val bh = h * k
+        val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
+        val cx = ((vw / 2f - tx) / scale).coerceIn(bw / 2f, pw - bw / 2f)
+        val cy = ((vh / 2f - ty) / scale - finishedView.pageTop(page)).coerceIn(bh / 2f, ph - bh / 2f)
+        val ox = cx - bw / 2f; val oy = cy - bh / 2f
+        val pc = finishedView.pageColor
+        val lum = (0.299 * Color.red(pc) + 0.587 * Color.green(pc) + 0.114 * Color.blue(pc)) / 255.0
+        val axis = if (lum < 0.5) Color.rgb(0xE5, 0xE7, 0xEB) else Color.rgb(0x2B, 0x30, 0x3A)
+        fun map(p: PointF) = PointF(ox + p.x * k, oy + p.y * k)
+        val recs = ArrayList<FinishedStrokesView.Rec>()
+        for (it in items) {
+            if (it.pts.isEmpty()) continue
+            val color = if (it.color == GraphInk.AXIS) axis else it.color
+            val width = it.width * k.coerceAtLeast(0.6f)
+            when (it.kind) {
+                GraphInk.FREE -> recs.add(freehandRec(it.pts.map(::map), color, width, false, Brush.PEN))
+                GraphInk.LINE, GraphInk.RECT, GraphInk.DOT -> {
+                    if (it.pts.size < 2) continue
+                    val type = when (it.kind) { GraphInk.LINE -> ShapeType.LINE; GraphInk.RECT -> ShapeType.RECT; else -> ShapeType.ELLIPSE }
+                    val spec = ShapeSpec(type, arrayListOf(map(it.pts[0]), map(it.pts[1])))
+                    recs.add(buildShapeRec(spec, color, width, false))
+                }
+            }
+        }
+        if (recs.isEmpty()) return
+        undoPushedThisGesture = false; pushUndo()
+        placeAndSelect(page, recs)
     }
 
     /** Paste the clipboard centered on page-local ([cx],[cy]), nudged so it stays on the page. */
@@ -1121,6 +1214,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (!rec.shape.hashed) o.put("nh", true)
                 if (rec.shape.type == ShapeType.TABLE) o.put("tr", rec.shape.rows).put("tc", rec.shape.cols).put("tb", rec.shape.border)
                 if (rec.shape.rot != 0f) o.put("r", rec.shape.rot.toDouble()).put("pv", JSONArray().put(rec.shape.pivot.x.toDouble()).put(rec.shape.pivot.y.toDouble()))
+                rec.shape.solid?.let { o.put("sd", it.params.toJson()).put("sr", Solid.rToJson(it.r)).put("sz", it.size.toDouble()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
             } else {
@@ -1192,12 +1286,18 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     val va = o.getJSONArray("v"); val verts = ArrayList<PointF>()
                     for (j in 0 until va.length()) { val p = va.getJSONArray(j); verts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
                     if (verts.size < type.vertCount) continue
-                    val spec = ShapeSpec(type, verts, dashed).apply {
+                    // v1.5.5 fixed-angle solids come back as turnable SOLIDs covering the same spot.
+                    val spec = (ShapeSpec.legacySolid(type, verts) ?: ShapeSpec(type, verts)).apply {
+                        this.dashed = dashed
+                        if (type == ShapeType.SOLID) o.optJSONObject("sd")?.let { sd ->
+                            solid = Solid(SolidParams.fromJson(sd), Solid.rFromJson(o.optJSONArray("sr")), o.optDouble("sz", 50.0).toFloat().coerceIn(2f, 4000f))
+                        }
                         hashed = !o.optBoolean("nh", false)
                         rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)
                         rot = o.optDouble("r", 0.0).toFloat()
                         o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
                     }
+                    if (spec.type == ShapeType.SOLID && spec.solid == null) continue
                     page.recs.add(buildShapeRec(spec, color, width, hl))
                 } else {
                     val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]
