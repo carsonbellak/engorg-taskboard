@@ -4,21 +4,24 @@
 
 // EngOrg Quick Note — Scriptable (iOS) widget for the Engineering Task Board.
 //
-// The home-screen widget is a sticky note in the app's style. Tapping it opens
-// an editable sticky note (title, description, project, priority, category,
-// due date) with a Post button that adds the note to your board.
+// The home-screen widget is a sticky note in the app's style. Tapping it runs your
+// "New Note" Apple Shortcut, which asks for each field in native pop-ups, posts the
+// note and returns to the home screen (build it from the web app: Settings → Widgets).
+// Running this script inside Scriptable instead opens an editable sticky-note form.
 //
 // It uses the same token-authenticated Cloud Functions as the Siri shortcut
 // (/api/listProjects + /api/addNote), so the note syncs to the desktop app and
 // PWA like any other.
 //
 // Setup: add a Scriptable widget, pick this script. Optional widget Parameter:
-// yellow | green | blue | red | purple | orange (sticky color). The first tap
-// asks for your API token (see the prompt for where to copy it).
+// yellow | green | blue | red | purple | orange (sticky color). Run the script once
+// in Scriptable to connect your API token; the widget then shows your categories.
 
 const API = 'https://assistant-taskboard.firebaseapp.com/api';
 const KC_TOKEN = 'engorg.apiToken';
 const KC_STATE = 'engorg.quickNote';
+// The Apple Shortcut the widget runs when tapped. Must match its name in Shortcuts.
+const SHORTCUT_NAME = 'New Note';
 
 // Mirrors STICKY_COLORS_LIGHT / _DARK in renderer/components/sticky-note.js
 const STICKY = {
@@ -119,8 +122,7 @@ function buildWidget(state, colorName) {
   const C = widgetColors(colorName);
   const w = new ListWidget();
   w.backgroundColor = C.bg;
-  const base = `scriptable:///run/${encodeURIComponent(Script.name())}?color=${colorName}`;
-  w.url = base;
+  w.url = `shortcuts://run-shortcut?name=${encodeURIComponent(SHORTCUT_NAME)}`;
 
   const family = config.widgetFamily || 'small';
   if (family.startsWith('accessory')) {
@@ -129,7 +131,7 @@ function buildWidget(state, colorName) {
     return w;
   }
   if (family === 'small') return buildSmallWidget(w, state, C);
-  return buildFormWidget(w, state, C, base, family === 'large' || family === 'extraLarge');
+  return buildFormWidget(w, state, C, family === 'large' || family === 'extraLarge');
 }
 
 // Small widgets allow a single tap target, so they stay a compact "tap to write" note.
@@ -143,7 +145,7 @@ function buildSmallWidget(w, state, C) {
   badge.backgroundColor = C.chip;
   badge.cornerRadius = 99;
   badge.setPadding(2, 7, 2, 7);
-  const bt = badge.addText(state.lastProjectName || 'Task Board');
+  const bt = badge.addText('Quick Note');
   bt.font = Font.boldSystemFont(10);
   bt.textColor = C.ink;
   bt.lineLimit = 1;
@@ -164,22 +166,14 @@ function buildSmallWidget(w, state, C) {
   hint.textColor = C.inkSoft;
 
   w.addSpacer();
-  if (state.last && state.last.title) {
-    const lt = w.addText(`Last: ${state.last.title}`);
-    lt.font = Font.systemFont(10);
-    lt.textColor = C.inkSoft;
-    lt.lineLimit = 1;
-    w.addSpacer(6);
-  }
-  addBottomRow(w, state, C, null);
+  addBottomRow(w, C);
   return w;
 }
 
-// Medium/large: draw the same sticky-note form the app opens. Widgets can't hold real
-// inputs, so each part is a tap target that opens the form with that choice made.
-function buildFormWidget(w, state, C, base, large) {
+// Medium/large: draw the sticky-note form. Widgets can't hold real inputs, so the whole
+// widget is one tap target that runs the New Note shortcut's pop-ups.
+function buildFormWidget(w, state, C, large) {
   w.setPadding(14, 16, 12, 16);
-  const prio = PRIORITY_COLORS[state.lastPriority] ? state.lastPriority : 'Medium';
   const innerW = widgetInnerWidth();
 
   // Top row: project badge + NEW NOTE
@@ -190,11 +184,10 @@ function buildFormWidget(w, state, C, base, large) {
   badge.backgroundColor = C.chip;
   badge.cornerRadius = 99;
   badge.setPadding(3, 9, 3, 9);
-  const bt = badge.addText(`${state.lastProjectName || 'Project'} ▾`);
+  const bt = badge.addText('Project ▾');
   bt.font = Font.boldSystemFont(11);
   bt.textColor = C.ink;
   bt.lineLimit = 1;
-  badge.url = `${base}&focus=title`;
   top.addSpacer();
   const kick = top.addText('NEW NOTE');
   kick.font = Font.boldSystemFont(9);
@@ -204,14 +197,12 @@ function buildFormWidget(w, state, C, base, large) {
   const title = w.addText('What needs doing?');
   title.font = Font.semiboldSystemFont(large ? 18 : 16);
   title.textColor = C.inkSoft;
-  title.url = `${base}&focus=title`;
 
   if (large) {
     w.addSpacer(6);
     const desc = w.addText('Description (optional)');
     desc.font = Font.systemFont(14);
     desc.textColor = C.inkSoft;
-    desc.url = `${base}&focus=desc`;
     w.addSpacer(8);
     const rule = w.addStack();
     rule.backgroundColor = C.rule;
@@ -227,8 +218,7 @@ function buildFormWidget(w, state, C, base, large) {
   prow.layoutHorizontally();
   prow.spacing = 6;
   for (const p of ['High', 'Medium', 'Low']) {
-    widgetChip(prow, p, C, { on: p === prio, ring: PRIORITY_COLORS[p], dot: PRIORITY_COLORS[p],
-      url: `${base}&priority=${p}` });
+    widgetChip(prow, p, C, { dot: PRIORITY_COLORS[p] });
   }
 
   if (large) {
@@ -253,7 +243,7 @@ function buildFormWidget(w, state, C, base, large) {
         const r = w.addStack();
         r.layoutHorizontally();
         r.spacing = 6;
-        row.forEach(c => widgetChip(r, c.name, C, { url: `${base}&category=${encodeURIComponent(c.id)}` }));
+        row.forEach(c => widgetChip(r, c.name, C, {}));
       });
     }
 
@@ -272,12 +262,11 @@ function buildFormWidget(w, state, C, base, large) {
       t.font = Font.systemFont(12);
       t.textColor = C.inkSoft;
       box.addSpacer();
-      box.url = `${base}&focus=due`;
     }
   }
 
   w.addSpacer();
-  addBottomRow(w, state, C, `${base}&focus=title`);
+  addBottomRow(w, C);
   return w;
 }
 
@@ -300,13 +289,9 @@ function widgetChip(parent, text, C, opts) {
   const s = parent.addStack();
   s.layoutHorizontally();
   s.centerAlignContent();
-  s.backgroundColor = opts.on ? C.chipOn : C.chip;
+  s.backgroundColor = C.chip;
   s.cornerRadius = 99;
   s.setPadding(4, 10, 4, 10);
-  if (opts.on) {
-    s.borderColor = new Color(opts.ring || '#000000');
-    s.borderWidth = 2;
-  }
   if (opts.dot) {
     const d = s.addText('●');
     d.font = Font.systemFont(8);
@@ -317,19 +302,17 @@ function widgetChip(parent, text, C, opts) {
   t.font = Font.semiboldSystemFont(12);
   t.textColor = C.ink;
   t.lineLimit = 1;
-  if (opts.url) s.url = opts.url;
   return s;
 }
 
 // Bottom row (.note-bottom): priority summary + Post pill
-function addBottomRow(w, state, C, url) {
-  const prio = PRIORITY_COLORS[state.lastPriority] ? state.lastPriority : 'Medium';
+function addBottomRow(w, C) {
   const bottom = w.addStack();
   bottom.layoutHorizontally();
   bottom.centerAlignContent();
-  const pt = bottom.addText(`● ${prio}`);
-  pt.font = Font.boldSystemFont(10);
-  pt.textColor = new Color(PRIORITY_COLORS[prio]);
+  const hint = bottom.addText('Tap to write');
+  hint.font = Font.boldSystemFont(10);
+  hint.textColor = C.inkSoft;
   bottom.addSpacer();
   const post = bottom.addStack();
   post.backgroundColor = C.edge;
@@ -338,7 +321,6 @@ function addBottomRow(w, state, C, url) {
   const ptx = post.addText('Post');
   ptx.font = Font.boldSystemFont(12);
   ptx.textColor = Color.white();
-  if (url) post.url = url;
 }
 
 // ===================== FORM (WebView sticky note) =====================
@@ -716,7 +698,17 @@ async function runForm(colorName, pre = {}) {
 // ===================== MAIN =====================
 
 if (config.runsInWidget) {
-  Script.setWidget(buildWidget(loadState(), pickColor(args.widgetParameter)));
+  // Notes now post through the shortcut, so the widget keeps its own category list fresh.
+  const state = loadState();
+  if (Keychain.contains(KC_TOKEN)) {
+    const res = await api('listProjects', Keychain.get(KC_TOKEN));
+    if (res.code === 200 && res.json && Array.isArray(res.json.projects)) {
+      state.projects = res.json.projects;
+      state.categories = res.json.categories || [];
+      saveState(state);
+    }
+  }
+  Script.setWidget(buildWidget(state, pickColor(args.widgetParameter)));
 } else {
   const qp = args.queryParameters || {};
   try {

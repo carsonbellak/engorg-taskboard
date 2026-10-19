@@ -3219,8 +3219,11 @@ function wcopy(id, shown) {
 function psetWidget() {
   const keyRow = (id, from) => `<div class="pset-copy-key">${wcopy(id)}<span class="pset-copy-from">&larr; ${from}</span></div>`;
   return `<div class="pset-section">
-    <h3 class="pset-h3">Type on the home screen (Shortcuts widget)</h3>
-    <p class="pset-hint">Build one shortcut, then add Apple&rsquo;s <b>Shortcuts</b> widget. Tapping it asks for each part of the note in small pop-ups right over your home screen (title, description, project, priority, category, due date) and posts it. No app opens. Takes about 5 minutes; tap any grey box to copy it.</p>
+    <h3 class="pset-h3">Quick Note widget</h3>
+    <p class="pset-hint">A sticky note on your iPhone home screen. Tap it and it asks for each part of the note in pop-ups (title, description, project, priority, category, due date), posts it, and drops you back on the home screen. Two parts, about 10 minutes in total. Tap any grey box to copy it.</p>
+  </div>
+  <div class="pset-section">
+    <h3 class="pset-h3">Part 1 &middot; Build the New Note shortcut</h3>
     <ol class="pset-wp-steps pset-guide">
       <li>Open <b>Shortcuts</b>, tap <b>+</b>, and rename the new shortcut <b>New Note</b>.</li>
       <li>Add <b>Ask for Input</b> and set its prompt to:${wcopy('title')}</li>
@@ -3243,18 +3246,18 @@ function psetWidget() {
           ${keyRow('k_dueDate', 'Due (step 11)')}
         </div></li>
       <li>Optional: add <b>Show Notification</b> with text:${wcopy('posted')}</li>
-      <li>Tap <b>Done</b>. Long-press your home screen &rarr; <b>+</b> &rarr; <b>Shortcuts</b> &rarr; add the widget, then long-press it &rarr; <b>Edit Widget</b> &rarr; pick <b>New Note</b>.</li>
+      <li>Add <b>Go to Home Screen</b> as the last action, so you land back on your home screen after posting. Tap <b>Done</b>.</li>
     </ol>
-    <p class="pset-hint" style="margin-top:8px">The two links contain your private token: anyone with them can add notes to your board.</p>
+    <p class="pset-hint" style="margin-top:8px">Keep the name exactly <b>New Note</b>: that&rsquo;s what the sticky note runs. The two links contain your private token: anyone with them can add notes to your board.</p>
   </div>
   <div class="pset-section">
-    <h3 class="pset-h3">Sticky-note widget (Scriptable)</h3>
-    <p class="pset-hint">Looks like one of your sticky notes on the home screen, made with the free <b>Scriptable</b> app. Tapping it opens Scriptable to fill in the note and hit Post.</p>
+    <h3 class="pset-h3">Part 2 &middot; Add the sticky note</h3>
     <ol class="pset-wp-steps">
       <li>Install <b>Scriptable</b> from the App Store.</li>
       <li>Tap the code box below to copy it. In Scriptable tap <b>+</b>, paste, and name it <b>Quick Note</b>.</li>
-      <li>Long-press your home screen &rarr; <b>+</b> &rarr; <b>Scriptable</b> &rarr; add a widget. Long-press it &rarr; <b>Edit Widget</b> &rarr; Script: <b>Quick Note</b>. Optional Parameter: <b>yellow</b>, <b>green</b>, <b>blue</b>, <b>red</b>, <b>purple</b> or <b>orange</b>.</li>
-      <li>Tap <b>Copy widget token</b>, then tap the widget. It picks the token up from your clipboard; tap <b>Connect</b>.</li>
+      <li>Tap <b>Copy widget token</b>, then run <b>Quick Note</b> once in Scriptable (tap it). It picks the token up from your clipboard; tap <b>Connect</b>, then swipe the note away. This lets the widget show your categories.</li>
+      <li>Long-press your home screen &rarr; <b>+</b> &rarr; <b>Scriptable</b> &rarr; add a medium or large widget. Long-press it &rarr; <b>Edit Widget</b> &rarr; Script: <b>Quick Note</b>. Optional Parameter: <b>yellow</b>, <b>green</b>, <b>blue</b>, <b>red</b>, <b>purple</b> or <b>orange</b>.</li>
+      <li>Tap the sticky note: it runs <b>New Note</b>, and you&rsquo;re back on the home screen once it posts.</li>
     </ol>
     <div class="pset-code" id="pset-widget-code" role="button" tabindex="0" aria-label="Copy the Quick Note script">
       <div class="pset-code-head"><span>quick-note.js</span><span class="pset-code-hint" id="pset-widget-code-hint">Tap to copy</span></div>
