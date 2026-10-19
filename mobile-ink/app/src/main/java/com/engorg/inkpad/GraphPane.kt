@@ -68,6 +68,8 @@ class GraphPane(
         /** Drop the current graph onto the page as ink strokes. */
         fun insertInk(ink: List<GraphInk>, w: Float, h: Float)
         fun closed()
+        /** Remove the graph from the page (undoable). */
+        fun delete()
     }
 
     private val dens = act.resources.displayMetrics.density
@@ -144,10 +146,10 @@ class GraphPane(
         if (lp.width != w || lp.height != h) { boxW = r.width() / cb.pageScale(); boxH = r.height() / cb.pageScale(); lp.width = w; lp.height = h; root.layoutParams = lp; layoutBody() }
     }
 
-    fun close() {
+    fun close(save: Boolean = true) {
         if (!isOpen) return
         palette?.dismiss()
-        commitNow()
+        if (save) commitNow() else handler.removeCallbacks(commitTask)
         (act.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(root.windowToken, 0)
         graph.dispose(); graph3.dispose()
         host.removeView(root)
@@ -256,6 +258,7 @@ class GraphPane(
         angleBtn = chip(if (degrees) "DEG" else "RAD") { toggleAngle() }; bar.addView(angleBtn)
         bar.addView(iconChip(Icons.HOME) { if (dim3) graph3.home() else graph.home(); scheduleCommit() })
         bar.addView(chip("Add to page") { insertInk() })
+        bar.addView(iconChip(Icons.TRASH) { close(save = false); cb.delete() })
         bar.addView(iconChip(Icons.CHECK, filled = true) { close() })
         h.addView(bar, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
         h.addView(View(act), LinearLayout.LayoutParams(0, 1, 1f))

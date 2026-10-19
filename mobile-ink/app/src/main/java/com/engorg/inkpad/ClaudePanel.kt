@@ -262,8 +262,18 @@ class ClaudePanel(
         val status = TextView(act).apply { textSize = 13f; setTextColor(muted); setPadding(0, dp(8), 0, 0) }
         col.addView(status)
         col.addView(primaryButton(if (connected) "Save" else "Connect") {
-            val key = keyInput.text.toString().trim()
+            // Pasting often drags along spaces, line breaks or invisible characters; a key never has any.
+            val raw = keyInput.text.toString()
+            val key = raw.filterNot { it.isWhitespace() || it == '​' || it == '‌' || it == '‍' || it == '﻿' }
             if (key.isEmpty()) { if (connected) { hideKeyboard(); render() } else status.text = "Paste your API key first."; return@primaryButton }
+            val problem = when {
+                key.contains('…') || key.contains("...") || key.contains('•') || key.contains('*') ->
+                    "That's the shortened key the Anthropic Console shows in its list, not the full key. The full key is only shown once, when you create it, so create a new key and copy it right away."
+                !key.startsWith("sk-ant-") -> "That doesn't look like an Anthropic API key. They start with sk-ant-."
+                key.length < 60 -> "That key looks cut off (it's only ${key.length} characters). Copy the whole key and try again."
+                else -> null
+            }
+            if (problem != null) { status.text = problem; return@primaryButton }
             status.text = "Checking the key…"
             ClaudeApi.validateKey(key) { err ->
                 if (err != null) { status.text = err; return@validateKey }

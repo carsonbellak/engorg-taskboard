@@ -140,7 +140,7 @@ object ClaudeApi {
         val msg = try { JSONObject(body ?: "").optJSONObject("error")?.optString("message").orEmpty() } catch (_: Exception) { "" }
         return when {
             msg.contains("workspace", true) -> "This looks like an Organization-scoped key. Create a key with the \"Default workspace\" scope instead."
-            code == 401 -> "Anthropic rejected that API key."
+            code == 401 -> "Anthropic rejected that API key${if (msg.isNotBlank()) " (“$msg”)" else ""}. Check it was copied in full, or that it hasn't been deleted or disabled in the Console."
             code == 403 -> "This API key isn't allowed to use that model."
             code == 429 -> "Rate limited — wait a moment and try again."
             code == 529 || code >= 500 -> "Claude is overloaded right now — try again in a minute."

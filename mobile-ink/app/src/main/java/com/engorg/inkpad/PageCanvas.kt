@@ -1131,6 +1131,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private var graphRec: FinishedStrokesView.Rec? = null
     private var graphPage = -1
     private var graphUndoPushed = false
+    private var deleteRec: FinishedStrokesView.Rec? = null   // the graph a pane was showing when it closed
+    private var deletePage = -1
     private var tapDown: PointF? = null
     private var tapDownAt = 0L
 
@@ -1197,7 +1199,17 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 }
             }
             override fun insertInk(ink: List<GraphInk>, w: Float, h: Float) = insertGraph(ink, w, h)
-            override fun closed() { graphPane = null; graphRec = null; graphPage = -1; graphUndoPushed = false; finishedView.invalidate() }
+            override fun closed() { deleteRec = graphRec; deletePage = graphPage; graphPane = null; graphRec = null; graphPage = -1; graphUndoPushed = false; finishedView.invalidate() }
+            override fun delete() {
+                // closed() already ran, so remove the rec the pane was editing (one undo step).
+                val page = deletePage; val r = deleteRec ?: return
+                if (page < 0 || page >= finishedView.pages.size) return
+                undoPushedThisGesture = false; pushUndo()
+                finishedView.pages[page].recs.remove(r)
+                finishedView.invalidate(); savePage(page)
+                mirror?.pageEdited(this@PageCanvas, page)
+                Toast.makeText(context, "Graph deleted — Undo brings it back", Toast.LENGTH_SHORT).show()
+            }
         })
         graphPane = pane
         pane.open(card, box.width(), box.height(), dark)
