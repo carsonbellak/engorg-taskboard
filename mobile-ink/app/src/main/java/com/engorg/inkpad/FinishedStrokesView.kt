@@ -52,6 +52,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         ROW_ADD("+ Row"), ROW_DEL("− Row"), COL_ADD("+ Col"), COL_DEL("− Col"), BORDER("Border"),
         // Second row, shown when a single 3D solid is selected: snap to a standard view, or reshape it.
         VIEW_ISO("Iso"), VIEW_FRONT("Front"), VIEW_TOP("Top"), VIEW_SIDE("Side"), SOLID_EDIT("Edit shape"),
+        // Second row, shown when a single graph card is selected.
+        GRAPH_EDIT("Edit graph"), GRAPH_LEGEND("Expressions"),
     }
 
     companion object {
@@ -374,14 +376,14 @@ class FinishedStrokesView(context: Context) : View(context) {
         return PointF(r.centerX() + dpf(24f), r.bottom + dpf(30f))
     }
 
-    /** Erase whole strokes near the tip. Tables are skipped, so erasing writing inside a cell never
-     *  deletes the grid (select the table and Delete it instead). */
+    /** Erase whole strokes near the tip. Tables and graph cards are skipped, so erasing writing inside
+     *  one never deletes it (select it and Delete it instead). */
     fun eraseNear(page: Int, x: Float, y: Float, radius: Float): Boolean {
         if (page < 0 || page >= pages.size) return false
         val r2 = radius * radius
         val recs = pages[page].recs
         val before = recs.size
-        recs.removeAll { rec -> rec.shape?.type != ShapeType.TABLE && rec.points.any { val dx = it.x - x; val dy = it.y - y; dx * dx + dy * dy <= r2 } }
+        recs.removeAll { rec -> rec.shape?.type != ShapeType.TABLE && rec.shape?.type != ShapeType.GRAPH && rec.points.any { val dx = it.x - x; val dy = it.y - y; dx * dx + dy * dy <= r2 } }
         val changed = recs.size != before
         if (changed) invalidate()
         return changed
@@ -389,8 +391,23 @@ class FinishedStrokesView(context: Context) : View(context) {
 
     private fun pageMatrix(i: Int): Matrix = Matrix().apply { setScale(scale, scale); postTranslate(tx, ty); preTranslate(0f, pageTop(i)) }
 
+    /** True while rendering for export (PDF / snapshots): graph cards compute their curves right away. */
+    private var syncCards = false
+
+    private fun drawGraphCard(canvas: Canvas, spec: ShapeSpec) {
+        val card = spec.graph ?: return
+        val a = spec.verts[0]; val b = spec.verts[1]
+        val box = RectF(kotlin.math.min(a.x, b.x), kotlin.math.min(a.y, b.y), kotlin.math.max(a.x, b.x), kotlin.math.max(a.y, b.y))
+        val lum = (0.299 * Color.red(pageColor) + 0.587 * Color.green(pageColor) + 0.114 * Color.blue(pageColor)) / 255.0
+        val save = canvas.save()
+        if (spec.rot != 0f) canvas.rotate(spec.rot, spec.pivot.x, spec.pivot.y)
+        GraphCardRenderer.draw(canvas, card, box, lum < 0.5, syncCards) { postInvalidate() }
+        canvas.restoreToCount(save)
+    }
+
     private fun drawRecs(canvas: Canvas, page: Page) {
         for (rec in page.recs) {
+            if (rec.shape?.type == ShapeType.GRAPH) { drawGraphCard(canvas, rec.shape!!); continue }
             if (rec.shape != null) {
                 // Parametric shapes draw as a crisp solid pen line — or a dashed one when flagged.
                 strokePaint.style = Paint.Style.STROKE
@@ -462,7 +479,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         canvas.clipRect(0f, 0f, PAGE_W * s, PAGE_H * s)
         drawPaper(canvas, 0f, 0f, s)
         canvas.concat(Matrix().apply { setScale(s, s) })
-        drawRecs(canvas, pages[i])
+        syncCards = true
+        try { drawRecs(canvas, pages[i]) } finally { syncCards = false }
         canvas.restoreToCount(save)
     }
 

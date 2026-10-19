@@ -18,6 +18,16 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.7': {
+      title: "What's new",
+      intro: 'EngInk can now graph in 3D, and Claude can give you feedback on your work.',
+      slides: [
+        { emoji: '🧊', title: '3D graphing', body: 'Tap 2D in the EngInk grapher’s header to switch to 3D. It graphs surfaces like z = x² − y², equations like x² + y² + z² = 9, curves (cos t, sin t, t), parametric surfaces in u and v, and points. Drag to turn the view and pinch to zoom.' },
+        { emoji: '∭', title: 'Double and triple integrals', body: 'The ƒ(x) button has ∬ and ∭. Write the bounds innermost first, the way you’d write dz dy dx. The grapher shows the value and, in 3D, draws the region you’re integrating over.' },
+        { emoji: '📐', title: 'Typeset math and live graphs', body: 'Expressions now show as properly typeset math, with fractions, exponents, roots and integral signs. Tap one to edit it. Add to page can now drop the graph exactly as it looks in the window. Select it and tap Edit graph to change it later.' },
+        { emoji: '✨', title: 'Ask Claude', body: 'The sparkle button on the EngInk toolbar sends your page, or the whole notebook, to Claude, which checks your work, gives a hint or explains it. It uses your own Anthropic API key, which stays on the tablet.' },
+      ],
+    },
     '1.5.6': {
       title: "What's new",
       intro: 'EngInk on the tablet has a built-in graphing calculator.',

@@ -72,6 +72,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit)
         /** Open the 3D solid builder on [params] and report the edited shape. */
         fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit)
+        /** Reopen a graph card in the grapher and report the updated card. */
+        fun editGraph(card: GraphCard, onApply: (GraphCard) -> Unit)
     }
 
     /**
@@ -417,7 +419,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             // Partial-quadrant axes fit the box you drew: origin bottom-left (1Q) or mid-left (2Q).
             ShapeType.AXES2D_1Q -> arrayListOf(PointF(minX, maxY), PointF(maxX, minY))
             ShapeType.AXES2D_2Q -> arrayListOf(PointF(minX, (minY + maxY) / 2f), PointF(maxX, minY))
-            ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
+            ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID,
+            ShapeType.GRAPH -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
         }
         // A solid fills the box you drew, in its default three-quarter view.
         val spec = (if (type == ShapeType.SOLID) ShapeSpec.solidIn(host.pendingSolid ?: SolidParams.box(), minX, minY, maxX, maxY)
@@ -647,6 +650,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun selectedTable(): FinishedStrokesView.Rec? =
         selRecs.singleOrNull()?.takeIf { it.shape?.type == ShapeType.TABLE }
 
+    /** The lone selected graph card (enables Edit graph). */
+    private fun selectedGraph(): FinishedStrokesView.Rec? =
+        selRecs.singleOrNull()?.takeIf { r -> r.shape?.let { it.type == ShapeType.GRAPH && it.graph != null } == true }
+
     /** The lone selected 3D solid, if that's what's selected (enables the orbit knob + view menu). */
     private fun selectedSolid(): FinishedStrokesView.Rec? =
         selRecs.singleOrNull()?.takeIf { it.shape?.solid != null }
@@ -668,6 +675,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.VIEW_ISO, FinishedStrokesView.MenuAction.VIEW_FRONT,
             FinishedStrokesView.MenuAction.VIEW_TOP, FinishedStrokesView.MenuAction.VIEW_SIDE,
             FinishedStrokesView.MenuAction.SOLID_EDIT,
+        ) else if (selectedGraph() != null) listOf(
+            FinishedStrokesView.MenuAction.GRAPH_EDIT, FinishedStrokesView.MenuAction.GRAPH_LEGEND,
         ) else emptyList()
         finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
     }
@@ -902,7 +911,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         var inside = 0; var cx = 0f; var cy = 0f
         for (p in rec.points) { if (pointInPoly(p, poly)) inside++; cx += p.x; cy += p.y }
         val n = rec.points.size
-        if (rec.shape?.type == ShapeType.TABLE) return inside.toFloat() / n >= 0.75f
+        if (rec.shape?.type == ShapeType.TABLE || rec.shape?.type == ShapeType.GRAPH) return inside.toFloat() / n >= 0.75f
         if (inside == n) return true
         if (inside.toFloat() / n >= 0.4f) return true
         return pointInPoly(PointF(cx / n, cy / n), poly)
@@ -914,7 +923,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         for (rec in finishedView.pages[h.page].recs) for (p in rec.points) {
             val d = hypot(p.x - h.x, p.y - h.y); if (d < bestD) { bestD = d; best = rec }
         }
-        return best
+        if (best != null) return best
+        // Nothing near the finger: a tap anywhere inside a graph card picks the card (topmost first).
+        return finishedView.pages[h.page].recs.lastOrNull { rec ->
+            rec.shape?.type == ShapeType.GRAPH && recBounds(listOf(rec))?.contains(h.x, h.y) == true
+        }
     }
 
     /**
@@ -1013,6 +1026,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.VIEW_FRONT -> editSolid { it.solid!!.setView(Solid.frontView()) }
             FinishedStrokesView.MenuAction.VIEW_TOP -> editSolid { it.solid!!.setView(Solid.topView()) }
             FinishedStrokesView.MenuAction.VIEW_SIDE -> editSolid { it.solid!!.setView(Solid.sideView()) }
+            FinishedStrokesView.MenuAction.GRAPH_EDIT -> {
+                val rec = selectedGraph() ?: return
+                host.editGraph(rec.shape!!.graph!!) { card -> if (selectedGraph() === rec) editGraphCard { it.graph = card } }
+            }
+            FinishedStrokesView.MenuAction.GRAPH_LEGEND -> editGraphCard { s -> s.graph?.let { g -> s.graph = g.withLegend(!g.legend) } }
             FinishedStrokesView.MenuAction.SOLID_EDIT -> {
                 val rec = selectedSolid() ?: return
                 host.editSolid(rec.shape!!.solid!!.params.copy()) { p ->
@@ -1020,6 +1038,36 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 }
             }
         }
+    }
+
+    /** Change the lone selected graph card in place (as one undo step). */
+    private fun editGraphCard(change: (ShapeSpec) -> Unit) {
+        val rec = selectedGraph() ?: return
+        val spec = rec.shape!!.clone(); change(spec)
+        undoPushedThisGesture = false; pushUndo()
+        val n = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
+        replaceRec(rec, n); selRecs[0] = n
+        selBox = recBounds(selRecs); refreshSelectionOverlay(); savePage(selPage)
+        mirror?.pageEdited(this, selPage)
+    }
+
+    /**
+     * Drop a live graph card ([w]×[h] page units) onto the page in view, centered on what's visible
+     * (shrunk to fit the page if needed). It lands selected so it can be moved or resized right away.
+     */
+    fun insertGraphCard(card: GraphCard, w: Float, h: Float) {
+        if (finishedView.pages.isEmpty()) return
+        val page = currentPage()
+        val pw = FinishedStrokesView.PAGE_W; val ph = FinishedStrokesView.PAGE_H
+        val k = min(1f, min(pw * 0.92f / w, ph * 0.92f / h))
+        val bw = w * k; val bh = h * k
+        val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
+        val cx = ((vw / 2f - tx) / scale).coerceIn(bw / 2f, pw - bw / 2f)
+        val cy = ((vh / 2f - ty) / scale - finishedView.pageTop(page)).coerceIn(bh / 2f, ph - bh / 2f)
+        val spec = ShapeSpec(ShapeType.GRAPH, arrayListOf(PointF(cx - bw / 2f, cy - bh / 2f), PointF(cx + bw / 2f, cy + bh / 2f)))
+        spec.graph = card
+        undoPushedThisGesture = false; pushUndo()
+        placeAndSelect(page, listOf(buildShapeRec(spec, Color.GRAY, 1f, false)))
     }
 
     /** Change the lone selected solid in place (as one undo step), keeping its center. */
@@ -1215,6 +1263,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (rec.shape.type == ShapeType.TABLE) o.put("tr", rec.shape.rows).put("tc", rec.shape.cols).put("tb", rec.shape.border)
                 if (rec.shape.rot != 0f) o.put("r", rec.shape.rot.toDouble()).put("pv", JSONArray().put(rec.shape.pivot.x.toDouble()).put(rec.shape.pivot.y.toDouble()))
                 rec.shape.solid?.let { o.put("sd", it.params.toJson()).put("sr", Solid.rToJson(it.r)).put("sz", it.size.toDouble()) }
+                rec.shape.graph?.let { o.put("g", it.toJson()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
             } else {
@@ -1296,8 +1345,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                         rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)
                         rot = o.optDouble("r", 0.0).toFloat()
                         o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
+                        if (type == ShapeType.GRAPH) graph = GraphCard.fromJson(o.optJSONObject("g"))
                     }
                     if (spec.type == ShapeType.SOLID && spec.solid == null) continue
+                    if (spec.type == ShapeType.GRAPH && spec.graph == null) continue
                     page.recs.add(buildShapeRec(spec, color, width, hl))
                 } else {
                     val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]

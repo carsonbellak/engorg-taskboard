@@ -576,6 +576,10 @@ object StrokeFont {
         '-' to listOf(P(0.08f, 0.55f, 0.45f, 0.55f)),
         '.' to listOf(P(0.12f, 0.95f, 0.16f, 0.97f)),
         'e' to listOf(P(0.08f, 0.68f, 0.52f, 0.68f, 0.48f, 0.5f, 0.3f, 0.42f, 0.1f, 0.52f, 0.06f, 0.76f, 0.18f, 0.96f, 0.48f, 0.95f)),
+        // Axis letters for exported 3D graphs.
+        'x' to listOf(P(0.06f, 0.42f, 0.54f, 1f), P(0.54f, 0.42f, 0.06f, 1f)),
+        'y' to listOf(P(0.06f, 0.42f, 0.3f, 0.95f), P(0.54f, 0.42f, 0.22f, 1.15f, 0.08f, 1.22f)),
+        'z' to listOf(P(0.08f, 0.42f, 0.52f, 0.42f, 0.08f, 1f, 0.54f, 1f)),
     )
 
     private fun advance(ch: Char) = when (ch) { '.' -> 0.32f; '1' -> 0.55f; '-' -> 0.58f; else -> 0.72f }

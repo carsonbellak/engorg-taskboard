@@ -20,6 +20,10 @@ class GraphRow(
     var sMax: Double = 10.0,
     var tMin: String = "0",
     var tMax: String = "2pi",
+    var uMin: String = "0",       // 3D parametric surface domain (u, v)
+    var uMax: String = "2pi",
+    var vMin: String = "0",
+    var vMax: String = "pi",
 )
 
 enum class RowKind { EMPTY, ERROR, VALUE, SLIDER, CONST, FUNC, PLOT, POINT }
@@ -33,6 +37,7 @@ class RowStatus(
     val value: Double = Double.NaN,
     val rangeVar: String? = null,   // "t" (parametric) or "θ" (polar) when the row has a domain
     val missing: String? = null,    // an undefined variable the window can offer to add as a slider
+    val uvRange: Boolean = false,   // a 3D parametric surface: show the u and v domain controls
 )
 
 /** Something drawable produced by a row. */
@@ -46,7 +51,30 @@ sealed class PlotItem(val row: Int, val color: Int) {
     class Implicit(row: Int, color: Int, val fs: List<Compiled>, val senses: IntArray, val degrees: Boolean) : PlotItem(row, color)
 }
 
-class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val degrees: Boolean) {
+/** Something drawable in the 3D grapher. */
+sealed class Plot3(val row: Int, val color: Int) {
+    /** One coordinate as a function of the other two: [axis] 2 = z(x, y), 0 = x(y, z), 1 = y(x, z). */
+    class Explicit(row: Int, color: Int, val g: Compiled, val axis: Int, val degrees: Boolean) : Plot3(row, color)
+    class Curve(row: Int, color: Int, val fx: Compiled, val fy: Compiled, val fz: Compiled, val t0: Double, val t1: Double) : Plot3(row, color)
+    class Surface(row: Int, color: Int, val fx: Compiled, val fy: Compiled, val fz: Compiled, val u0: Double, val u1: Double, val v0: Double, val v1: Double) : Plot3(row, color)
+    /** F(x, y, z) = 0 (r, θ are cylindrical). */
+    class Implicit(row: Int, color: Int, val f: Compiled, val degrees: Boolean) : Plot3(row, color)
+    class Point(row: Int, color: Int, val x: Double, val y: Double, val z: Double) : Plot3(row, color)
+    /**
+     * The solid a double / triple integral runs over: [vars] = outer, middle, inner variable names (a
+     * permutation of x, y, z), outer in [oLo, oHi], middle between [mLo]/[mHi] (of the outer), inner
+     * between [iLo]/[iHi] (of the outer two). Every bound is compiled over [MathEngine.PLOT_VARS_3D].
+     */
+    class Region(row: Int, color: Int, val vars: List<String>, val oLo: Double, val oHi: Double,
+                 val mLo: Compiled, val mHi: Compiled, val iLo: Compiled, val iHi: Compiled) : Plot3(row, color)
+}
+
+class GraphModel(
+    val statuses: List<RowStatus>, val items: List<PlotItem>, val degrees: Boolean,
+    val parsed: List<MathEngine.Statement?> = emptyList(),   // each row's parse, for typesetting
+    val items3: List<Plot3> = emptyList(),
+    val dim3: Boolean = false,
+) {
 
     companion object {
         private const val ID = "[A-Za-z][A-Za-z0-9_]*"
@@ -55,17 +83,19 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
 
         private class Def(val row: Int, val name: String, val rhs: Ex)
 
-        fun build(rows: List<GraphRow>, degrees: Boolean): GraphModel {
+        fun build(rows: List<GraphRow>, degrees: Boolean, dim3: Boolean = false): GraphModel {
             val env = MathEnv(degrees)
+            val plotVars = if (dim3) MathEngine.PLOT_VARS_3D else MathEngine.PLOT_VARS
+            fun reserved(n: String) = MathEngine.isReserved(n) || n in plotVars
             val norm = rows.map { MathEngine.normalize(it.text) }
             val userFns = HashSet<String>()
             val userNames = HashSet<String>()
             for (s in norm) {
-                FN_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!MathEngine.isReserved(n)) userFns.add(n) }
+                FN_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!reserved(n)) userFns.add(n) }
             }
             for (s in norm) {
                 if (FN_RE.find(s) != null) continue
-                CONST_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!MathEngine.isReserved(n) && n !in userFns) userNames.add(n) }
+                CONST_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!reserved(n) && n !in userFns) userNames.add(n) }
             }
 
             val statuses = arrayOfNulls<RowStatus>(rows.size)
@@ -110,7 +140,7 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
             for (d in pending) {
                 val msg = try { MathEngine.evalConst(d.rhs, env); "Invalid" } catch (e: MathError) { e.message ?: "Invalid" }
                 val circular = pending.any { p -> msg.contains("'${p.name}'") }
-                val plotVar = MathEngine.PLOT_VARS.firstOrNull { msg.contains("'$it'") }
+                val plotVar = plotVars.firstOrNull { msg.contains("'$it'") }
                 statuses[d.row] = RowStatus(RowKind.ERROR, when {
                     circular -> "Circular definition"
                     plotVar != null -> "'${d.name}' can't depend on ${if (plotVar == "theta") "θ" else plotVar}"
@@ -120,6 +150,7 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
 
             // ---- everything else: classify and compile what to draw
             val items = ArrayList<PlotItem>()
+            val items3 = ArrayList<Plot3>()
             for (i in rows.indices) {
                 if (statuses[i] != null) continue
                 val st = parsed[i] ?: continue
@@ -130,10 +161,13 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
                     statuses[i] = when {
                         fn != null -> {
                             // Validate the body; a one-variable f(x) also plots like Desmos.
-                            val extra = fn.params.filter { it !in MathEngine.PLOT_VARS }
-                            MathEngine.compile(Ex.Call(fn.name, fn.params.map { Ex.Var(it) }), env, MathEngine.PLOT_VARS + extra)
-                            if (fn.params == listOf("x") && !row.hidden)
+                            val extra = fn.params.filter { it !in plotVars }
+                            MathEngine.compile(Ex.Call(fn.name, fn.params.map { Ex.Var(it) }), env, plotVars + extra)
+                            if (!dim3 && fn.params == listOf("x") && !row.hidden)
                                 items.add(PlotItem.Explicit(i, row.color, MathEngine.compile(Ex.Call(fn.name, listOf(Ex.Var("x"))), env), false, false, 0))
+                            // In 3D a two-variable f(x, y) draws as the surface z = f(x, y).
+                            if (dim3 && fn.params == listOf("x", "y") && !row.hidden)
+                                items3.add(Plot3.Explicit(i, row.color, MathEngine.compile(Ex.Call(fn.name, listOf(Ex.Var("x"), Ex.Var("y"))), env, plotVars), 2, degrees))
                             RowStatus(RowKind.FUNC)
                         }
                         def != null -> {
@@ -141,10 +175,11 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
                             if (isLiteral(def.rhs)) RowStatus(RowKind.SLIDER, "", sliderName = def.name, value = v)
                             else RowStatus(RowKind.CONST, "= " + MathEngine.fmt(v), value = v)
                         }
+                        dim3 -> classify3(i, row, st, env, items3, degrees, userFns, userNames)
                         else -> classify(i, row, st, env, items, degrees, userFns, userNames)
                     }
                 } catch (e: MathError) {
-                    statuses[i] = errorStatus(e.message ?: "Invalid", st, env)
+                    statuses[i] = errorStatus(e.message ?: "Invalid", st, env, plotVars)
                 } catch (e: StackOverflowError) {
                     statuses[i] = RowStatus(RowKind.ERROR, "Too deeply nested", true)
                 } catch (e: Exception) {
@@ -152,13 +187,14 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
                 }
             }
             items.removeAll { rows[it.row].hidden }
-            return GraphModel(statuses.map { it ?: RowStatus(RowKind.EMPTY) }, items, degrees)
+            items3.removeAll { rows[it.row].hidden }
+            return GraphModel(statuses.map { it ?: RowStatus(RowKind.EMPTY) }, items, degrees, parsed.toList(), items3, dim3)
         }
 
-        private fun errorStatus(msg: String, st: MathEngine.Statement, env: MathEnv): RowStatus {
+        private fun errorStatus(msg: String, st: MathEngine.Statement, env: MathEnv, plotVars: List<String>): RowStatus {
             val m = Regex("'([A-Za-z][A-Za-z0-9_]*)' isn't defined").find(msg)
             val name = m?.groupValues?.get(1)
-            val missing = name?.takeIf { it !in MathEngine.PLOT_VARS && !MathEngine.isReserved(it) && !env.consts.containsKey(it) }
+            val missing = name?.takeIf { it !in plotVars && !MathEngine.isReserved(it) && !env.consts.containsKey(it) }
             return RowStatus(RowKind.ERROR, msg, true, missing = missing)
         }
 
@@ -173,7 +209,7 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
         private fun requireVars(e: Ex, env: MathEnv, allowed: Set<String>) {
             val bad = free(e, env) - allowed
             val v = bad.firstOrNull() ?: return
-            if (v in MathEngine.PLOT_VARS) {
+            if (v in MathEngine.PLOT_VARS_3D) {
                 val shown = if (v == "theta") "θ" else v
                 throw MathError("'$shown' can't be used here")
             }
@@ -266,6 +302,113 @@ class GraphModel(val statuses: List<RowStatus>, val items: List<PlotItem>, val d
                 return RowStatus(RowKind.VALUE, if (abs(a - b) <= 1e-12 * max(1.0, abs(a))) "true" else "false")
             }
             return implicit(listOf(Ex.Bin("-", l, r)), intArrayOf(0))
+        }
+
+        // ---------------------------------------------------------------- 3D
+        private val V3 = MathEngine.PLOT_VARS_3D
+
+        private fun classify3(
+            i: Int, row: GraphRow, st: MathEngine.Statement, env: MathEnv, items: MutableList<Plot3>,
+            degrees: Boolean, userFns: Set<String>, userNames: Set<String>,
+        ): RowStatus {
+            val l = st.lhs; val r = st.rhs
+            val c = row.color
+            fun comp(e: Ex) = MathEngine.compile(e, env, V3)
+            fun bound(s: String, label: String): Double {
+                val v = try { MathEngine.evalConst(MathEngine.parseExpr(s, userFns, userNames), env) } catch (e: MathError) { throw MathError("Range $label: ${e.message}") }
+                if (!v.isFinite()) throw MathError("Range $label must be a finite number")
+                return v
+            }
+            fun explicit(e: Ex, axis: Int): RowStatus {
+                requireVars(e, env, when (axis) { 2 -> setOf("x", "y", "r", "theta"); 0 -> setOf("y", "z"); else -> setOf("x", "z") })
+                items.add(Plot3.Explicit(i, c, comp(e), axis, degrees))
+                return RowStatus(RowKind.PLOT)
+            }
+            if (r == null) {
+                if (isCmp(l)) throw MathError("Inequalities can't be graphed in 3D yet")
+                if (l is Ex.Tuple) {
+                    if (l.items.size != 3) throw MathError("3D points and curves need three coordinates (x, y, z)")
+                    val fv = free(l, env)
+                    if (fv.isEmpty()) {
+                        val x = MathEngine.evalConst(l.items[0], env); val y = MathEngine.evalConst(l.items[1], env); val z = MathEngine.evalConst(l.items[2], env)
+                        if (!row.hidden) items.add(Plot3.Point(i, c, x, y, z))
+                        return RowStatus(RowKind.POINT, "(" + MathEngine.fmt(x, 6) + ", " + MathEngine.fmt(y, 6) + ", " + MathEngine.fmt(z, 6) + ")")
+                    }
+                    if (fv.all { it == "t" }) {
+                        val a = bound(row.tMin, "start"); val b = bound(row.tMax, "end")
+                        if (a == b) throw MathError("The range is empty")
+                        items.add(Plot3.Curve(i, c, comp(l.items[0]), comp(l.items[1]), comp(l.items[2]), a, b))
+                        return RowStatus(RowKind.PLOT, rangeVar = "t")
+                    }
+                    requireVars(l, env, setOf("u", "v"))
+                    val u0 = bound(row.uMin, "u start"); val u1 = bound(row.uMax, "u end")
+                    val v0 = bound(row.vMin, "v start"); val v1 = bound(row.vMax, "v end")
+                    if (u0 == u1 || v0 == v1) throw MathError("The range is empty")
+                    items.add(Plot3.Surface(i, c, comp(l.items[0]), comp(l.items[1]), comp(l.items[2]), u0, u1, v0, v1))
+                    return RowStatus(RowKind.PLOT, uvRange = true)
+                }
+                val fv = free(l, env)
+                if (fv.isEmpty()) {
+                    val v = MathEngine.evalConst(l, env)
+                    regionOf(l, env, i, c)?.let { if (!row.hidden) items.add(it) }
+                    return RowStatus(RowKind.VALUE, "= " + MathEngine.fmt(v), value = v)
+                }
+                if (fv.all { it in setOf("x", "y", "r", "theta") }) return explicit(l, 2)
+                requireVars(l, env, setOf("x", "y", "z", "r", "theta", "t", "u", "v"))
+                throw MathError("Try z = f(x, y), (x(t), y(t), z(t)) or an equation in x, y, z")
+            }
+            if (isCmp(l) || isCmp(r)) throw MathError("Inequalities can't be graphed in 3D yet")
+            val fl = free(l, env); val fr = free(r, env)
+            val xy = setOf("x", "y", "r", "theta")
+            if (isVar(l, "z") && fr.all { it in xy }) return explicit(r, 2)
+            if (isVar(r, "z") && fl.all { it in xy }) return explicit(l, 2)
+            if (isVar(l, "x") && fr.isNotEmpty() && fr.all { it == "y" || it == "z" }) return explicit(r, 0)
+            if (isVar(r, "x") && fl.isNotEmpty() && fl.all { it == "y" || it == "z" }) return explicit(l, 0)
+            if (isVar(l, "y") && fr.isNotEmpty() && fr.all { it == "x" || it == "z" }) return explicit(r, 1)
+            if (isVar(r, "y") && fl.isNotEmpty() && fl.all { it == "x" || it == "z" }) return explicit(l, 1)
+            val all = fl + fr
+            if (all.isEmpty()) {
+                val a = MathEngine.evalConst(l, env); val b = MathEngine.evalConst(r, env)
+                return RowStatus(RowKind.VALUE, if (abs(a - b) <= 1e-12 * max(1.0, abs(a))) "true" else "false")
+            }
+            val f = Ex.Bin("-", l, r)
+            requireVars(f, env, setOf("x", "y", "z", "r", "theta"))
+            items.add(Plot3.Implicit(i, c, comp(f), degrees))
+            return RowStatus(RowKind.PLOT)
+        }
+
+        /**
+         * The region of a double / triple integral, when its variables are x, y (and z): a triple
+         * integral is the solid between its inner bounds; a double one over x, y is the solid between
+         * z = 0 and the integrand. Null when the bounds don't describe something drawable.
+         */
+        private fun regionOf(e: Ex, env: MathEnv, row: Int, color: Int): Plot3.Region? {
+            val levels = ArrayList<Triple<String, Ex, Ex>>()
+            var cur = e
+            while (cur is Ex.Call && MathEngine.canonical(cur.name).let { it == "int" || it == "integral" } && cur.args.size == 4 && cur.args[1] is Ex.Var) {
+                levels.add(Triple((cur.args[1] as Ex.Var).name, cur.args[2], cur.args[3]))
+                cur = cur.args[0]
+            }
+            val names = levels.map { it.first }
+            return try {
+                when {
+                    levels.size == 3 && names.toSet() == setOf("x", "y", "z") -> {
+                        val oLo = MathEngine.evalConst(levels[0].second, env); val oHi = MathEngine.evalConst(levels[0].third, env)
+                        if (!oLo.isFinite() || !oHi.isFinite()) return null
+                        Plot3.Region(row, color, names, oLo, oHi,
+                            MathEngine.compile(levels[1].second, env, V3), MathEngine.compile(levels[1].third, env, V3),
+                            MathEngine.compile(levels[2].second, env, V3), MathEngine.compile(levels[2].third, env, V3))
+                    }
+                    levels.size == 2 && names.toSet() == setOf("x", "y") && free(cur, env).all { it == "x" || it == "y" } -> {
+                        val oLo = MathEngine.evalConst(levels[0].second, env); val oHi = MathEngine.evalConst(levels[0].third, env)
+                        if (!oLo.isFinite() || !oHi.isFinite()) return null
+                        Plot3.Region(row, color, names + "z", oLo, oHi,
+                            MathEngine.compile(levels[1].second, env, V3), MathEngine.compile(levels[1].third, env, V3),
+                            MathEngine.compile(Ex.Num(0.0), env, V3), MathEngine.compile(cur, env, V3))
+                    }
+                    else -> null
+                }
+            } catch (_: MathError) { null }
         }
     }
 }

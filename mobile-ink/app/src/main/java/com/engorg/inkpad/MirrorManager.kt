@@ -164,6 +164,14 @@ object MirrorManager : PageCanvas.MirrorSink {
             val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
             val segs = JSONArray()
             val shape = rec.shape
+            if (shape != null && shape.type == ShapeType.GRAPH && shape.graph != null) {
+                // The desktop has no grapher: send the card as colored strokes (frame, axes, curves).
+                val a = shape.verts[0]; val b = shape.verts[1]
+                val box = android.graphics.RectF(minOf(a.x, b.x), minOf(a.y, b.y), maxOf(a.x, b.x), maxOf(a.y, b.y))
+                for ((color, pts) in GraphCardRenderer.strokes(shape.graph!!, box))
+                    recs.put(JSONObject().put("c", color).put("w", 1.6).put("h", false).put("k", "s").put("segs", JSONArray().put(ptsJson(pts))))
+                continue
+            }
             if (shape != null) {
                 o.put("k", "s"); if (shape.dashed) o.put("d", true)
                 val parts = shape.parts()

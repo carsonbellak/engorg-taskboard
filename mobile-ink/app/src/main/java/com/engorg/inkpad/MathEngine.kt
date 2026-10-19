@@ -83,6 +83,9 @@ object MathEngine {
     /** Plot variables, always slots 0..4 of a top-level frame. */
     val PLOT_VARS = listOf("x", "y", "t", "theta", "r")
     const val SX = 0; const val SY = 1; const val ST = 2; const val STHETA = 3; const val SR = 4
+    /** The 3D grapher's variables: the 2D ones (same slots) plus z and the surface parameters u, v. */
+    val PLOT_VARS_3D = PLOT_VARS + listOf("z", "u", "v")
+    const val SZ = 5; const val SU = 6; const val SV = 7
 
     const val EULER_GAMMA = 0.5772156649015329
     val CONSTANTS: Map<String, Double> = mapOf(
@@ -90,7 +93,7 @@ object MathEngine {
         "inf" to Double.POSITIVE_INFINITY, "infinity" to Double.POSITIVE_INFINITY, "egamma" to EULER_GAMMA,
     )
     private val CMP = setOf("<", "<=", ">", ">=", "==", "!=")
-    val BINDERS = setOf("sum", "prod", "int", "integral", "deriv", "diff", "lim", "limit", "if")
+    val BINDERS = setOf("sum", "prod", "int", "integral", "int2", "int3", "deriv", "diff", "lim", "limit", "if")
 
     // ---------------------------------------------------------------- function table
     private class Fn(
@@ -141,6 +144,8 @@ object MathEngine {
         f1("acot", trigOut = true) { if (it == 0.0) PI / 2 else atan(1 / it) }
         alias("asin", "arcsin"); alias("acos", "arccos"); alias("atan", "arctan"); alias("asec", "arcsec")
         alias("acsc", "arccsc"); alias("acot", "arccot"); alias("csc", "cosec")
+        // ∬ / ∭ — sugar for nested int(…), desugared by the parser.
+        alias("int2", "iint", "dblint", "doubleint"); alias("int3", "iiint", "tripleint")
 
         // ---- hyperbolic and inverses
         f1("sinh") { sinh(it) }; f1("cosh") { cosh(it) }; f1("tanh") { tanh(it) }
@@ -215,11 +220,11 @@ object MathEngine {
     private val DERIV_RE = Regex("""(?<![A-Za-z0-9_])d\s*/\s*d(theta|[A-Za-z])(?![A-Za-z0-9_])""")
 
     fun normalize(src: String): String {
-        var s = src
+        var s = if (src.indexOf('\\') >= 0) Latex.toPlain(src) else src
         val reps = arrayOf(
             "×" to "*", "·" to "*", "⋅" to "*", "÷" to "/", "−" to "-", "–" to "-", "≤" to "<=", "≥" to ">=", "≠" to "!=",
             "²" to "^2", "³" to "^3", "√" to "sqrt", "∛" to "cbrt", "π" to "pi", "θ" to "theta", "τ" to "tau",
-            "φ" to "phi", "∞" to "inf", "∑" to "sum", "Σ" to "sum", "∏" to "prod", "∫" to "int", "**" to "^", "Γ" to "gamma",
+            "φ" to "phi", "∞" to "inf", "∑" to "sum", "Σ" to "sum", "∏" to "prod", "∭" to "int3", "∬" to "int2", "∫" to "int", "**" to "^", "Γ" to "gamma",
         )
         for ((a, b) in reps) s = s.replace(a, b)
         return DERIV_RE.replace(s) { m -> "ddx_" + m.groupValues[1] + " " }
@@ -442,6 +447,8 @@ object MathEngine {
                 if (args.size != 1) throw MathError("log_b takes one argument")
                 return Ex.Call("logb", listOf(base, args[0]))
             }
+            val canon = canonical(name)
+            if ((canon == "int2" || canon == "int3") && name !in userFns) return multiIntegral(canon == "int3")
             var primes = 0
             while (isOp("'")) { p++; primes++ }
             if (isFn(name)) {
@@ -466,6 +473,24 @@ object MathEngine {
                 return primary()
             }
             return Ex.Var(name)
+        }
+
+        /**
+         * int2(f, y, c, d, x, a, b) = ∫ₐᵇ∫꜀ᵈ f dy dx and int3(f, z, …, y, …, x, a, b) = ∭ f dz dy dx: the
+         * variables are listed innermost first, in the order the differentials are written. Each inner
+         * bound may use the outer variables. Desugared to nested int(…) so everything downstream
+         * (compile, free variables, typesetting, the 3D region view) just sees ordinary integrals.
+         */
+        fun multiIntegral(triple: Boolean): Ex {
+            val args = fnArgs()
+            val n = if (triple) 3 else 2
+            if (args.size != 1 + 3 * n) throw MathError(if (triple) "int3(f, z, z₀, z₁, y, y₀, y₁, x, a, b)" else "int2(f, y, y₀, y₁, x, a, b)")
+            var body = args[0]
+            for (k in 0 until n) {
+                val v = args[1 + 3 * k] as? Ex.Var ?: throw MathError("Each integration variable must be a single name")
+                body = Ex.Call("int", listOf(body, v, args[2 + 3 * k], args[3 + 3 * k]))
+            }
+            return body
         }
 
         fun split(name: String): List<Tok>? {
@@ -547,9 +572,22 @@ object MathEngine {
 
     private fun fx(b: Fx): Fx = b
 
+    /** Does [e] contain an integral (so integrating it makes a multiple integral)? */
+    private fun hasIntegral(e: Ex): Boolean = when (e) {
+        is Ex.Call -> canonical(e.name).let { it == "int" || it == "integral" } || e.args.any { hasIntegral(it) }
+        is Ex.Neg -> hasIntegral(e.a)
+        is Ex.Bin -> hasIntegral(e.a) || hasIntegral(e.b)
+        is Ex.Chain -> e.items.any { hasIntegral(it) }
+        is Ex.Tuple -> e.items.any { hasIntegral(it) }
+        is Ex.Piece -> e.cases.any { hasIntegral(it.first) || it.second?.let { v -> hasIntegral(v) } == true } || e.otherwise?.let { hasIntegral(it) } == true
+        is Ex.Deriv -> hasIntegral(e.a)
+        else -> false
+    }
+
     private class Compiler(val env: MathEnv, vars: List<String>) {
         val slots = HashMap<String, Int>()
         var n = 0
+        var intDepth = 0   // how many int(…) bodies we're inside (inner integrals get a cheaper rule)
         init { for (v in vars) slots[v] = n++ }
 
         fun <R> bind(name: String, body: (Int) -> R): R {
@@ -653,9 +691,15 @@ object MathEngine {
                         a = args[2]; b = args[3]
                     } else { v = intVar(args[0]); a = args[1]; b = args[2] }
                     val lo = c(a); val hi = c(b)
+                    // Every level of a double / triple integral runs once per sample of the levels around
+                    // it, so those levels use the bounded-cost rule (Calc.integrateNested) instead of the
+                    // fully adaptive one: a ball's volume takes ~0.1 s instead of ~20 s.
+                    val nested = intDepth > 0 || hasIntegral(args[0])
                     return bind(v) { s ->
-                        val body = c(args[0])
-                        fx { f -> val sv = f[s]; val r = Calc.integrate({ xv -> f[s] = xv; body(f) }, lo(f), hi(f)); f[s] = sv; r }
+                        intDepth++
+                        val body = try { c(args[0]) } finally { intDepth-- }
+                        if (nested) fx { f -> val sv = f[s]; val r = Calc.integrateNested({ xv -> f[s] = xv; body(f) }, lo(f), hi(f)); f[s] = sv; r }
+                        else fx { f -> val sv = f[s]; val r = Calc.integrate({ xv -> f[s] = xv; body(f) }, lo(f), hi(f)); f[s] = sv; r }
                     }
                 }
                 "deriv", "diff" -> {
@@ -773,7 +817,7 @@ object Calc {
      * Tanh-sinh (double-exponential) quadrature on a finite [a, b]: copes with integrable endpoint
      * singularities (1/sqrt(x), ln x) that defeat Gauss-Legendre. Returns NaN unless it converges.
      */
-    private fun tanhSinh(f: (Double) -> Double, a: Double, b: Double): Double {
+    private fun tanhSinh(f: (Double) -> Double, a: Double, b: Double, maxLevel: Int = 8, tMax: Double = 6.5, tol: Double = 1e-11): Double {
         val c = (a + b) / 2; val h = (b - a) / 2
         fun pair(t: Double): Double {
             val u = PI / 2 * sinh(t)
@@ -782,7 +826,9 @@ object Calc {
             val d = h * 2 / (exp(2 * u) + 1)          // distance from each endpoint, without cancellation
             if (d == 0.0 || w < 1e-300 || !w.isFinite()) return 0.0
             val fl = f(a + d); val fr = f(b - d)
-            if (fl.isNaN() || fr.isNaN()) return Double.NaN
+            // Right at the ends, rounding can step just outside a √ bound (NaN) where the weight is
+            // already negligible; only a NaN that carries real weight means the integral is undefined.
+            if ((fl.isNaN() || fr.isNaN()) && w > 1e-12) return Double.NaN
             return w * ((if (fl.isFinite()) fl else 0.0) + (if (fr.isFinite()) fr else 0.0))
         }
         val f0 = f(c)
@@ -790,24 +836,51 @@ object Calc {
         var sum = PI / 2 * (if (f0.isFinite()) f0 else 0.0)
         var step = 1.0
         var t = step
-        while (t < 6.5) { val p = pair(t); if (p.isNaN()) return p; sum += p; t += step }
+        while (t < tMax) { val p = pair(t); if (p.isNaN()) return p; sum += p; t += step }
         var est = h * step * sum
-        for (level in 1..8) {
+        for (level in 1..maxLevel) {
             step /= 2
             t = step
-            while (t < 6.5) { val p = pair(t); if (p.isNaN()) return p; sum += p; t += 2 * step }
+            while (t < tMax) { val p = pair(t); if (p.isNaN()) return p; sum += p; t += 2 * step }
             val next = h * step * sum
-            if (level >= 3 && abs(next - est) <= 1e-11 * max(1.0, abs(next))) return next
+            if (level >= 3 && abs(next - est) <= tol * max(1.0, abs(next))) return next
             est = next
         }
         return Double.NaN
     }
 
-    /** Adaptive Gauss-Legendre quadrature (tanh-sinh fallback); infinite limits via a change of variables. */
-    fun integrate(g: (Double) -> Double, a: Double, b: Double, panels: Int = 8, depth: Int = 9): Double {
+    /**
+     * One level of a double / triple integral, at a bounded cost. A smooth integrand passes the quick
+     * Gauss-Legendre check (30 evaluations); anything else — typically a √ bound's vertical tangent at
+     * an end — goes to a short tanh-sinh run (≤ ~130 evaluations), which handles endpoint singularities
+     * well. Accurate to ~1e-9 relative, so even a ball's volume nests three levels in a fraction of a second.
+     */
+    fun integrateNested(g: (Double) -> Double, a: Double, b: Double): Double {
         if (a.isNaN() || b.isNaN()) return Double.NaN
         if (a == b) return 0.0
-        if (a > b) return -integrate(g, b, a, panels, depth)
+        if (a > b) return -integrateNested(g, b, a)
+        val h: (Double) -> Double; val lo: Double; val hi: Double
+        when {
+            a.isInfinite() && b.isInfinite() -> { h = { u -> val c = cos(u); g(tan(u)) / (c * c) }; lo = -PI / 2; hi = PI / 2 }
+            b.isInfinite() -> { h = { u -> val d = 1 - u; g(a + u / d) / (d * d) }; lo = 0.0; hi = 1.0 }
+            a.isInfinite() -> { h = { u -> val d = 1 - u; g(b - u / d) / (d * d) }; lo = 0.0; hi = 1.0 }
+            else -> { h = g; lo = a; hi = b }
+        }
+        val m = (lo + hi) / 2
+        val whole = gl10(h, lo, hi); val halves = gl10(h, lo, m) + gl10(h, m, hi)
+        if (abs(halves - whole) <= 1e-10 * max(1.0, abs(halves))) return halves
+        val de = tanhSinh(h, lo, hi, maxLevel = 4, tMax = 4.0, tol = 1e-9)
+        if (de.isFinite()) return de
+        // Neither settled (an interior kink or jump): a short adaptive pass is still bounded.
+        val flag = Flag()
+        return adapt(h, lo, m, gl10(h, lo, m), 1e-8 * max(1.0, abs(halves)), 4, flag) + adapt(h, m, hi, gl10(h, m, hi), 1e-8 * max(1.0, abs(halves)), 4, flag)
+    }
+
+    /** Adaptive Gauss-Legendre quadrature (tanh-sinh fallback); infinite limits via a change of variables. */
+    fun integrate(g: (Double) -> Double, a: Double, b: Double, panels: Int = 8, depth: Int = 9, tol: Double = 1e-11): Double {
+        if (a.isNaN() || b.isNaN()) return Double.NaN
+        if (a == b) return 0.0
+        if (a > b) return -integrate(g, b, a, panels, depth, tol)
         val h: (Double) -> Double; val lo: Double; val hi: Double
         when {
             a.isInfinite() && b.isInfinite() -> { h = { u -> val c = cos(u); g(tan(u)) / (c * c) }; lo = -PI / 2; hi = PI / 2 }
@@ -821,7 +894,7 @@ object Calc {
         for (i in 0 until panels) {
             val x0 = lo + i * w; val x1 = if (i == panels - 1) hi else x0 + w
             val whole = gl10(h, x0, x1)
-            total += adapt(h, x0, x1, whole, 1e-11 * max(1.0, abs(whole)), depth, flag)
+            total += adapt(h, x0, x1, whole, tol * max(1.0, abs(whole)), depth, flag)
         }
         if (flag.hit && total.isFinite()) {
             val de = tanhSinh(h, lo, hi)

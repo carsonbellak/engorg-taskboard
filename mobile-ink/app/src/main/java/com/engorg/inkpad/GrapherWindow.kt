@@ -43,18 +43,21 @@ import kotlin.math.min
 import kotlin.math.pow
 
 /**
- * A Desmos-style graphing calculator that floats over the notebook: expressions on the left,
- * the graph on the right. Drag the header to move it, any edge or corner to resize it, and the
- * bar between the list and the graph to re-balance them. "Add to page" drops the visible graph
- * onto the focused page as ink (selected, so it can be dragged straight into place).
+ * A Desmos-style graphing calculator that floats over the notebook: expressions on the left (typeset
+ * like LaTeX; tap one to edit it as text), the graph on the right — in 2D or 3D. Drag the header to
+ * move it, any edge or corner to resize it, and the bar between the list and the graph to re-balance
+ * them. "Add to page" drops the graph onto the focused page either as a live graph card that looks
+ * like this window (and can be reopened with "Edit graph") or as plain ink strokes.
  *
- * Rows, view, angle mode and window geometry persist in SharedPreferences ("engink_graph").
+ * Rows (2D and 3D kept separately), views, angle mode and window geometry persist in
+ * SharedPreferences ("engink_graph").
  */
 @SuppressLint("ClickableViewAccessibility", "SetTextI18n")
 class GrapherWindow(
     private val act: Activity,
     private val host: FrameLayout,
     private val onInsert: (List<GraphInk>, Float, Float) -> Unit,
+    private val onInsertCard: (GraphCard, Float, Float) -> Unit,
 ) {
     private val prefs = act.getSharedPreferences("engink_graph", Context.MODE_PRIVATE)
     private val dens = act.resources.displayMetrics.density
@@ -68,7 +71,10 @@ class GrapherWindow(
         Color.rgb(0x00, 0x96, 0x88), Color.rgb(0xD8, 0x1B, 0x60),
     )
 
-    private val rows = ArrayList<GraphRow>()
+    private val rows2 = ArrayList<GraphRow>()
+    private val rows3 = ArrayList<GraphRow>()
+    private var dim3 = false
+    private val rows: ArrayList<GraphRow> get() = if (dim3) rows3 else rows2
     private val views = ArrayList<RowView>()
     private var degrees = false
     private var leftW = 0
@@ -81,6 +87,16 @@ class GrapherWindow(
 
     private lateinit var frame: ResizableFrame
     private lateinit var graph: GraphView
+    private lateinit var graph3: Graph3DView
+    private lateinit var modeBtn: TextView
+    private lateinit var insertBtn: TextView
+
+    // Editing a graph card from the page: what to call with the result, and the session to restore.
+    private var cardEdit: ((GraphCard) -> Unit)? = null
+    private var cardLegend = true
+    private class Stash(val dim3: Boolean, val rows2: List<GraphRow>, val rows3: List<GraphRow>, val degrees: Boolean,
+                        val cx: Double, val cy: Double, val units: Double, val yaw: Double, val pitch: Double, val range: Double)
+    private var stash: Stash? = null
     private lateinit var list: LinearLayout
     private lateinit var leftPanel: LinearLayout
     private lateinit var angleBtn: TextView
@@ -107,13 +123,14 @@ class GrapherWindow(
     fun close() {
         if (!built) return
         palette?.dismiss()
+        if (cardEdit != null) endCardEdit()
         save()
         (act.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(frame.windowToken, 0)
         host.removeView(frame)
         onClosed?.invoke()
     }
 
-    fun dispose() { if (built) { save(); graph.dispose() } }
+    fun dispose() { if (built) { if (cardEdit != null) endCardEdit(); save(); graph.dispose(); graph3.dispose() } }
 
     // ================================================================= build
     private fun build() {
@@ -145,16 +162,51 @@ class GrapherWindow(
         body.addView(leftPanel, LinearLayout.LayoutParams(leftW, MATCH_PARENT))
         body.addView(buildSplitter(body), LinearLayout.LayoutParams(dp(7), MATCH_PARENT))
         graph = GraphView(act)
-        body.addView(graph, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
+        graph3 = Graph3DView(act)
+        val plots = FrameLayout(act).apply {
+            addView(graph, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(graph3, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        }
+        body.addView(plots, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
         col.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         frame.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
 
         val v = prefs.getString("view", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
         if (v != null) graph.setView(v.optDouble("cx", 0.0), v.optDouble("cy", 0.0), v.optDouble("units", 20.0))
+        val v3 = prefs.getString("view3d", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        if (v3 != null) graph3.setView(v3.optDouble("yaw", Graph3DView.DEFAULT_YAW), v3.optDouble("pitch", Graph3DView.DEFAULT_PITCH), v3.optDouble("range", Graph3DView.DEFAULT_RANGE))
         graph.onViewChanged = { handler.removeCallbacks(saveTask); handler.postDelayed(saveTask, 600) }
+        graph3.onViewChanged = { handler.removeCallbacks(saveTask); handler.postDelayed(saveTask, 600) }
 
+        applyMode()
+        reloadRows()
+    }
+
+    /** Show the 2D or 3D plot and label the mode chip. */
+    private fun applyMode() {
+        graph.visibility = if (dim3) View.GONE else View.VISIBLE
+        graph3.visibility = if (dim3) View.VISIBLE else View.GONE
+        modeBtn.text = if (dim3) "3D" else "2D"
+        modeBtn.setTextColor(if (dim3) AppTheme.onAccent() else AppTheme.text)
+        (modeBtn.background as? GradientDrawable)?.setColor(if (dim3) AppTheme.accent else AppTheme.elevated)
+    }
+
+    /** Rebuild the row views from the current mode's rows. */
+    private fun reloadRows() {
+        lastEdit = null
+        list.removeAllViews(); views.clear()
         for (r in rows) list.addView(RowView(r).also { views.add(it) }.box)
-        if (rows.isEmpty()) addRow(0, "", focus = false)
+        if (rows.isEmpty()) addRow(0, "", focus = false) else rebuild()
+    }
+
+    private fun switchMode() {
+        if (cardEdit != null) { Toast.makeText(act, "Finish editing this graph first", Toast.LENGTH_SHORT).show(); return }
+        palette?.dismiss()
+        (act.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(frame.windowToken, 0)
+        dim3 = !dim3
+        applyMode()
+        reloadRows()
+        save()
     }
 
     private fun chip(label: String, filled: Boolean = false, onClick: (TextView) -> Unit) = TextView(act).apply {
@@ -190,10 +242,13 @@ class GrapherWindow(
         }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         val tools = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         tools.addView(chip("ƒ(x)") { showPalette(it) })
+        modeBtn = chip(if (dim3) "3D" else "2D") { switchMode() }
+        tools.addView(modeBtn)
         angleBtn = chip(if (degrees) "DEG" else "RAD") { toggleAngle() }
         tools.addView(angleBtn)
-        tools.addView(iconChip(Icons.HOME) { graph.home() })
-        tools.addView(chip("Add to page", filled = true) { insert() })
+        tools.addView(iconChip(Icons.HOME) { if (dim3) graph3.home() else graph.home() })
+        insertBtn = chip("Add to page", filled = true) { insertMenu(it) }
+        tools.addView(insertBtn)
         tools.addView(iconChip(Icons.FIT) { toggleMax() })
         tools.addView(iconChip(Icons.CLOSE) { close() })
         header.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(tools) },
@@ -333,6 +388,10 @@ class GrapherWindow(
         val box = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(6), dp(6), dp(6)) }
         val dot = View(act)
         val edit = EditText(act)
+        val mathLine = MathView(act)                 // the typeset line, shown when not editing
+        val displayScroll = HorizontalScrollView(act)
+        val preview = MathView(act)                 // live typeset preview under the text while editing
+        var editing = false
         val info = TextView(act)
         val slider = LinearLayout(act)
         val seek = SeekBar(act)
@@ -340,6 +399,8 @@ class GrapherWindow(
         val range = LinearLayout(act)
         val tMin = smallEdit(); val tMax = smallEdit()
         val rangeLabel = TextView(act)
+        val uv = LinearLayout(act)
+        val uMin = smallEdit(); val uMax = smallEdit(); val vMin = smallEdit(); val vMax = smallEdit()
         var status: RowStatus? = null
 
         init {
@@ -352,7 +413,7 @@ class GrapherWindow(
             edit.apply {
                 setText(row.text)
                 textSize = 16f; setTextColor(AppTheme.text); setHintTextColor(alpha(AppTheme.text, 0x70))
-                hint = if (rows.indexOf(row) <= 0) "y = x², x²+y²=9, r = 2cos3θ…" else "Expression"
+                hint = if (rows.indexOf(row) > 0) "Expression" else if (dim3) "z = x² − y², x²+y²+z² = 9, (cos t, sin t, t)…" else "y = x², x²+y²=9, r = 2cos3θ…"
                 isSingleLine = true
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
                 imeOptions = EditorInfo.IME_ACTION_NEXT or EditorInfo.IME_FLAG_NO_EXTRACT_UI
@@ -369,9 +430,23 @@ class GrapherWindow(
                     override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                     override fun afterTextChanged(s: Editable?) { if (suppress) return; row.text = s?.toString() ?: ""; scheduleRebuild() }
                 })
-                setOnFocusChangeListener { _, has -> if (has) { lastEdit = this; graph.focusRow = rows.indexOf(row) } }
+                setOnFocusChangeListener { _, has ->
+                    if (has) { lastEdit = this; graph.focusRow = rows.indexOf(row) }
+                    else if (row.text.isNotBlank()) showEditor(false)
+                }
             }
-            top.addView(edit, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            mathLine.size = dpf(19f); mathLine.color = AppTheme.text
+            mathLine.setOnClickListener { startEditing() }
+            displayScroll.apply {
+                isHorizontalScrollBarEnabled = false; isFillViewport = true
+                minimumHeight = dp(40)
+                background = GradientDrawable().apply { cornerRadius = dpf(8f); setColor(AppTheme.elevated) }
+                addView(mathLine, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.CENTER_VERTICAL))
+            }
+            val slot = FrameLayout(act)
+            slot.addView(edit, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            slot.addView(displayScroll, FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            top.addView(slot, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             top.addView(ImageButton(act).apply {
                 setImageBitmap(Icons.bitmap(Icons.CLOSE, dp(16))); setColorFilter(alpha(AppTheme.text, 0x99))
                 background = null; scaleType = ImageView.ScaleType.FIT_CENTER
@@ -379,6 +454,11 @@ class GrapherWindow(
                 setOnClickListener { removeRow(this@RowView) }
             }, LinearLayout.LayoutParams(dp(32), dp(32)).apply { leftMargin = dp(2) })
             box.addView(top)
+
+            preview.size = dpf(15f); preview.color = alpha(AppTheme.text, 0xD0)
+            preview.visibility = View.GONE
+            box.addView(preview, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(26) })
+            showEditor(row.text.isBlank())
 
             info.apply { textSize = 12.5f; setPadding(dp(32), dp(3), dp(4), 0); visibility = View.GONE }
             box.addView(info)
@@ -423,8 +503,46 @@ class GrapherWindow(
             range.addView(tMax, LinearLayout.LayoutParams(dp(64), WRAP_CONTENT))
             box.addView(range)
 
+            // 3D parametric surface domain: [u₀] ≤ u ≤ [u₁], [v₀] ≤ v ≤ [v₁]
+            uv.apply { orientation = LinearLayout.VERTICAL; setPadding(dp(32), dp(4), 0, 0); visibility = View.GONE }
+            uMin.setText(row.uMin); uMax.setText(row.uMax); vMin.setText(row.vMin); vMax.setText(row.vMax)
+            val uvWatch = object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: Editable?) {
+                    if (suppress) return
+                    row.uMin = uMin.text.toString(); row.uMax = uMax.text.toString(); row.vMin = vMin.text.toString(); row.vMax = vMax.text.toString()
+                    scheduleRebuild()
+                }
+            }
+            for ((lo, hi, name) in listOf(Triple(uMin, uMax, "u"), Triple(vMin, vMax, "v"))) {
+                lo.addTextChangedListener(uvWatch); hi.addTextChangedListener(uvWatch)
+                uv.addView(LinearLayout(act).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(2), 0, dp(2))
+                    addView(lo, LinearLayout.LayoutParams(dp(64), WRAP_CONTENT))
+                    addView(TextView(act).apply { text = "≤ $name ≤"; textSize = 13f; setTextColor(alpha(AppTheme.text, 0xB0)); setPadding(dp(8), 0, dp(8), 0) })
+                    addView(hi, LinearLayout.LayoutParams(dp(64), WRAP_CONTENT))
+                })
+            }
+            box.addView(uv)
+
             box.addView(View(act).apply { setBackgroundColor(alpha(AppTheme.text, 0x14)) },
                 LinearLayout.LayoutParams(MATCH_PARENT, dp(1)).apply { topMargin = dp(6) })
+        }
+
+        /** Text field while editing (or empty), the typeset line otherwise. */
+        fun showEditor(on: Boolean) {
+            editing = on
+            edit.visibility = if (on) View.VISIBLE else View.GONE
+            displayScroll.visibility = if (on) View.GONE else View.VISIBLE
+            preview.visibility = if (on && status?.error != true && row.text.isNotBlank() && hasParse) View.VISIBLE else View.GONE
+        }
+        private var hasParse = false
+
+        fun startEditing() {
+            showEditor(true)
+            edit.requestFocus(); edit.setSelection(edit.text.length)
+            (act.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)
         }
 
         fun paintDot() {
@@ -455,8 +573,12 @@ class GrapherWindow(
             rebuild()
         }
 
-        fun apply(s: RowStatus) {
+        fun apply(s: RowStatus, st: MathEngine.Statement?) {
             status = s
+            hasParse = st != null
+            mathLine.set(st, row.text)
+            preview.set(st, row.text)
+            preview.visibility = if (editing && st != null && !s.error && row.text.isNotBlank()) View.VISIBLE else View.GONE
             val msg = when {
                 s.error && s.missing != null -> "⚠ ${s.info}  ·  tap to add a slider for ${s.missing}"
                 s.error -> "⚠ ${s.info}"
@@ -481,6 +603,7 @@ class GrapherWindow(
             }
             range.visibility = if (s.rangeVar != null) View.VISIBLE else View.GONE
             if (s.rangeVar != null) rangeLabel.text = "≤ ${s.rangeVar} ≤"
+            uv.visibility = if (s.uvRange) View.VISIBLE else View.GONE
         }
     }
 
@@ -533,10 +656,13 @@ class GrapherWindow(
     private fun rebuild() {
         handler.removeCallbacks(rebuildTask)
         if (!built) return
-        val m = GraphModel.build(rows, degrees)
-        for (i in views.indices) views[i].apply(m.statuses.getOrElse(i) { RowStatus(RowKind.EMPTY) })
-        graph.focusRow = lastEdit?.let { e -> views.indexOfFirst { it.edit === e } } ?: -1
-        graph.setModel(m)
+        val m = GraphModel.build(rows, degrees, dim3)
+        for (i in views.indices) views[i].apply(m.statuses.getOrElse(i) { RowStatus(RowKind.EMPTY) }, m.parsed.getOrNull(i))
+        if (dim3) graph3.setModel(m)
+        else {
+            graph.focusRow = lastEdit?.let { e -> views.indexOfFirst { it.edit === e } } ?: -1
+            graph.setModel(m)
+        }
         handler.removeCallbacks(saveTask); handler.postDelayed(saveTask, 400)
     }
 
@@ -593,8 +719,18 @@ class GrapherWindow(
             "Calculus" to listOf(
                 "d/dx" to "d/dx(§)", "f'(x)" to "f'(x)", "f''(x)" to "f''(x)", "deriv" to "deriv(§, x)", "f' at a" to "deriv(§, x, 1)",
                 "∫ₐᵇ" to "int(§, x, 0, 1)", "∫₀ˣ" to "int(§, t, 0, x)", "∫ −∞..∞" to "int(§, x, -inf, inf)",
+                "∬" to "int2(§, y, 0, 1, x, 0, 1)", "∭" to "int3(§, z, 0, 1, y, 0, 1, x, 0, 1)",
                 "Σ" to "sum(§, n, 1, 10)", "Σ ∞" to "sum(§, n, 1, inf)", "Π" to "prod(§, n, 1, 10)", "lim" to "lim(§, x, 0)",
                 "lim ∞" to "lim(§, x, inf)",
+            ),
+            "3D" to listOf(
+                "z =" to "z = §", "x" to "x", "y" to "y", "z" to "z", "u" to "u", "v" to "v", "t" to "t", "r" to "r",
+                "(x, y, z)" to "(§, , )", "curve" to "(cos(t), sin(t), §t/4)", "surface" to "(§cos(u)sin(v), sin(u)sin(v), cos(v))",
+                "sphere" to "x^2 + y^2 + z^2 = §9", "cone" to "z = §sqrt(x^2 + y^2)", "paraboloid" to "z = §x^2 + y^2",
+                "saddle" to "z = §x^2 − y^2", "cylinder" to "x^2 + y^2 = §4",
+                "∬" to "int2(§, y, 0, 1, x, 0, 1)", "∭" to "int3(§, z, 0, 1, y, 0, 1, x, 0, 1)",
+                "∭ ball" to "int3(§1, z, −sqrt(4 − x^2 − y^2), sqrt(4 − x^2 − y^2), y, −sqrt(4 − x^2), sqrt(4 − x^2), x, −2, 2)",
+                "∭ tetra" to "int3(§1, z, 0, 1 − x − y, y, 0, 1 − x, x, 0, 1)",
             ),
             "Special" to listOf(
                 "Γ" to "gamma(§)", "lnΓ" to "lgamma(§)", "ψ" to "digamma(§)", "B(a,b)" to "beta(§, )", "erf" to "erf(§)",
@@ -666,6 +802,7 @@ class GrapherWindow(
 
     private fun insertText(tpl: String) {
         val e = lastEdit ?: views.lastOrNull()?.edit ?: return
+        views.firstOrNull { it.edit === e }?.let { if (!it.editing) it.startEditing() }
         if (!e.hasFocus()) e.requestFocus()
         val cur = tpl.indexOf('§').let { if (it < 0) tpl.replace("§", "").length else it }
         val txt = tpl.replace("§", "")
@@ -675,26 +812,126 @@ class GrapherWindow(
     }
 
     // ================================================================= add to page
-    private fun insert() {
-        val r = graph.exportInk()
+    /** "Add to page": as a live graph (looks like this window) or as ink strokes. */
+    private fun insertMenu(anchor: View) {
+        if (cardEdit != null) { applyCardEdit(); return }
+        if (rows.none { it.text.isNotBlank() }) { Toast.makeText(act, "Nothing to add yet — type an expression first.", Toast.LENGTH_SHORT).show(); return }
+        val col = LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = GradientDrawable().apply { cornerRadius = dpf(14f); setColor(AppTheme.surface); setStroke(dp(1), alpha(AppTheme.text, 0x30)) }
+        }
+        val pop = PopupWindow(col, dp(250), WRAP_CONTENT, true).apply { elevation = dpf(14f) }
+        fun option(title: String, sub: String, onClick: () -> Unit) = col.addView(LinearLayout(act).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dpf(10f); setColor(AppTheme.elevated) }
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) }
+            addView(TextView(act).apply { text = title; textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(AppTheme.text) })
+            addView(TextView(act).apply { text = sub; textSize = 12f; setTextColor(alpha(AppTheme.text, 0xA8)) })
+            setOnClickListener { pop.dismiss(); onClick() }
+        })
+        val legend = android.widget.CheckBox(act).apply {
+            text = "Show the expressions beside it"; textSize = 12.5f; setTextColor(AppTheme.text)
+            buttonTintList = android.content.res.ColorStateList.valueOf(AppTheme.accent)
+            isChecked = prefs.getBoolean("cardLegend", true)
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("cardLegend", on).apply() }
+        }
+        option("Graph", "Looks like this window · stays editable") { insertCard(legend.isChecked) }
+        col.addView(legend, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(8); leftMargin = dp(2) })
+        option("Ink strokes", "Plain lines you can erase and recolor") { insertInk() }
+        pop.showAsDropDown(anchor, -dp(90), dp(6))
+    }
+
+    private fun insertInk() {
+        val r = if (dim3) graph3.exportInk() else graph.exportInk()
         if (r == null || r.first.size <= 1) { Toast.makeText(act, "Nothing to add yet — type an expression first.", Toast.LENGTH_SHORT).show(); return }
         onInsert(r.first, r.second, r.third)
+    }
+
+    private fun currentCard(legend: Boolean) = GraphCard(
+        dim3, GraphCard.copyRows(rows), degrees,
+        graph.cx, graph.cy, graph.unitsAcross(), graph3.yaw, graph3.pitch, graph3.range, legend,
+    )
+
+    /** Page size for a card: the plot keeps this window's aspect, the legend sits beside it. */
+    private fun cardSize(card: GraphCard): Pair<Float, Float> {
+        val v: View = if (dim3) graph3 else graph
+        val aspect = if (v.width > 0 && v.height > 0) v.height.toFloat() / v.width else 0.7f
+        val plotW = 400f
+        val h = (plotW * aspect).coerceIn(200f, 560f)
+        val w = if (card.legend && card.rows.any { it.text.isNotBlank() }) plotW / 0.66f else plotW
+        val rowsH = 16f + card.rows.count { it.text.isNotBlank() } * 30f
+        return w to (if (card.legend) max(h, rowsH.coerceAtMost(700f)) else h)
+    }
+
+    private fun insertCard(legend: Boolean) {
+        val card = currentCard(legend)
+        val (w, h) = cardSize(card)
+        onInsertCard(card, w, h)
+    }
+
+    /**
+     * Reopen a page's graph card here. The current session is set aside and comes back when you
+     * update the card ("Update graph") or close the window.
+     */
+    fun editCard(card: GraphCard, onApply: (GraphCard) -> Unit) {
+        if (!built) build()
+        if (cardEdit == null) stash = Stash(dim3, GraphCard.copyRows(rows2), GraphCard.copyRows(rows3), degrees,
+            graph.cx, graph.cy, graph.unitsAcross(), graph3.yaw, graph3.pitch, graph3.range)
+        cardEdit = onApply; cardLegend = card.legend
+        dim3 = card.dim3; degrees = card.degrees
+        angleBtn.text = if (degrees) "DEG" else "RAD"
+        val target = if (dim3) rows3 else rows2
+        target.clear(); target.addAll(GraphCard.copyRows(card.rows))
+        graph.setView(card.cx, card.cy, card.units)
+        graph3.setView(card.yaw, card.pitch, card.range)
+        insertBtn.text = "Update graph"
+        applyMode()
+        reloadRows()
+        open()
+    }
+
+    private fun applyCardEdit() {
+        val cb = cardEdit ?: return
+        val card = currentCard(cardLegend)
+        endCardEdit()
+        cb(card)
+        close()
+    }
+
+    private fun endCardEdit() {
+        val st = stash
+        cardEdit = null; stash = null
+        insertBtn.text = "Add to page"
+        if (st != null) {
+            dim3 = st.dim3; degrees = st.degrees
+            rows2.clear(); rows2.addAll(st.rows2); rows3.clear(); rows3.addAll(st.rows3)
+            angleBtn.text = if (degrees) "DEG" else "RAD"
+            graph.setView(st.cx, st.cy, st.units)
+            graph3.setView(st.yaw, st.pitch, st.range)
+        }
+        applyMode()
+        reloadRows()
     }
 
     // ================================================================= persistence
     private fun load() {
         degrees = prefs.getBoolean("deg", false)
-        rows.clear()
-        try {
-            val arr = JSONArray(prefs.getString("rows", "[]"))
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                rows.add(GraphRow(
-                    o.optString("t", ""), o.optInt("c", colors[i % colors.size]), o.optBoolean("h", false),
-                    o.optDouble("smin", -10.0), o.optDouble("smax", 10.0), o.optString("tmin", "0"), o.optString("tmax", "2pi"),
-                ))
-            }
-        } catch (_: Exception) { }
+        dim3 = prefs.getBoolean("dim3", false)
+        for ((key, list) in listOf("rows" to rows2, "rows3" to rows3)) {
+            list.clear()
+            try {
+                val arr = JSONArray(prefs.getString(key, "[]"))
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    list.add(GraphRow(
+                        o.optString("t", ""), o.optInt("c", colors[i % colors.size]), o.optBoolean("h", false),
+                        o.optDouble("smin", -10.0), o.optDouble("smax", 10.0), o.optString("tmin", "0"), o.optString("tmax", "2pi"),
+                        o.optString("umin", "0"), o.optString("umax", "2pi"), o.optString("vmin", "0"), o.optString("vmax", "pi"),
+                    ))
+                }
+            } catch (_: Exception) { }
+        }
         val hw = host.width.coerceAtLeast(dp(600))
         leftW = prefs.getInt("split", 0).takeIf { it > 0 } ?: (hw * 0.62f * 0.36f).toInt().coerceIn(dp(220), dp(380))
     }
@@ -715,11 +952,20 @@ class GrapherWindow(
     private fun save() {
         if (!built) return
         handler.removeCallbacks(saveTask)
-        val arr = JSONArray()
-        for (r in rows) arr.put(JSONObject().put("t", r.text).put("c", r.color).put("h", r.hidden)
-            .put("smin", r.sMin).put("smax", r.sMax).put("tmin", r.tMin).put("tmax", r.tMax))
-        val e = prefs.edit().putString("rows", arr.toString()).putBoolean("deg", degrees).putInt("split", leftW)
-        if (graph.ppu > 0) e.putString("view", JSONObject().put("cx", graph.cx).put("cy", graph.cy).put("units", graph.unitsAcross()).toString())
+        val e = prefs.edit().putInt("split", leftW)
+        // While a page's graph card is open for editing, the session underneath is what gets kept.
+        if (cardEdit == null) {
+            for ((key, list) in listOf("rows" to rows2, "rows3" to rows3)) {
+                val arr = JSONArray()
+                for (r in list) arr.put(JSONObject().put("t", r.text).put("c", r.color).put("h", r.hidden)
+                    .put("smin", r.sMin).put("smax", r.sMax).put("tmin", r.tMin).put("tmax", r.tMax)
+                    .put("umin", r.uMin).put("umax", r.uMax).put("vmin", r.vMin).put("vmax", r.vMax))
+                e.putString(key, arr.toString())
+            }
+            e.putBoolean("deg", degrees).putBoolean("dim3", dim3)
+            if (graph.ppu > 0) e.putString("view", JSONObject().put("cx", graph.cx).put("cy", graph.cy).put("units", graph.unitsAcross()).toString())
+            e.putString("view3d", JSONObject().put("yaw", graph3.yaw).put("pitch", graph3.pitch).put("range", graph3.range).toString())
+        }
         if (frame.parent != null && !maximized) {
             val lp = frame.layoutParams as FrameLayout.LayoutParams
             e.putInt("x", lp.leftMargin).putInt("y", lp.topMargin).putInt("w", frame.width.takeIf { it > 0 } ?: lp.width).putInt("h", frame.height.takeIf { it > 0 } ?: lp.height)

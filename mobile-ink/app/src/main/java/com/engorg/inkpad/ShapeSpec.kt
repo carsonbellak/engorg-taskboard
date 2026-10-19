@@ -16,10 +16,11 @@ import kotlin.math.sin
  * SOLID = a 3D solid ([ShapeSpec.solid]) that can be turned in 3D, its hidden edges dashed.
  * BOX / CYLINDER / CONE / SPHERE / PYRAMID are v1.5.5's fixed-angle solids: only read from old
  * notebooks, where the loader turns them into SOLIDs ([ShapeSpec.legacySolid]).
+ * GRAPH = a live graph card from the grapher ([ShapeSpec.graph]) filling the box between its two verts.
  */
 enum class ShapeType {
     LINE, ARROW, RECT, ELLIPSE, TRIANGLE, AXES2D_1Q, AXES2D_2Q, AXES2D, AXES3D, AXES3D_8, TABLE,
-    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID;
+    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID, GRAPH;
 
     /** Verts a saved shape must have (a SOLID's one is its center; a legacy box had a depth handle). */
     val vertCount: Int get() = when (this) { SOLID -> 1; TRIANGLE, BOX -> 3; else -> 2 }
@@ -50,11 +51,14 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     var rot = 0f
     val pivot = PointF()
     var solid: Solid? = null
+    /** A GRAPH's card. Immutable, so clones share it (and its computed geometry). */
+    var graph: GraphCard? = null
 
     fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }), dashed).also {
         it.hashed = hashed; it.rows = rows; it.cols = cols; it.border = border
         it.rot = rot; it.pivot.set(pivot.x, pivot.y)
         it.solid = solid?.copy()
+        it.graph = graph
     }
 
     /**
@@ -65,7 +69,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
 
     /** The draggable handle points, on the page (rotated with the shape). */
     val handles: List<PointF> get() = when {
-        solid != null -> emptyList()
+        solid != null || type == ShapeType.GRAPH -> emptyList()
         rot == 0f -> verts
         else -> verts.map { rotated(it) }
     }
@@ -138,6 +142,13 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
         ShapeType.AXES3D -> axes3d(verts[0], verts[1], both = false, ticks = hashed)
         ShapeType.AXES3D_8 -> axes3d(verts[0], verts[1], both = true, ticks = hashed)
         ShapeType.TABLE -> table(verts[0], verts[1], rows.coerceAtLeast(1), cols.coerceAtLeast(1), border)
+        // A graph card is drawn by GraphCardRenderer; its frame is what selection, the lasso and bounds use.
+        ShapeType.GRAPH -> {
+            val a = verts[0]; val b = verts[1]
+            val l = min(a.x, b.x); val r = max(a.x, b.x); val t = min(a.y, b.y); val bt = max(a.y, b.y)
+            listOf(Part(seg(PointF(l, t), PointF(r, t)).dropLast(1) + seg(PointF(r, t), PointF(r, bt)).dropLast(1) +
+                seg(PointF(r, bt), PointF(l, bt)).dropLast(1) + seg(PointF(l, bt), PointF(l, t))))
+        }
         // A solid always carries [solid]; legacy types are converted as they load.
         ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> emptyList()
     }
@@ -154,7 +165,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
                 ShapeType.AXES2D_1Q -> arrayListOf(PointF(cx - s, cy + s), PointF(cx + s, cy - s))
                 ShapeType.AXES3D -> arrayListOf(PointF(cx, cy + s * 0.55f), PointF(cx + s * 0.75f, cy - s * 0.75f))
                 ShapeType.AXES3D_8 -> arrayListOf(PointF(cx, cy), PointF(cx + s * 0.6f, cy - s * 0.6f))
-                ShapeType.TABLE -> arrayListOf(PointF(cx - s, cy - s * 0.75f), PointF(cx + s, cy + s * 0.75f))
+                ShapeType.TABLE, ShapeType.GRAPH -> arrayListOf(PointF(cx - s, cy - s * 0.75f), PointF(cx + s, cy + s * 0.75f))
                 ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID ->
                     return solidIn(legacyParams(type) ?: SolidParams.box(), cx - s, cy - s, cx + s, cy + s)
             }
