@@ -349,15 +349,16 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     private fun buildShapeRec(spec: ShapeSpec, color: Int, width: Float, hl: Boolean): FinishedStrokesView.Rec {
         val parts = spec.parts()
-        val paths = parts.filter { !it.fine }.map { FinishedStrokesView.buildStraightPath(it.pts) }
+        val paths = parts.filter { !it.fine && !it.hidden }.map { FinishedStrokesView.buildStraightPath(it.pts) }
         val fine = parts.filter { it.fine }.map { FinishedStrokesView.buildStraightPath(it.pts) }
+        val hidden = parts.filter { it.hidden }.map { FinishedStrokesView.buildStraightPath(it.pts) }
         val pts = ArrayList<PointF>(); parts.forEach { pts.addAll(it.pts) }
-        return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec, Brush.PEN, fine)
+        return FinishedStrokesView.Rec(paths, pts, color, width, hl, spec, Brush.PEN, fine, hidden)
     }
 
     /** [base] rebuilt in [color] (geometry reused — recs are immutable). */
     private fun recolored(base: FinishedStrokesView.Rec, color: Int): FinishedStrokesView.Rec =
-        FinishedStrokesView.Rec(base.paths, base.points, color, base.widthPx, base.highlighter, base.shape, base.brush, base.fine)
+        FinishedStrokesView.Rec(base.paths, base.points, color, base.widthPx, base.highlighter, base.shape, base.brush, base.fine, base.hidden)
 
     /** Convert the captured screen samples to page-local points on the page the stroke started on. */
     private fun samplesToPage(): Pair<Int, ArrayList<PointF>>? {
@@ -410,6 +411,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             // Partial-quadrant axes fit the box you drew: origin bottom-left (1Q) or mid-left (2Q).
             ShapeType.AXES2D_1Q -> arrayListOf(PointF(minX, maxY), PointF(maxX, minY))
             ShapeType.AXES2D_2Q -> arrayListOf(PointF(minX, (minY + maxY) / 2f), PointF(maxX, minY))
+            // 3D solids fill the box you drew (a box's depth runs to its top-right corner).
+            ShapeType.BOX -> ShapeSpec.boxVerts(minX, minY, maxX, maxY)
+            ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
         }
         val spec = ShapeSpec(type, verts, host.pendingShapeDashed).apply {
             hashed = host.pendingShapeHashed
@@ -1187,7 +1191,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     val dashed = o.optBoolean("d", false)
                     val va = o.getJSONArray("v"); val verts = ArrayList<PointF>()
                     for (j in 0 until va.length()) { val p = va.getJSONArray(j); verts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
-                    if (verts.size < 2 || (type == ShapeType.TRIANGLE && verts.size < 3)) continue
+                    if (verts.size < type.vertCount) continue
                     val spec = ShapeSpec(type, verts, dashed).apply {
                         hashed = !o.optBoolean("nh", false)
                         rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)

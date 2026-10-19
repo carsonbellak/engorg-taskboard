@@ -473,7 +473,12 @@ class InkActivity : ComponentActivity() {
                 pathEffect = android.graphics.DashPathEffect(floatArrayOf(px * 0.11f, px * 0.08f), 0f)
             } else strokeCap = android.graphics.Paint.Cap.ROUND
         }
-        for (poly in spec.polylines()) c.drawPath(FinishedStrokesView.buildStraightPath(poly), paint)
+        // A solid's hidden edges preview dashed even when the outline is solid, as they'll draw.
+        val hiddenPaint = android.graphics.Paint(paint).apply {
+            strokeCap = android.graphics.Paint.Cap.BUTT
+            pathEffect = android.graphics.DashPathEffect(floatArrayOf(px * 0.08f, px * 0.06f), 0f)
+        }
+        for (part in spec.parts()) c.drawPath(FinishedStrokesView.buildStraightPath(part.pts), if (part.hidden) hiddenPaint else paint)
         return bmp
     }
 
@@ -621,6 +626,7 @@ class InkActivity : ComponentActivity() {
             ShapeType.LINE, ShapeType.ARROW, ShapeType.RECT, ShapeType.ELLIPSE, ShapeType.TRIANGLE,
             ShapeType.AXES2D_1Q, ShapeType.AXES2D_2Q, ShapeType.AXES2D, ShapeType.AXES3D, ShapeType.AXES3D_8,
         )
+        val solids = listOf(ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID)
         val col = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
@@ -665,7 +671,7 @@ class InkActivity : ComponentActivity() {
             addView(hashBox, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(10) })
         })
 
-        for (type in types) {
+        fun addButtons(into: GridLayout, list: List<ShapeType>) = list.forEach { type ->
             val btn = ImageButton(this).apply {
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 background = pill(light); stateListAnimator = null
@@ -674,9 +680,19 @@ class InkActivity : ComponentActivity() {
                 setOnClickListener { popup.dismiss(); armShape(type) }
             }
             shapeButtons[type] = btn
-            grid.addView(btn)
+            into.addView(btn)
         }
+        addButtons(grid, types)
         col.addView(grid)
+        // 3D solids — their own row, so they read as a family (hidden edges preview dashed).
+        col.addView(TextView(this).apply {
+            text = "3D solids"; textSize = 12f
+            setTextColor(Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            setPadding(dp(8), dp(8), 0, dp(2))
+        })
+        val solidGrid = GridLayout(this).apply { columnCount = 5 }
+        addButtons(solidGrid, solids)
+        col.addView(solidGrid)
         refreshDash()
         popup.showAsDropDown(anchor, 0, dp(6))
     }
@@ -716,6 +732,8 @@ class InkActivity : ComponentActivity() {
         ShapeType.ELLIPSE -> "ellipse"; ShapeType.TRIANGLE -> "triangle"
         ShapeType.AXES2D_1Q -> "1-quadrant axis"; ShapeType.AXES2D_2Q -> "2-quadrant axis"; ShapeType.AXES2D -> "4-quadrant axis"
         ShapeType.AXES3D -> "3D axis"; ShapeType.AXES3D_8 -> "8-octant 3D axis"; ShapeType.TABLE -> "table"
+        ShapeType.BOX -> "box"; ShapeType.CYLINDER -> "cylinder"; ShapeType.CONE -> "cone"
+        ShapeType.SPHERE -> "sphere"; ShapeType.PYRAMID -> "pyramid"
     }
 
     /**

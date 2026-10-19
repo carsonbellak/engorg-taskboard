@@ -18,6 +18,13 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.5': {
+      title: "What's new",
+      intro: 'EngInk on the tablet can now draw 3D solids.',
+      slides: [
+        { emoji: '🧊', title: '3D solids', body: 'The shapes menu in EngInk has a new 3D solids row: box, cylinder, cone, sphere and pyramid. Pick one and draw roughly where it should go. Edges you couldn’t see on a real solid are drawn dashed. On a box, drag the handle at its back corner to change its depth and angle.' },
+      ],
+    },
     '1.5.1': {
       title: "What's new",
       intro: 'Post notes straight from your iPhone home screen.',

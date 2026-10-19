@@ -40,6 +40,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         val shape: ShapeSpec?,
         val brush: Brush = Brush.PEN, // ink style (freehand only; shapes always draw pen-style)
         val fine: List<Path> = emptyList(), // shape detail drawn thinner than the outline (axis tick marks)
+        val hidden: List<Path> = emptyList(), // a 3D solid's back edges, always drawn dashed
     )
 
     class Page(val recs: ArrayList<Rec> = ArrayList())
@@ -398,6 +399,12 @@ class FinishedStrokesView(context: Context) : View(context) {
                     strokePaint.strokeCap = Paint.Cap.ROUND
                 }
                 for (p in rec.paths) canvas.drawPath(p, strokePaint)
+                if (rec.hidden.isNotEmpty()) {
+                    // Hidden edges: dashed whatever the outline style, like a drafting hidden line.
+                    strokePaint.pathEffect = dashEffect(rec.widthPx)
+                    strokePaint.strokeCap = Paint.Cap.BUTT
+                    for (p in rec.hidden) canvas.drawPath(p, strokePaint)
+                }
                 strokePaint.pathEffect = null   // never leak the dash onto the next rec / freehand ink
                 if (rec.fine.isNotEmpty()) {
                     // Tick marks: solid and about half the outline weight.

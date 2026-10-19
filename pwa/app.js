@@ -624,6 +624,16 @@ function showLoginError(msg) {
 }
 
 // ===================== FIRESTORE LISTENERS =====================
+// Deep link from the iPhone Due Today widget: ?note=<id> opens that note once tasks load.
+let _pendingNoteId = new URLSearchParams(location.search).get('note');
+function openPendingNote() {
+  if (!_pendingNoteId || !data.tasks.some(t => t.id === _pendingNoteId)) return;
+  const id = _pendingNoteId;
+  _pendingNoteId = null;
+  history.replaceState(null, '', location.pathname);
+  setTimeout(() => showNoteDetail(id), 0);
+}
+
 function setupListeners(uid) {
   removeListeners();
   const base = db.collection('users').doc(uid).collection('data');
@@ -644,6 +654,7 @@ function setupListeners(uid) {
       const items = d[m.key];
       if (items && Array.isArray(items)) data[m.prop] = items;
       scheduleRender();
+      if (m.doc === 'tasks') openPendingNote();
     });
     listeners.push(unsub);
   }
@@ -3259,24 +3270,50 @@ function psetWidget() {
       <li>Long-press your home screen &rarr; <b>+</b> &rarr; <b>Scriptable</b> &rarr; add a medium or large widget. Long-press it &rarr; <b>Edit Widget</b> &rarr; Script: <b>Quick Note</b>. Optional Parameter: <b>yellow</b>, <b>green</b>, <b>blue</b>, <b>red</b>, <b>purple</b> or <b>orange</b>.</li>
       <li>Tap the sticky note: it runs <b>New Note</b>, and you&rsquo;re back on the home screen once it posts.</li>
     </ol>
-    <div class="pset-code" id="pset-widget-code" role="button" tabindex="0" aria-label="Copy the Quick Note script">
-      <div class="pset-code-head"><span>quick-note.js</span><span class="pset-code-hint" id="pset-widget-code-hint">Tap to copy</span></div>
-      <pre class="pset-code-body" id="pset-widget-code-body">Loading script…</pre>
-    </div>
+    ${scriptCodeBox('quick-note.js', 'Quick Note')}
     <button class="btn-primary-full" id="pset-widget-token" style="margin-top:12px">Copy widget token</button>
     <p class="pset-hint" style="margin-top:8px">The token is private: anyone with it can add notes to your board. Keep it to your own devices.</p>
+  </div>
+  <div class="pset-section">
+    <h3 class="pset-h3">Due Today wall</h3>
+    <p class="pset-hint">A corkboard of sticky notes for what&rsquo;s due today. Once today&rsquo;s are all done, it switches to tomorrow&rsquo;s. Tap a note to open it. Notes need a due date to show up.</p>
+    <ol class="pset-wp-steps">
+      <li>Tap the code box below to copy it. In Scriptable tap <b>+</b>, paste, and name it <b>Due Today</b>.</li>
+      <li>Tap <b>Copy calendar link</b>, then run <b>Due Today</b> once in Scriptable. It picks the link up from your clipboard; tap <b>Connect</b>.</li>
+      <li>Long-press your home screen &rarr; <b>+</b> &rarr; <b>Scriptable</b> &rarr; add a <b>large</b> (6 notes) or <b>medium</b> (3 notes) widget. Long-press it &rarr; <b>Edit Widget</b> &rarr; Script: <b>Due Today</b>.</li>
+    </ol>
+    ${scriptCodeBox('due-today.js', 'Due Today')}
+    <button class="btn-primary-full" id="pset-due-token" style="margin-top:12px">Copy calendar link</button>
+    <p class="pset-hint" style="margin-top:8px">Opening a note from the widget goes through Safari, so sign in there once.</p>
   </div>`;
 }
 
-let _scriptableSrc = null;
-async function loadScriptableSrc() {
-  if (_scriptableSrc) return _scriptableSrc;
-  const r = await fetch('/scriptable/quick-note.js', { cache: 'no-cache' });
+function scriptCodeBox(file, label) {
+  return `<div class="pset-code" data-script="${file}" role="button" tabindex="0" aria-label="Copy the ${label} script">
+      <div class="pset-code-head"><span>${file}</span><span class="pset-code-hint">Tap to copy</span></div>
+      <pre class="pset-code-body">Loading script…</pre>
+    </div>`;
+}
+
+const _scriptableSrc = {};
+async function loadScriptableSrc(file) {
+  if (_scriptableSrc[file]) return _scriptableSrc[file];
+  const r = await fetch('/scriptable/' + file, { cache: 'no-cache' });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const t = await r.text();
   // The hosting catch-all rewrite answers a missing file with index.html — don't show that.
   if (!t.includes('icon-glyph')) throw new Error('not deployed');
-  return (_scriptableSrc = t);
+  return (_scriptableSrc[file] = t);
+}
+
+// Same calendar token the subscribed calendar and lock-screen wallpaper use.
+async function getCalendarFeedLink() {
+  const idToken = await auth.currentUser.getIdToken();
+  const r = await fetch('https://generatecalendartoken-sf7sdunyuq-uc.a.run.app', { headers: { Authorization: `Bearer ${idToken}` } });
+  if (!r.ok) throw new Error('token request failed');
+  const { token } = await r.json();
+  if (!token) throw new Error('no token');
+  return `https://calendarfeed-sf7sdunyuq-uc.a.run.app?token=${token}`;
 }
 
 // iOS only allows clipboard writes inside the tap itself, so async content goes in as a
@@ -3453,17 +3490,25 @@ function bindPsetEvents() {
     if (!auth.currentUser) { wTok.textContent = 'Sign in first'; return; }
     copyAsync(wTok, 'Copy widget token', getApiToken);
   });
-  const wCode = body.querySelector('#pset-widget-code');
-  if (wCode) {
-    const codeBody = document.getElementById('pset-widget-code-body');
-    const hint = document.getElementById('pset-widget-code-hint');
-    loadScriptableSrc()
+  const dueTok = body.querySelector('#pset-due-token');
+  if (dueTok) dueTok.addEventListener('click', () => {
+    if (!auth.currentUser) { dueTok.textContent = 'Sign in first'; return; }
+    copyAsync(dueTok, 'Copy calendar link', getCalendarFeedLink);
+  });
+
+  // Scriptable code boxes: load each script, then tap the box to copy it.
+  body.querySelectorAll('.pset-code[data-script]').forEach(box => {
+    const file = box.dataset.script;
+    const codeBody = box.querySelector('.pset-code-body');
+    const hint = box.querySelector('.pset-code-hint');
+    loadScriptableSrc(file)
       .then(t => { codeBody.textContent = t; })
       .catch(() => { codeBody.textContent = 'Couldn’t load the script. Check your connection and reopen this tab.'; });
     // Text is already loaded, so the copy runs inside the tap (iOS requires that).
-    wCode.addEventListener('click', async () => {
-      if (!_scriptableSrc) return;
-      try { await navigator.clipboard.writeText(_scriptableSrc); }
+    box.addEventListener('click', async () => {
+      const src = _scriptableSrc[file];
+      if (!src) return;
+      try { await navigator.clipboard.writeText(src); }
       catch (e) {
         const sel = window.getSelection(), range = document.createRange();
         range.selectNodeContents(codeBody); sel.removeAllRanges(); sel.addRange(range);
@@ -3471,10 +3516,10 @@ function bindPsetEvents() {
         sel.removeAllRanges();
       }
       hint.textContent = 'Copied!';
-      wCode.classList.add('copied');
-      setTimeout(() => { hint.textContent = 'Tap to copy'; wCode.classList.remove('copied'); }, 1800);
+      box.classList.add('copied');
+      setTimeout(() => { hint.textContent = 'Tap to copy'; box.classList.remove('copied'); }, 1800);
     });
-  }
+  });
 
   // Account
   const signout = body.querySelector('#pset-signout');
