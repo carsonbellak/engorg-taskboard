@@ -80,9 +80,10 @@ const enginkMirror = (() => {
       case 'client':
         if (msg.connected) {
           if (!model.connected.some(c => c.device === msg.device)) model.connected.push({ device: msg.device, version: msg.version || '' });
+          if (!active) showConnectCard(msg.device);
         } else {
           model.connected = model.connected.filter(c => c.device !== msg.device);
-          if (!model.connected.length) { model.notebook = null; model.pages.clear(); model.wet = null; model.view = null; }
+          if (!model.connected.length) { model.notebook = null; model.pages.clear(); model.wet = null; model.view = null; hideConnectCard(); }
         }
         refreshStatus();
         requestRender();
@@ -267,6 +268,50 @@ const enginkMirror = (() => {
     setTimeout(() => window.print(), 60);
   }
 
+  // ---- "tablet connected" card (bottom right, like the Windows-theme popup) ----
+  let card = null, cardHideT = null;
+  function showConnectCard(device) {
+    if (!card || !document.body.contains(card)) {
+      card = document.createElement('div');
+      card.className = 'engink-connect-card';
+      card.setAttribute('role', 'status');
+      card.innerHTML = `
+        <div class="engink-connect-head"><span class="engink-connect-icon">🖋️</span><span class="engink-connect-title">EngInk is mirroring</span>
+          <button class="engink-connect-x" data-act="dismiss" title="Dismiss">×</button></div>
+        <div class="engink-connect-body"></div>
+        <div class="engink-connect-actions">
+          <button class="engink-connect-btn primary" data-act="open">Open mirror</button>
+          <button class="engink-connect-btn" data-act="dismiss">Dismiss</button>
+        </div>`;
+      card.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-act]'); if (!b) return;
+        hideConnectCard();
+        if (b.dataset.act === 'open' && typeof window.openEngineeringUtility === 'function') window.openEngineeringUtility('engink');
+      });
+      // Hovering keeps it up; leaving restarts the countdown.
+      card.addEventListener('mouseenter', () => clearTimeout(cardHideT));
+      card.addEventListener('mouseleave', () => { clearTimeout(cardHideT); cardHideT = setTimeout(hideConnectCard, 8000); });
+      document.body.appendChild(card);
+    }
+    card.querySelector('.engink-connect-body').innerHTML = `<b>${escapeHtml(device || 'Your tablet')}</b> connected. Open the mirror to watch your notebook live.`;
+    requestAnimationFrame(() => card.classList.add('show'));
+    clearTimeout(cardHideT);
+    cardHideT = setTimeout(hideConnectCard, 15000);
+  }
+  function hideConnectCard() {
+    clearTimeout(cardHideT);
+    if (card) card.classList.remove('show');
+  }
+
+  // Subscribe once to the main-process stream (from startup via listen(), or when the utility mounts),
+  // so the model is already current when the mirror opens.
+  function subscribe() {
+    if (subscribed || !(window.api && window.api.engink)) return;
+    window.api.engink.onMessage(handle);
+    window.api.engink.onStatus((s) => { model.server = { running: !!s.running, host: s.host || '', port: s.port || 0, code: s.code || '' }; model.connected = s.clients || []; refreshStatus(); });
+    subscribed = true;
+  }
+
   // ---- build DOM ----
   function build() {
     root.innerHTML = `
@@ -331,14 +376,13 @@ const enginkMirror = (() => {
     mount(el) {
       root = el;
       if (!built) build();
-      if (!subscribed) {
-        window.api.engink.onMessage(handle);
-        window.api.engink.onStatus((s) => { model.server = { running: !!s.running, host: s.host || '', port: s.port || 0, code: s.code || '' }; model.connected = s.clients || []; refreshStatus(); });
-        subscribed = true;
-      }
+      subscribe();
     },
+    /** Start following the tablet stream at app startup (the server itself auto-starts in main). */
+    listen() { subscribe(); },
     async activate() {
       active = true;
+      hideConnectCard();
       // Start (idempotent) so pairing info is ready the moment the tab opens.
       try {
         const s = await window.api.engink.start();

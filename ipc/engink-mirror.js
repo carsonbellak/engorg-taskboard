@@ -97,6 +97,8 @@ function start() {
         try { ws.send(JSON.stringify({ t: 'welcome' })); } catch (_) {}
         send('engink:message', { t: 'client', connected: true, device: info.device, version: info.version });
         send('engink:status', statusObject());
+        // The renderer pops a "tablet connected" card; flash the taskbar so it's noticed from the background.
+        try { const w = getWin(); if (w && !w.isDestroyed() && !w.isFocused()) w.flashFrame(true); } catch (_) {}
         return;
       }
 
@@ -150,6 +152,9 @@ function start() {
 
 module.exports = function registerEnginkMirror(getMainWindow) {
   getWin = getMainWindow;
+  // Listen from launch, so starting a mirror on the tablet finds this PC without first opening
+  // Engineering > EngInk here. Delayed a moment so it never competes with window startup.
+  setTimeout(() => { try { start(); } catch (_) { /* port busy etc. — the utility can retry */ } }, 2000);
   ipcMain.handle('engink:start', () => { try { return start(); } catch (e) { return { running: false, error: String(e && e.message || e) }; } });
   ipcMain.handle('engink:stop', () => { stop(); return { running: false }; });
   ipcMain.handle('engink:status', () => statusObject());

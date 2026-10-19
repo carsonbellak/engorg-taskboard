@@ -13268,3 +13268,29 @@ embed.eco-media-content { object-fit: fill; }
 .os-theme-progress-label { margin-top: 7px; font-size: 11.5px; color: var(--text-muted, #94A3B8); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .os-theme-progress.error .os-theme-progress-fill { background: var(--danger, #EF4444); }
 .os-theme-progress.error .os-theme-progress-label { color: var(--danger, #EF4444); white-space: normal; }
+
+/* EngInk mirror: "tablet connected" card, bottom right (same look as the Windows-theme popup). */
+.engink-connect-card {
+  position: fixed; right: 20px; bottom: 20px; z-index: 2400; width: 300px;
+  padding: 12px 14px; border-radius: 12px;
+  background: var(--bg-card, #1E293B); color: var(--text-primary, #F1F5F9);
+  border: 1px solid var(--border-color, #334155);
+  box-shadow: 0 10px 30px rgba(0,0,0,.28);
+  opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity .2s, transform .2s;
+}
+.engink-connect-card.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.engink-connect-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.engink-connect-icon { font-size: 15px; }
+.engink-connect-title { flex: 1; font-size: 13px; font-weight: 700; }
+.engink-connect-x { background: none; border: none; color: var(--text-muted, #94A3B8); font-size: 17px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.engink-connect-x:hover { color: var(--text-primary, #F1F5F9); }
+.engink-connect-body { font-size: 12px; color: var(--text-muted, #94A3B8); line-height: 1.4; }
+.engink-connect-body b { color: var(--text-primary, #F1F5F9); font-weight: 600; }
+.engink-connect-actions { display: flex; gap: 8px; margin-top: 10px; }
+.engink-connect-btn {
+  flex: 1; padding: 6px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: var(--bg-hover, #334155); color: var(--text-primary, #F1F5F9); border: 1px solid transparent;
+}
+.engink-connect-btn.primary { background: var(--accent, #3B82F6); color: #fff; }
+.engink-connect-btn:hover { filter: brightness(1.08); }

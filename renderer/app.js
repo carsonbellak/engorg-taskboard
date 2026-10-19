@@ -1834,6 +1834,9 @@
     // Resume tracking any print left in-progress (asks success/fail when it finishes).
     if (window.printTracker && !EMB) printTracker.init();
 
+    // EngInk mirror: listen from startup so a tablet that starts mirroring pops a card here.
+    if (typeof enginkMirror !== 'undefined' && !EMB) enginkMirror.listen();
+
     // Restore last view (handle legacy 'schedule' -> 'calendar', and remove 'tasks')
     let savedView = dataManager.settings.activeView;
     if (savedView === 'schedule') savedView = 'calendar';
