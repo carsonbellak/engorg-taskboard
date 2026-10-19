@@ -101,17 +101,26 @@ async function ensureToken() {
 
 // ===================== WIDGET =====================
 
-function buildWidget(state, colorName) {
+function widgetColors(colorName) {
   const pal = STICKY[colorName];
-  const bg = Color.dynamic(new Color(pal.light[0]), new Color(pal.dark[0]));
-  const edge = Color.dynamic(new Color(pal.light[1]), new Color(pal.dark[1]));
-  const ink = Color.dynamic(new Color('#1E293B'), new Color('#E2E8F0'));
-  const inkSoft = Color.dynamic(new Color('#1E293B', 0.65), new Color('#E2E8F0', 0.65));
-  const chip = Color.dynamic(new Color('#000000', 0.08), new Color('#FFFFFF', 0.08));
+  const dyn = (l, d, a) => Color.dynamic(new Color(l, a), new Color(d, a));
+  return {
+    bg: dyn(pal.light[0], pal.dark[0]),
+    edge: dyn(pal.light[1], pal.dark[1]),
+    ink: dyn('#1E293B', '#E2E8F0'),
+    inkSoft: dyn('#1E293B', '#E2E8F0', 0.6),
+    chip: Color.dynamic(new Color('#000000', 0.08), new Color('#FFFFFF', 0.08)),
+    chipOn: Color.dynamic(new Color('#FFFFFF', 0.5), new Color('#FFFFFF', 0.14)),
+    rule: Color.dynamic(new Color('#000000', 0.1), new Color('#FFFFFF', 0.1)),
+  };
+}
 
+function buildWidget(state, colorName) {
+  const C = widgetColors(colorName);
   const w = new ListWidget();
-  w.backgroundColor = bg;
-  w.url = `scriptable:///run/${encodeURIComponent(Script.name())}?color=${colorName}`;
+  w.backgroundColor = C.bg;
+  const base = `scriptable:///run/${encodeURIComponent(Script.name())}?color=${colorName}`;
+  w.url = base;
 
   const family = config.widgetFamily || 'small';
   if (family.startsWith('accessory')) {
@@ -119,75 +128,217 @@ function buildWidget(state, colorName) {
     t.font = Font.boldSystemFont(14);
     return w;
   }
-  const big = family !== 'small';
+  if (family === 'small') return buildSmallWidget(w, state, C);
+  return buildFormWidget(w, state, C, base, family === 'large' || family === 'extraLarge');
+}
+
+// Small widgets allow a single tap target, so they stay a compact "tap to write" note.
+function buildSmallWidget(w, state, C) {
   w.setPadding(14, 14, 12, 14);
 
-  // Top row: project badge (.note-project-badge) + pencil
   const top = w.addStack();
   top.layoutHorizontally();
   top.centerAlignContent();
   const badge = top.addStack();
-  badge.backgroundColor = chip;
+  badge.backgroundColor = C.chip;
   badge.cornerRadius = 99;
   badge.setPadding(2, 7, 2, 7);
   const bt = badge.addText(state.lastProjectName || 'Task Board');
   bt.font = Font.boldSystemFont(10);
-  bt.textColor = ink;
+  bt.textColor = C.ink;
   bt.lineLimit = 1;
   top.addSpacer();
   const sym = SFSymbol.named('square.and.pencil');
   sym.applyFont(Font.boldSystemFont(13));
   const pen = top.addImage(sym.image);
   pen.imageSize = new Size(15, 15);
-  pen.tintColor = edge;
+  pen.tintColor = C.edge;
 
   w.addSpacer(8);
   const title = w.addText('New note');
-  title.font = Font.boldSystemFont(big ? 18 : 15);
-  title.textColor = ink;
+  title.font = Font.boldSystemFont(15);
+  title.textColor = C.ink;
   w.addSpacer(2);
   const hint = w.addText('Tap to jot it down…');
-  hint.font = Font.systemFont(big ? 13 : 12);
-  hint.textColor = inkSoft;
+  hint.font = Font.systemFont(12);
+  hint.textColor = C.inkSoft;
 
   w.addSpacer();
-
   if (state.last && state.last.title) {
-    const lastRow = w.addStack();
-    lastRow.layoutHorizontally();
-    const lt = lastRow.addText(`Last: ${state.last.title}`);
+    const lt = w.addText(`Last: ${state.last.title}`);
     lt.font = Font.systemFont(10);
-    lt.textColor = inkSoft;
+    lt.textColor = C.inkSoft;
     lt.lineLimit = 1;
-    if (big && state.last.at) {
-      lastRow.addSpacer(4);
-      const ld = lastRow.addDate(new Date(state.last.at));
-      ld.applyRelativeStyle();
-      ld.font = Font.systemFont(10);
-      ld.textColor = inkSoft;
-      lastRow.addSpacer();
-    }
     w.addSpacer(6);
   }
+  addBottomRow(w, state, C, null);
+  return w;
+}
 
-  // Bottom row (.note-bottom): priority dot + Post pill
+// Medium/large: draw the same sticky-note form the app opens. Widgets can't hold real
+// inputs, so each part is a tap target that opens the form with that choice made.
+function buildFormWidget(w, state, C, base, large) {
+  w.setPadding(14, 16, 12, 16);
+  const prio = PRIORITY_COLORS[state.lastPriority] ? state.lastPriority : 'Medium';
+  const innerW = widgetInnerWidth();
+
+  // Top row: project badge + NEW NOTE
+  const top = w.addStack();
+  top.layoutHorizontally();
+  top.centerAlignContent();
+  const badge = top.addStack();
+  badge.backgroundColor = C.chip;
+  badge.cornerRadius = 99;
+  badge.setPadding(3, 9, 3, 9);
+  const bt = badge.addText(`${state.lastProjectName || 'Project'} ▾`);
+  bt.font = Font.boldSystemFont(11);
+  bt.textColor = C.ink;
+  bt.lineLimit = 1;
+  badge.url = `${base}&focus=title`;
+  top.addSpacer();
+  const kick = top.addText('NEW NOTE');
+  kick.font = Font.boldSystemFont(9);
+  kick.textColor = C.inkSoft;
+
+  w.addSpacer(large ? 10 : 6);
+  const title = w.addText('What needs doing?');
+  title.font = Font.semiboldSystemFont(large ? 18 : 16);
+  title.textColor = C.inkSoft;
+  title.url = `${base}&focus=title`;
+
+  if (large) {
+    w.addSpacer(6);
+    const desc = w.addText('Description (optional)');
+    desc.font = Font.systemFont(14);
+    desc.textColor = C.inkSoft;
+    desc.url = `${base}&focus=desc`;
+    w.addSpacer(8);
+    const rule = w.addStack();
+    rule.backgroundColor = C.rule;
+    rule.size = new Size(innerW, 1);
+    w.addSpacer(4);
+    sectionLabel(w, 'PRIORITY', C);
+  } else {
+    w.addSpacer(8);
+  }
+
+  // Priority chips
+  const prow = w.addStack();
+  prow.layoutHorizontally();
+  prow.spacing = 6;
+  for (const p of ['High', 'Medium', 'Low']) {
+    widgetChip(prow, p, C, { on: p === prio, ring: PRIORITY_COLORS[p], dot: PRIORITY_COLORS[p],
+      url: `${base}&priority=${p}` });
+  }
+
+  if (large) {
+    const cats = state.categories || [];
+    if (cats.length) {
+      sectionLabel(w, 'CATEGORY', C);
+      // Widgets have no flex-wrap, so wrap the chips into rows by estimated width.
+      const rows = [[]];
+      let used = 0;
+      for (const c of cats) {
+        const cw = c.name.length * 7 + 20;
+        if (used && used + 6 + cw > innerW) {
+          if (rows.length === 3) break;
+          rows.push([]);
+          used = 0;
+        }
+        rows[rows.length - 1].push(c);
+        used += (used ? 6 : 0) + cw;
+      }
+      rows.forEach((row, i) => {
+        if (i) w.addSpacer(6);
+        const r = w.addStack();
+        r.layoutHorizontally();
+        r.spacing = 6;
+        row.forEach(c => widgetChip(r, c.name, C, { url: `${base}&category=${encodeURIComponent(c.id)}` }));
+      });
+    }
+
+    sectionLabel(w, 'DUE', C);
+    const due = w.addStack();
+    due.layoutHorizontally();
+    due.spacing = 8;
+    for (const [label, width] of [['Date', 118], ['Time', 84]]) {
+      const box = due.addStack();
+      box.backgroundColor = C.chip;
+      box.cornerRadius = 8;
+      box.size = new Size(width, 28);
+      box.setPadding(0, 10, 0, 10);
+      box.centerAlignContent();
+      const t = box.addText(label);
+      t.font = Font.systemFont(12);
+      t.textColor = C.inkSoft;
+      box.addSpacer();
+      box.url = `${base}&focus=due`;
+    }
+  }
+
+  w.addSpacer();
+  addBottomRow(w, state, C, `${base}&focus=title`);
+  return w;
+}
+
+function widgetInnerWidth() {
+  let screenW = 390;
+  try { const s = Device.screenSize(); screenW = Math.min(s.width, s.height); } catch (_) {}
+  // Medium/large widgets span the screen minus ~20pt insets each side, minus our 16pt padding.
+  return Math.max(260, Math.min(screenW - 40, 364) - 32);
+}
+
+function sectionLabel(w, text, C) {
+  w.addSpacer(10);
+  const t = w.addText(text);
+  t.font = Font.boldSystemFont(9);
+  t.textColor = C.inkSoft;
+  w.addSpacer(5);
+}
+
+function widgetChip(parent, text, C, opts) {
+  const s = parent.addStack();
+  s.layoutHorizontally();
+  s.centerAlignContent();
+  s.backgroundColor = opts.on ? C.chipOn : C.chip;
+  s.cornerRadius = 99;
+  s.setPadding(4, 10, 4, 10);
+  if (opts.on) {
+    s.borderColor = new Color(opts.ring || '#000000');
+    s.borderWidth = 2;
+  }
+  if (opts.dot) {
+    const d = s.addText('●');
+    d.font = Font.systemFont(8);
+    d.textColor = new Color(opts.dot);
+    s.addSpacer(5);
+  }
+  const t = s.addText(text);
+  t.font = Font.semiboldSystemFont(12);
+  t.textColor = C.ink;
+  t.lineLimit = 1;
+  if (opts.url) s.url = opts.url;
+  return s;
+}
+
+// Bottom row (.note-bottom): priority summary + Post pill
+function addBottomRow(w, state, C, url) {
+  const prio = PRIORITY_COLORS[state.lastPriority] ? state.lastPriority : 'Medium';
   const bottom = w.addStack();
   bottom.layoutHorizontally();
   bottom.centerAlignContent();
-  const prio = state.lastPriority || 'Medium';
   const pt = bottom.addText(`● ${prio}`);
   pt.font = Font.boldSystemFont(10);
-  pt.textColor = new Color(PRIORITY_COLORS[prio] || PRIORITY_COLORS.Medium);
+  pt.textColor = new Color(PRIORITY_COLORS[prio]);
   bottom.addSpacer();
   const post = bottom.addStack();
-  post.backgroundColor = edge;
+  post.backgroundColor = C.edge;
   post.cornerRadius = 99;
-  post.setPadding(3, 10, 3, 10);
-  const ptx = post.addText('＋ Post');
-  ptx.font = Font.boldSystemFont(11);
+  post.setPadding(4, 14, 4, 14);
+  const ptx = post.addText('Post');
+  ptx.font = Font.boldSystemFont(12);
   ptx.textColor = Color.white();
-
-  return w;
+  if (url) post.url = url;
 }
 
 // ===================== FORM (WebView sticky note) =====================
@@ -330,7 +481,7 @@ function buildHtml(data) {
   var PCOL = { High: '#EF4444', Medium: '#F97316', Low: '#22C55E' };
   var $ = function (id) { return document.getElementById(id); };
   var priority = PCOL[D.lastPriority] ? D.lastPriority : 'Medium';
-  var category = '';
+  var category = D.categories.some(function (c) { return c.id === D.category; }) ? D.category : '';
   var armed = null, queued = null, busy = false, toastTimer = null;
 
   // Scriptable bridge: the script calls window.__arm(completion) to wait for the next action.
@@ -477,13 +628,16 @@ function buildHtml(data) {
   renderPrio(); renderCats(); summary();
   autosize($('title')); autosize($('desc'));
   if (D.offline) toast('Offline: using your saved project list', true);
-  setTimeout(function () { $('title').focus(); }, 350);
+  // The widget part that was tapped decides where typing starts.
+  var focusId = D.focus === 'desc' ? 'desc' : D.focus === 'due' ? 'dueDate' : 'title';
+  setTimeout(function () { $(focusId).focus(); }, 350);
 })();
 </script>
 </body></html>`;
 }
 
-async function runForm(colorName) {
+// `pre` = choices made by tapping a part of the widget: { priority, category, focus }.
+async function runForm(colorName, pre = {}) {
   let token = await ensureToken();
   if (!token) return;
   const state = loadState();
@@ -519,7 +673,9 @@ async function runForm(colorName) {
     projects,
     categories: state.categories || [],
     lastProjectId: state.lastProjectId || null,
-    lastPriority: state.lastPriority || 'Medium',
+    lastPriority: PRIORITY_COLORS[pre.priority] ? pre.priority : (state.lastPriority || 'Medium'),
+    category: pre.category || '',
+    focus: pre.focus || 'title',
     offline: !online,
   }));
 
@@ -564,7 +720,8 @@ if (config.runsInWidget) {
 } else {
   const qp = args.queryParameters || {};
   try {
-    await runForm(pickColor(qp.color || args.widgetParameter));
+    await runForm(pickColor(qp.color || args.widgetParameter),
+      { priority: qp.priority, category: qp.category, focus: qp.focus });
   } catch (err) {
     console.error(err);
     await showAlert('Quick Note hit an error', String(err && err.message || err));
