@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.9': {
+      title: "What's new",
+      intro: 'The EngInk grapher now lives on your notebook page.',
+      slides: [
+        { emoji: '📈', title: 'Graphs on the page', body: 'Tap the graph button in EngInk to drop a graphing window onto the page. It stays put and moves with the page. Drag its toolbar to move it, the corner to resize it, and tap away to put it down. Tap it with a finger to edit it again. Add to page still drops a copy of the graph as lines.' },
+        { emoji: '∫', title: 'Type math like Desmos', body: 'Expressions build as you type: / makes a fraction, ^ an exponent, and typing sqrt, int or sum makes a root, integral or sum. Tap an integral’s top or bottom bound to fill it in. Space moves to the next box.' },
+        { emoji: '✨', title: 'Claude effort levels', body: 'The Claude panel shows step by step where to get and paste your API key. You can now choose how hard Claude thinks, from Low (quickest) to Max (most thorough).' },
+      ],
+    },
     '1.5.7': {
       title: "What's new",
       intro: 'EngInk can now graph in 3D, and Claude can give you feedback on your work.',

@@ -74,7 +74,6 @@ class InkActivity : ComponentActivity() {
     private var mirrorButton: ImageButton? = null
     private val toolButtons = HashMap<Tool, ImageButton>()
     private var graphButton: ImageButton? = null
-    private var grapher: GrapherWindow? = null
     private var claudeButton: ImageButton? = null
     private var claude: ClaudePanel? = null
     private lateinit var rootFrame: FrameLayout
@@ -126,7 +125,6 @@ class InkActivity : ComponentActivity() {
         override val pendingTableBorder get() = tableBorder
         override val pendingSolid get() = this@InkActivity.pendingSolid
         override fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit) = showSolidBuilder(params, "Apply", onApply)
-        override fun editGraph(card: GraphCard, onApply: (GraphCard) -> Unit) { grapherWindow().editCard(card, onApply); updateGraphButton() }
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
         override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
         override fun onShapeCommitted() { clearPendingShape(); this@InkActivity.tool = Tool.SELECT; updateTools() }
@@ -205,7 +203,6 @@ class InkActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        grapher?.dispose()
         claude?.dispose()
         MirrorManager.onState = null
         MirrorManager.bind(null)   // keep the socket alive but stop feeding a destroyed pane
@@ -634,7 +631,7 @@ class InkActivity : ComponentActivity() {
             addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
             addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
             addView(iconBtn(Icons.TABLE) { showTableMenu(it) }.also { tableButton = it })
-            addView(iconBtn(Icons.GRAPH) { toggleGrapher() }.also { graphButton = it })
+            addView(iconBtn(Icons.GRAPH) { spawnGraph() }.also { graphButton = it })
             addView(sep())
             addView(colorButton)
             addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
@@ -660,24 +657,13 @@ class InkActivity : ComponentActivity() {
     }
 
     /** Open / close the floating graphing calculator (functions left, graph right). */
-    private fun grapherWindow(): GrapherWindow = grapher ?: GrapherWindow(this, rootFrame,
-        onInsert = { ink, w, h -> addGraphToPage(ink, w, h) },
-        onInsertCard = { card, w, h -> addGraphCardToPage(card, w, h) },
-    ).also { grapher = it; it.onClosed = { updateGraphButton() } }
-
-    private fun toggleGrapher() {
-        grapherWindow().toggle()
-        updateGraphButton()
-    }
-
-    /** Drop a live graph card onto the focused pane's page, selected so it can be moved into place. */
-    private fun addGraphCardToPage(card: GraphCard, w: Float, h: Float) {
+    /** The graph button: drop a graphing window onto the focused page, open and ready to type. */
+    private fun spawnGraph() {
         val pane = focused ?: return
         clearPendingShape(); tool = Tool.SELECT
         panes.forEach { it.onToolChanged() }
         updateTools()
-        pane.insertGraphCard(card, w, h)
-        Toast.makeText(this, "Graph added — drag it into place", Toast.LENGTH_SHORT).show()
+        pane.spawnGraph()
     }
 
     /** Open / close the Claude feedback panel (scans the focused pane's page). */
@@ -690,13 +676,6 @@ class InkActivity : ComponentActivity() {
     private fun updateClaudeButton() {
         val b = claudeButton ?: return
         val on = claude?.isOpen == true
-        b.background = pill(if (on) accent else light)
-        b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
-    }
-
-    private fun updateGraphButton() {
-        val b = graphButton ?: return
-        val on = grapher?.isOpen == true
         b.background = pill(if (on) accent else light)
         b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
     }

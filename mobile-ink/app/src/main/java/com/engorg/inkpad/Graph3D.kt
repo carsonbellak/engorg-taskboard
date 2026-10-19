@@ -697,6 +697,8 @@ class Graph3DView(context: Context) : View(context) {
     var model: GraphModel? = null; private set
     var scene: Scene3? = null; private set
     var onViewChanged: (() -> Unit)? = null
+    var bgOverride: Int? = null
+    var inkOverride: Int? = null
     private val renderer = Render3D()
     private val exec = Executors.newSingleThreadExecutor()
     @Volatile private var gen = 0
@@ -731,10 +733,11 @@ class Graph3DView(context: Context) : View(context) {
     }
 
     override fun onDraw(c: Canvas) {
-        c.drawColor(AppTheme.surface)
+        val bg = bgOverride ?: AppTheme.surface
+        c.drawColor(bg)
         rect.set(0f, 0f, width.toFloat(), height.toFloat())
         // While a zoom re-samples, the previous geometry is drawn at the new scale (it fills in a moment later).
-        renderer.draw(c, scene, yaw, pitch, range, rect, Render3D.Style(AppTheme.surface, AppTheme.text, dens))
+        renderer.draw(c, scene, yaw, pitch, range, rect, Render3D.Style(bg, inkOverride ?: AppTheme.text, dens))
     }
 
     /** Ink strokes of the current view in a box at most [maxW]×[maxH] page units. */

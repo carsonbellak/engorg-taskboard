@@ -48,6 +48,21 @@ object ClaudeAuth {
     }
     fun setModel(ctx: Context, id: String) { prefs(ctx).edit().putString("model", id).apply() }
 
+    /** How hard Claude thinks before answering (the API's output_config.effort). */
+    data class Effort(val id: String, val label: String, val hint: String)
+    val EFFORTS = listOf(
+        Effort("low", "Low", "Quickest, for simple checks"),
+        Effort("medium", "Medium", "Balanced"),
+        Effort("high", "High", "Careful step-by-step checking"),
+        Effort("xhigh", "Extra high", "Slower, for tricky problems"),
+        Effort("max", "Max", "Slowest and most thorough"),
+    )
+    fun effort(ctx: Context): Effort {
+        val id = prefs(ctx).getString("effort", null)
+        return EFFORTS.firstOrNull { it.id == id } ?: EFFORTS[2]
+    }
+    fun setEffort(ctx: Context, id: String) { prefs(ctx).edit().putString("effort", id).apply() }
+
     fun connected(ctx: Context): Boolean = apiKey(ctx) != null
 
     private fun secretKey(): SecretKey {
@@ -149,7 +164,7 @@ object ClaudeApi {
          * [onText] gets the full reply text so far, as it grows. The turn joins [history] only once a
          * reply arrives, so a failed send leaves the conversation as it was.
          */
-        fun send(key: String, model: ClaudeAuth.Model, userContent: JSONArray, onText: (String) -> Unit, onDone: (Result) -> Unit) {
+        fun send(key: String, model: ClaudeAuth.Model, effort: String, userContent: JSONArray, onText: (String) -> Unit, onDone: (Result) -> Unit) {
             val userMsg = JSONObject().put("role", "user").put("content", userContent)
             val msgs = JSONArray()
             for (i in 0 until history.length()) msgs.put(history.get(i))
@@ -159,8 +174,7 @@ object ClaudeApi {
                 .put("max_tokens", 32000)
                 .put("stream", true)
                 .put("system", system)
-                // Checking someone's math is exactly where depth pays off, so run at high effort.
-                .put("output_config", JSONObject().put("effort", "high"))
+                .put("output_config", JSONObject().put("effort", effort))
                 .put("messages", msgs)
             val req = request("/v1/messages", key).header("content-type", "application/json")
             // Server-side fallback: if a safety classifier declines, the API re-runs the request on

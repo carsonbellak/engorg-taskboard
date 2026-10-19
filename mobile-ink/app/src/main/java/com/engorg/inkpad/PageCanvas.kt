@@ -72,8 +72,6 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit)
         /** Open the 3D solid builder on [params] and report the edited shape. */
         fun editSolid(params: SolidParams, onApply: (SolidParams) -> Unit)
-        /** Reopen a graph card in the grapher and report the updated card. */
-        fun editGraph(card: GraphCard, onApply: (GraphCard) -> Unit)
     }
 
     /**
@@ -231,6 +229,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     // ---------- open / focus ----------
     /** Point this pane at a notebook (null = the first/quick-notes notebook) and fit it to view. */
     fun open(notebookId: String?) {
+        closeGraph()
         if (::notebook.isInitialized) { syncLastPage(); flushSaves() }   // persist the outgoing notebook before switching
         notebook = (notebookId?.let { store.notebook(it) }) ?: store.notebooks.firstOrNull()
             ?: store.createNotebook("Quick notes", null, AppTheme.accent)
@@ -290,6 +289,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun applyTransform() {
         if (::notebook.isInitialized && finishedView.height > 0) notebook.lastPage = currentPage()
         finishedView.setTransform(scale, tx, ty); host.onPageChanged(this); mirror?.transformed(this)
+        graphPane?.reposition()
     }
 
     private fun clampTransform() {
@@ -519,6 +519,13 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 val idx = event.actionIndex
                 activePointerId = event.getPointerId(idx)
                 undoPushedThisGesture = false
+                // Touching the page outside an open graph window puts it away (a finger tap does only that).
+                if (graphPane != null) {
+                    closeGraph()
+                    if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER) { mode = Mode.NONE; tapDown = null; return true }
+                }
+                tapDown = if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER) PointF(event.getX(idx), event.getY(idx)) else null
+                tapDownAt = event.eventTime
                 // The floating Cut/Copy/Paste menu wins over every tool (a shape just drawn with the
                 // pen is selected too, so its menu must work without switching to the lasso).
                 finishedView.menuActionAt(event.getX(idx), event.getY(idx))?.let { a ->
@@ -599,6 +606,14 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val cancel = event.actionMasked == MotionEvent.ACTION_CANCEL
                 removeCallbacks(longPress); removeCallbacks(holdToStraight)
+                // A quick finger tap (no drag) on a graph opens it in place.
+                val td = tapDown; tapDown = null
+                if (!cancel && td != null && mode == Mode.PAN && event.eventTime - tapDownAt < 350 &&
+                    hypot(event.x - td.x, event.y - td.y) < dp(10)) {
+                    val h = hitTest(td.x, td.y)
+                    val g = if (h.onPage) finishedView.pages[h.page].recs.lastOrNull { it.shape?.type == ShapeType.GRAPH && recBounds(listOf(it))?.contains(h.x, h.y) == true } else null
+                    if (g != null) { mode = Mode.NONE; activePointerId = -1; openGraph(g, h.page); return true }
+                }
                 if (addArmed) { addArmed = false; if (!cancel) addPage() }
                 else when (mode) {
                     Mode.DRAW -> { if (!cancel) { if (host.pendingShape != null) commitPendingShape() else commitSamples() }; straightened = false; wetOverlay.clear(); samples.clear(); mirror?.wetCleared(this) }
@@ -676,7 +691,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.VIEW_TOP, FinishedStrokesView.MenuAction.VIEW_SIDE,
             FinishedStrokesView.MenuAction.SOLID_EDIT,
         ) else if (selectedGraph() != null) listOf(
-            FinishedStrokesView.MenuAction.GRAPH_EDIT, FinishedStrokesView.MenuAction.GRAPH_LEGEND,
+            FinishedStrokesView.MenuAction.GRAPH_EDIT,
         ) else emptyList()
         finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
     }
@@ -1028,9 +1043,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.VIEW_SIDE -> editSolid { it.solid!!.setView(Solid.sideView()) }
             FinishedStrokesView.MenuAction.GRAPH_EDIT -> {
                 val rec = selectedGraph() ?: return
-                host.editGraph(rec.shape!!.graph!!) { card -> if (selectedGraph() === rec) editGraphCard { it.graph = card } }
+                val page = selPage
+                clearSelection()
+                openGraph(rec, page)
             }
-            FinishedStrokesView.MenuAction.GRAPH_LEGEND -> editGraphCard { s -> s.graph?.let { g -> s.graph = g.withLegend(!g.legend) } }
             FinishedStrokesView.MenuAction.SOLID_EDIT -> {
                 val rec = selectedSolid() ?: return
                 host.editSolid(rec.shape!!.solid!!.params.copy()) { p ->
@@ -1068,6 +1084,102 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         spec.graph = card
         undoPushedThisGesture = false; pushUndo()
         placeAndSelect(page, listOf(buildShapeRec(spec, Color.GRAY, 1f, false)))
+    }
+
+    // ---------- graphs that live on the page ----------
+    private var graphPane: GraphPane? = null
+    private var graphRec: FinishedStrokesView.Rec? = null
+    private var graphPage = -1
+    private var graphUndoPushed = false
+    private var tapDown: PointF? = null
+    private var tapDownAt = 0L
+
+    /** The graph button: a new graph on the page in view, open and ready to type. */
+    fun spawnGraph() {
+        if (finishedView.pages.isEmpty()) return
+        closeGraph(); clearSelection()
+        val page = currentPage()
+        val w = 600f; val h = 330f
+        val pw = FinishedStrokesView.PAGE_W; val ph = FinishedStrokesView.PAGE_H
+        val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
+        val cx = ((vw / 2f - tx) / scale).coerceIn(w / 2f, pw - w / 2f)
+        val cy = ((vh / 2f - ty) / scale - finishedView.pageTop(page)).coerceIn(h / 2f + 50f, ph - h / 2f)
+        val spec = ShapeSpec(ShapeType.GRAPH, arrayListOf(PointF(cx - w / 2f, cy - h / 2f), PointF(cx + w / 2f, cy + h / 2f)))
+        spec.graph = GraphCard(false, listOf(GraphRow("", Color.rgb(0xC7, 0x44, 0x40))), false, 0.0, 0.0, 20.0,
+            Graph3DView.DEFAULT_YAW, Graph3DView.DEFAULT_PITCH, Graph3DView.DEFAULT_RANGE, true)
+        undoPushedThisGesture = false; pushUndo()
+        val rec = buildShapeRec(spec, Color.GRAY, 1f, false)
+        finishedView.pages[page].recs.add(rec)
+        finishedView.invalidate(); savePage(page)
+        mirror?.pageEdited(this, page)
+        graphUndoPushed = true
+        openGraph(rec, page)
+    }
+
+    private fun graphBox(rec: FinishedStrokesView.Rec): RectF? {
+        val s = rec.shape ?: return null
+        val a = s.verts[0]; val b = s.verts[1]
+        return RectF(min(a.x, b.x), min(a.y, b.y), max(a.x, b.x), max(a.y, b.y))
+    }
+
+    /** Open a page graph for editing right where it is. */
+    private fun openGraph(rec: FinishedStrokesView.Rec, page: Int) {
+        val card = rec.shape?.graph ?: return
+        val box = graphBox(rec) ?: return
+        closeGraph()
+        graphRec = rec; graphPage = page
+        val act = context as? android.app.Activity ?: return
+        val pc = finishedView.pageColor
+        val dark = (0.299 * Color.red(pc) + 0.587 * Color.green(pc) + 0.114 * Color.blue(pc)) / 255.0 < 0.5
+        val pane = GraphPane(act, this, object : GraphPane.Callbacks {
+            override fun screenRect(): RectF? {
+                val r = graphRec ?: return null
+                val b = graphBox(r) ?: return null
+                val top = finishedView.pageTop(graphPage)
+                return RectF(tx + scale * b.left, ty + scale * (top + b.top), tx + scale * b.right, ty + scale * (top + b.bottom))
+            }
+            override fun pageScale() = scale
+            override fun commit(card: GraphCard) = replaceGraph { it.graph = card }
+            override fun moveBy(dx: Float, dy: Float, done: Boolean) {
+                if (dx != 0f || dy != 0f) replaceGraph(save = false) { s ->
+                    val b = graphBox(graphRec!!)!!
+                    val ddx = dx.coerceIn(-b.left, FinishedStrokesView.PAGE_W - b.right)
+                    val ddy = dy.coerceIn(-b.top, FinishedStrokesView.PAGE_H - b.bottom)
+                    s.verts.forEach { v -> v.offset(ddx, ddy) }; s.pivot.offset(ddx, ddy)
+                }
+                if (done) { savePage(graphPage); mirror?.pageEdited(this@PageCanvas, graphPage) }
+            }
+            override fun resizeTo(w: Float, h: Float, done: Boolean) {
+                replaceGraph(save = done) { s ->
+                    val a = s.verts[0]; val b = s.verts[1]
+                    val l = min(a.x, b.x); val t = min(a.y, b.y)
+                    a.set(l, t); b.set(min(l + w, FinishedStrokesView.PAGE_W), min(t + h, FinishedStrokesView.PAGE_H))
+                }
+            }
+            override fun insertInk(ink: List<GraphInk>, w: Float, h: Float) = insertGraph(ink, w, h)
+            override fun closed() { graphPane = null; graphRec = null; graphPage = -1; graphUndoPushed = false; finishedView.invalidate() }
+        })
+        graphPane = pane
+        pane.open(card, box.width(), box.height(), dark)
+    }
+
+    /** Put the open graph away (saving it). */
+    fun closeGraph() { graphPane?.close() }
+
+    /** Rebuild the open graph's rec with a change to its shape (one undo step per editing session). */
+    private fun replaceGraph(save: Boolean = true, change: (ShapeSpec) -> Unit) {
+        val rec = graphRec ?: return
+        val page = graphPage
+        if (page < 0 || page >= finishedView.pages.size) return
+        val recs = finishedView.pages[page].recs
+        val i = recs.indexOf(rec)
+        if (i < 0) return
+        if (!graphUndoPushed) { undoPushedThisGesture = false; pushUndo(); graphUndoPushed = true }
+        val spec = rec.shape!!.clone(); change(spec)
+        val n = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
+        recs[i] = n; graphRec = n
+        finishedView.invalidate()
+        if (save) { savePage(page); mirror?.pageEdited(this, page) }
     }
 
     /** Change the lone selected solid in place (as one undo step), keeping its center. */
@@ -1203,6 +1315,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     private fun deleteSelection() {
         if (selRecs.isEmpty() || selPage < 0) return
+        if (graphRec != null && selRecs.contains(graphRec)) closeGraph()
         pushUndo()
         val page = selPage
         finishedView.pages[page].recs.removeAll(selRecs.toSet())
@@ -1237,8 +1350,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         clearSelection(); finishedView.invalidate(); saveAllPages()
         mirror?.paneOpened(this)
     }
-    fun undo() { if (undoStack.isEmpty()) return; redoStack.add(snapshot()); restore(undoStack.removeAt(undoStack.size - 1)) }
-    fun redo() { if (redoStack.isEmpty()) return; undoStack.add(snapshot()); restore(redoStack.removeAt(redoStack.size - 1)) }
+    fun undo() { closeGraph(); if (undoStack.isEmpty()) return; redoStack.add(snapshot()); restore(undoStack.removeAt(undoStack.size - 1)) }
+    fun redo() { closeGraph(); if (redoStack.isEmpty()) return; undoStack.add(snapshot()); restore(redoStack.removeAt(redoStack.size - 1)) }
 
     // ---------- persistence ----------
     // Page writes happen OFF the UI thread and coalesce. Serializing a whole page to JSON and
@@ -1296,6 +1409,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Block until every queued page write has hit disk (durability points: reload, pause, close). */
     fun flushSaves() {
+        graphPane?.commitNow()
         if (ioExecutor.isShutdown) return
         val latch = CountDownLatch(1)
         try { ioExecutor.execute { latch.countDown() } } catch (_: Exception) { return }
@@ -1303,7 +1417,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     /** Flush pending writes then stop the writer (call when the pane/activity goes away). */
-    fun dispose() { flushSaves(); ioExecutor.shutdown() }
+    fun dispose() { closeGraph(); flushSaves(); ioExecutor.shutdown() }
 
     private fun saveAllPages() {
         for (i in notebook.pageIds.indices) savePage(i)

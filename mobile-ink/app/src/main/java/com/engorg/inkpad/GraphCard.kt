@@ -92,7 +92,13 @@ object GraphCardRenderer {
     private val clipPath = Path()
 
     private class Theme(val bg: Int, val ink: Int)
-    private fun theme(dark: Boolean) = if (dark) Theme(Color.rgb(0x1F, 0x23, 0x2B), Color.rgb(0xE5, 0xE7, 0xEB)) else Theme(Color.WHITE, Color.rgb(0x1F, 0x29, 0x37))
+    private fun theme(dark: Boolean) = cardColors(dark).let { Theme(it.first, it.second) }
+
+    /** Background and ink of a graph on light or dark paper (shared with the live window, GraphPane). */
+    fun cardColors(dark: Boolean): Pair<Int, Int> = if (dark) Color.rgb(0x1F, 0x23, 0x2B) to Color.rgb(0xE5, 0xE7, 0xEB) else Color.WHITE to Color.rgb(0x1F, 0x29, 0x37)
+
+    /** Width of the expression list on a card [boxW] page units wide (the live window matches it). */
+    fun legendWidth(boxW: Float): Float = (boxW * 0.34f).coerceIn(min(150f, boxW * 0.5f), boxW * 0.5f)
     private fun alpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
     private fun lum(c: Int) = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255.0
 
@@ -105,8 +111,8 @@ object GraphCardRenderer {
 
     /** Split [box] into the legend column (or null) and the plot area. */
     private fun layout(card: GraphCard, box: RectF): Pair<RectF?, RectF> {
-        if (!card.legend || card.rows.none { it.text.isNotBlank() }) return null to RectF(box)
-        val lw = (box.width() * 0.34f).coerceIn(min(110f, box.width() * 0.5f), box.width() * 0.5f)
+        if (!card.legend) return null to RectF(box)
+        val lw = legendWidth(box.width())
         return RectF(box.left, box.top, box.left + lw, box.bottom) to RectF(box.left + lw, box.top, box.right, box.bottom)
     }
 
@@ -162,7 +168,7 @@ object GraphCardRenderer {
         val (leg, plot) = layout(card, box)
         val ready = ensure(card, plot, sync, onReady)
         if (card.dim3) {
-            val unit = (min(plot.width(), plot.height()) / 420f).coerceIn(0.35f, 1.6f)
+            val unit = 1f   // one page unit per grapher dp, like the live window
             r3.draw(c, if (ready) card.scene3 else null, card.yaw, card.pitch, card.range, plot, Render3D.Style(t.bg, t.ink, unit))
         } else draw2d(c, card, plot, t, if (ready) card.scene2 else null)
         if (leg != null) drawLegend(c, card, leg, t)
@@ -193,7 +199,7 @@ object GraphCardRenderer {
         val x0 = card.cx - r.width() / 2 / ppu; val x1 = card.cx + r.width() / 2 / ppu
         val y0 = card.cy - r.height() / 2 / ppu; val y1 = card.cy + r.height() / 2 / ppu
         c.save(); c.clipRect(r)
-        val u = (r.width() / 420f).coerceIn(0.45f, 1.5f)   // ≈ one grapher dp in page units
+        val u = 1f   // one page unit per grapher dp, like the live window
         val major = niceStep(105.0 * u / ppu)
         val minor = major / (if (mantissa(major) == 2) 4 else 5)
         fun grid(step: Double, a: Int) {
@@ -277,8 +283,8 @@ object GraphCardRenderer {
         c.drawLine(r.right, r.top, r.right, r.bottom, line)
         val m = card.model
         val pad = 8f
-        val dotR = 4.2f
-        val size = 12.5f
+        val dotR = 5f
+        val size = 15f
         var y = r.top + pad
         c.save(); c.clipRect(r)
         for ((i, row) in card.rows.withIndex()) {

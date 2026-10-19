@@ -53,7 +53,7 @@ class FinishedStrokesView(context: Context) : View(context) {
         // Second row, shown when a single 3D solid is selected: snap to a standard view, or reshape it.
         VIEW_ISO("Iso"), VIEW_FRONT("Front"), VIEW_TOP("Top"), VIEW_SIDE("Side"), SOLID_EDIT("Edit shape"),
         // Second row, shown when a single graph card is selected.
-        GRAPH_EDIT("Edit graph"), GRAPH_LEGEND("Expressions"),
+        GRAPH_EDIT("Edit graph"),
     }
 
     companion object {

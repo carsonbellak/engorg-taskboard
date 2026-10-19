@@ -211,15 +211,30 @@ class ClaudePanel(
             textSize = 14f; setTextColor(onSurface); setLineSpacing(0f, 1.15f)
         })
         val connected = ClaudeAuth.connected(act)
+        fun heading(t: String) = TextView(act).apply {
+            text = t; textSize = 11f; setTextColor(muted); setTypeface(null, Typeface.BOLD); letterSpacing = 0.05f
+            setPadding(0, dp(14), 0, dp(6))
+        }
+        col.addView(heading("ANTHROPIC API KEY"))
+        if (connected) col.addView(TextView(act).apply {
+            text = "✓ Your key is saved. To replace it, paste a new one below."; textSize = 13f; setTextColor(onSurface)
+        }) else {
+            // Spell out where the key comes from and where it goes.
+            col.addView(TextView(act).apply {
+                text = "1.  Tap “Get a key” below. It opens the Anthropic Console.\n2.  Sign in, then tap Create Key and copy it (it starts with sk-ant-).\n3.  Come back here, paste it in the box below and tap Connect."
+                textSize = 13f; setTextColor(onSurface); setLineSpacing(0f, 1.25f)
+            })
+        }
+        col.addView(TextView(act).apply {
+            text = "Get a key  ↗"; textSize = 13.5f; setTextColor(AppTheme.accent); setTypeface(null, Typeface.BOLD)
+            setPadding(dp(2), dp(10), 0, dp(2))
+            setOnClickListener { runCatching { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys"))) } }
+        })
+        col.addView(TextView(act).apply { text = "Paste your API key here:"; textSize = 13f; setTextColor(onSurface); setTypeface(null, Typeface.BOLD); setPadding(dp(2), dp(10), 0, 0) })
         val keyInput = input(if (connected) "Paste a new key to replace it" else "sk-ant-…").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; maxLines = 1
         }
-        col.addView(keyInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(14) })
-        col.addView(TextView(act).apply {
-            text = "Get a key at console.anthropic.com"; textSize = 12.5f; setTextColor(AppTheme.accent)
-            setPadding(dp(2), dp(8), 0, dp(4))
-            setOnClickListener { runCatching { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.anthropic.com/settings/keys"))) } }
-        })
+        col.addView(keyInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) })
 
         col.addView(TextView(act).apply {
             text = "MODEL"; textSize = 11f; setTextColor(muted); setTypeface(null, Typeface.BOLD); letterSpacing = 0.05f
@@ -236,6 +251,13 @@ class ClaudePanel(
             })
         }
         renderModels()
+
+        col.addView(heading("EFFORT"))
+        col.addView(TextView(act).apply {
+            text = "How long Claude thinks before answering. Higher is more careful but slower and uses more of your API credit."
+            textSize = 12.5f; setTextColor(muted); setPadding(0, 0, 0, dp(6))
+        })
+        col.addView(effortPicker(full = true))
 
         val status = TextView(act).apply { textSize = 13f; setTextColor(muted); setPadding(0, dp(8), 0, 0) }
         col.addView(status)
@@ -254,6 +276,20 @@ class ClaudePanel(
             setPadding(0, dp(14), 0, dp(4))
             setOnClickListener { resetChat(); ClaudeAuth.disconnect(act); showSetup(changing = false) }
         })
+    }
+
+    /** Effort chips; [full] adds each level's description under the selected one. */
+    private fun effortPicker(full: Boolean): View {
+        val wrap = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL }
+        lateinit var draw: () -> Unit
+        draw = {
+            wrap.removeAllViews()
+            val cur = ClaudeAuth.effort(act)
+            wrap.addView(chipRow(ClaudeAuth.EFFORTS.map { e -> chip(e.label, e.id == cur.id) { ClaudeAuth.setEffort(act, e.id); draw() } }))
+            if (full) wrap.addView(TextView(act).apply { text = cur.hint; textSize = 12f; setTextColor(muted); setPadding(dp(2), dp(4), 0, 0) })
+        }
+        draw()
+        return wrap
     }
 
     // Transcript entries survive re-renders (closing and reopening the panel keeps the conversation).
@@ -302,6 +338,11 @@ class ClaudePanel(
             )).apply { setPadding(0, dp(6), 0, 0) })
         }
         rebuild()
+        c.addView(LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, 0)
+            addView(TextView(act).apply { text = "Effort"; textSize = 12f; setTextColor(muted); setPadding(dp(2), 0, dp(8), 0) })
+            addView(effortPicker(full = false), LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        })
         val note = input("Anything specific? (optional)")
         c.addView(note, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
         c.addView(primaryButton("Scan") {
@@ -372,7 +413,7 @@ class ClaudePanel(
         transcript.add(Entry(true, label))
         val reply = Entry(false, "")
         streamingEntry = null; streamingView = null
-        chat.send(key, ClaudeAuth.model(act), content,
+        chat.send(key, ClaudeAuth.model(act), ClaudeAuth.effort(act).id, content,
             onText = { t ->
                 if (!chat.busy) return@send   // a late chunk from a reply that was just stopped
                 reply.text = t

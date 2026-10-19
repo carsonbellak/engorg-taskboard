@@ -53,8 +53,11 @@ class GraphView(context: Context) : View(context) {
     private var trace: Trace? = null
 
     // ---------------------------------------------------------------- paints
-    private val bg get() = AppTheme.surface
-    private val ink get() = AppTheme.text
+    /** Colors when drawn as part of a page graph (else the app theme's). */
+    var bgOverride: Int? = null
+    var inkOverride: Int? = null
+    private val bg get() = bgOverride ?: AppTheme.surface
+    private val ink get() = inkOverride ?: AppTheme.text
     private fun alpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
     private val gridPaint = Paint().apply { strokeWidth = 1f }
     private val axisPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = dp(1.4f) }
