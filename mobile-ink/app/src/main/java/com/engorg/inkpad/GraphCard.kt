@@ -38,6 +38,8 @@ class GraphCard(
     val legend: Boolean,
 ) {
     @Volatile internal var model: GraphModel? = null
+    /** The rows' parses for typesetting the legend before [model] is ready (built on first draw). */
+    internal var legendParsed: List<MathEngine.Statement?>? = null
     @Volatile internal var scene2: Scene? = null
     @Volatile internal var scene2Key: String? = null
     @Volatile internal var scene3: Scene3? = null
@@ -295,6 +297,8 @@ object GraphCardRenderer {
         line.color = alpha(t.ink, 0x22); line.strokeWidth = 1f
         c.drawLine(r.right, r.top, r.right, r.bottom, line)
         val m = card.model
+        // Typeset from the first frame: the full model is computed in the background, but parsing is instant.
+        val parsed = m?.parsed ?: card.legendParsed ?: GraphModel.parseRows(card.rows, card.dim3).also { card.legendParsed = it }
         val pad = 8f
         val dotR = 5f
         val size = 15f
@@ -302,7 +306,7 @@ object GraphCardRenderer {
         c.save(); c.clipRect(r)
         for ((i, row) in card.rows.withIndex()) {
             if (row.text.isBlank()) continue
-            val st = m?.parsed?.getOrNull(i)
+            val st = parsed.getOrNull(i)
             val status = m?.statuses?.getOrNull(i)
             val box = st?.let { runCatching { MathTypeset.layout(it, size) }.getOrNull() }
             val tx = r.left + pad + dotR * 2 + 6f

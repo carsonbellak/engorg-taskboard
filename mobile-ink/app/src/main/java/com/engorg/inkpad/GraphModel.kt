@@ -83,6 +83,20 @@ class GraphModel(
 
         private class Def(val row: Int, val name: String, val rhs: Ex)
 
+        /**
+         * Just each row's parse (no compiling or evaluating), cheap enough for the UI thread — a page
+         * graph card typesets its expression list with this before its full model is ready.
+         */
+        fun parseRows(rows: List<GraphRow>, dim3: Boolean): List<MathEngine.Statement?> {
+            val plotVars = if (dim3) MathEngine.PLOT_VARS_3D else MathEngine.PLOT_VARS
+            fun reserved(n: String) = MathEngine.isReserved(n) || n in plotVars
+            val norm = rows.map { MathEngine.normalize(it.text) }
+            val userFns = HashSet<String>(); val userNames = HashSet<String>()
+            for (s in norm) FN_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!reserved(n)) userFns.add(n) }
+            for (s in norm) { if (FN_RE.find(s) != null) continue; CONST_RE.find(s)?.let { m -> val n = m.groupValues[1]; if (!reserved(n) && n !in userFns) userNames.add(n) } }
+            return rows.map { r -> if (r.text.isBlank()) null else try { MathEngine.parseStatement(r.text, userFns, userNames) } catch (_: Exception) { null } }
+        }
+
         fun build(rows: List<GraphRow>, degrees: Boolean, dim3: Boolean = false): GraphModel {
             val env = MathEnv(degrees)
             val plotVars = if (dim3) MathEngine.PLOT_VARS_3D else MathEngine.PLOT_VARS
