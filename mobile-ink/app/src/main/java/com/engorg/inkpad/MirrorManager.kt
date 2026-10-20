@@ -53,6 +53,17 @@ object MirrorManager : PageCanvas.MirrorSink {
     private var lastWet = 0L
     private var lastView = 0L
 
+    // Serializing pages and strokes happens here, never on the UI thread (it used to make writing lag).
+    private val out = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val pendingPages = java.util.concurrent.ConcurrentHashMap<Int, List<FinishedStrokesView.Rec>>()
+    private fun bg(task: () -> Unit) { try { out.execute { try { task() } catch (_: Exception) {} } } catch (_: Exception) {} }
+
+    // In-progress stroke points waiting for the next 16 ms flush.
+    private val wetBuf = ArrayList<PointF>()
+    private var wetReset = false
+    private var wetMeta: JSONObject? = null
+    private val wetFlush = Runnable { flushWet() }
+
     // ---- binding ----
     /** Point the mirror at the currently focused pane (null when leaving the editor). */
     fun bind(pane: PageCanvas?) {
@@ -188,9 +199,15 @@ object MirrorManager : PageCanvas.MirrorSink {
         .put("paper", pane.finishedView.paperStyle.name).put("pageColor", pane.finishedView.pageColor)
         .put("pageCount", pane.finishedView.pages.size)
 
-    private fun pageJson(pane: PageCanvas, index: Int): JSONObject {
+    /** Snapshot a page's recs (cheap; recs are immutable) and serialize + send it in the background, newest wins. */
+    private fun queuePage(pane: PageCanvas, index: Int) {
+        val snap = ArrayList(pane.finishedView.pages.getOrNull(index)?.recs ?: return)
+        pendingPages[index] = snap
+        bg { val recs = pendingPages.remove(index) ?: return@bg; send(pageJson(recs, index)) }
+    }
+
+    private fun pageJson(list: List<FinishedStrokesView.Rec>, index: Int): JSONObject {
         val recs = JSONArray()
-        val list = pane.finishedView.pages.getOrNull(index)?.recs ?: arrayListOf()
         for (rec in list) {
             val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
             val segs = JSONArray()
@@ -222,28 +239,45 @@ object MirrorManager : PageCanvas.MirrorSink {
     }
 
     private fun sendView(pane: PageCanvas) {
-        send(JSONObject().put("t", "view").put("scale", pane.scale.toDouble())
-            .put("tx", pane.tx.toDouble()).put("ty", pane.ty.toDouble()).put("page", pane.currentPage()))
+        val o = JSONObject().put("t", "view").put("scale", pane.scale.toDouble())
+            .put("tx", pane.tx.toDouble()).put("ty", pane.ty.toDouble()).put("page", pane.currentPage())
+        bg { send(o) }
     }
 
     /** Push the whole current notebook (meta + every page + viewport) — on connect or focus change. */
     private fun reflect(pane: PageCanvas) {
-        send(openJson(pane))
-        for (i in pane.finishedView.pages.indices) send(pageJson(pane, i))
+        val open = openJson(pane)
+        bg { send(open) }
+        for (i in pane.finishedView.pages.indices) queuePage(pane, i)
         sendView(pane)
+    }
+
+    private fun flushWet() {
+        val meta = wetMeta ?: return
+        if (wetBuf.isEmpty() && !wetReset) return
+        val pts = ArrayList(wetBuf); wetBuf.clear()
+        val reset = wetReset; wetReset = false
+        lastWet = System.currentTimeMillis()
+        bg { send(JSONObject(meta.toString()).put("t", "wetAdd").put("reset", reset).put("pts", ptsJson(pts))) }
     }
 
     // ---- PageCanvas.MirrorSink ----
     override fun paneOpened(pane: PageCanvas) { if (connected && pane === bound) reflect(pane) }
-    override fun pageEdited(pane: PageCanvas, index: Int) { if (connected && pane === bound) send(pageJson(pane, index)) }
-    override fun wetStroke(pane: PageCanvas, page: Int, pts: List<PointF>, color: Int, widthPx: Float, hl: Boolean) {
-        if (!connected || pane !== bound) return
-        val now = System.currentTimeMillis()
-        if (now - lastWet < 16) return
-        lastWet = now
-        send(JSONObject().put("t", "wet").put("page", page).put("pts", ptsJson(pts)).put("c", color).put("w", widthPx.toDouble()).put("h", hl))
+    override fun pageEdited(pane: PageCanvas, index: Int) { if (connected && pane === bound) queuePage(pane, index) }
+    override fun wetStroke(pane: PageCanvas, page: Int, pts: List<PointF>, reset: Boolean, color: Int, widthPx: Float, hl: Boolean) {
+        if (!connected || pane !== bound || cloud != null) return   // live strokes are LAN-only
+        if (reset) { wetBuf.clear(); wetReset = true }
+        wetBuf.addAll(pts)
+        wetMeta = JSONObject().put("page", page).put("c", color).put("w", widthPx.toDouble()).put("h", hl)
+        // At most one small update every 16 ms, carrying just the new points.
+        main.removeCallbacks(wetFlush)
+        val wait = 16 - (System.currentTimeMillis() - lastWet)
+        if (wait <= 0) flushWet() else main.postDelayed(wetFlush, wait)
     }
-    override fun wetCleared(pane: PageCanvas) { if (connected && pane === bound) send(JSONObject().put("t", "wetClear")) }
+    override fun wetCleared(pane: PageCanvas) {
+        main.removeCallbacks(wetFlush); wetBuf.clear(); wetReset = false; wetMeta = null
+        if (connected && pane === bound) bg { send(JSONObject().put("t", "wetClear")) }
+    }
     override fun transformed(pane: PageCanvas) {
         if (!connected || pane !== bound) return
         val now = System.currentTimeMillis()

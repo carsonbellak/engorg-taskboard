@@ -12,7 +12,8 @@
 //   { t:'client', connected, device, version? }             a tablet paired / dropped
 //   { t:'open', id, title, paper, pageColor, pageCount }     notebook opened (resets model)
 //   { t:'page', index, recs:[{ c,w,h,k,d?,segs:[[[x,y]...]] }] } a page's committed strokes (d=dashed shape)
-//   { t:'wet', page, pts:[[x,y]...], c, w, h }               in-progress stroke
+//   { t:'wet', page, pts:[[x,y]...], c, w, h }               in-progress stroke (older tablets: the whole stroke)
+//   { t:'wetAdd', page, pts, c, w, h, reset }                in-progress stroke, just the new points
 //   { t:'wetClear' }                                         pen lifted
 //   { t:'view', scale, tx, ty, page }                        tablet viewport (page-follow)
 
@@ -33,9 +34,11 @@ const enginkMirror = (() => {
     wet: null,               // { page, pts, c, w, h }
     view: null,              // { scale, tx, ty, page } — tablet viewport
     pinnedPage: null,        // when the user browses pages themselves (free-look)
+    showPair: false,         // pairing details opened from the status chip while connected
   };
   // Desktop-side inspection transform (independent of the tablet).
-  const look = { zoom: 1, panX: 0, panY: 0 };
+  // mode 'page' fits the whole page; 'width' fills the width (scroll to move down the page).
+  const look = { zoom: 1, panX: 0, panY: 0, mode: 'page' };
 
   // ---- color helpers (Android color ints, possibly signed) ----
   const rgb = (c) => `rgb(${(c >> 16) & 0xFF},${(c >> 8) & 0xFF},${c & 0xFF})`;
@@ -101,6 +104,12 @@ const enginkMirror = (() => {
         model.wet = { page: msg.page, pts: msg.pts || [], c: msg.c, w: msg.w, h: !!msg.h };
         requestRender();
         break;
+      case 'wetAdd':
+        // The tablet sends only the points added since its last update (reset = a new or redrawn stroke).
+        if (msg.reset || !model.wet || model.wet.page !== msg.page) model.wet = { page: msg.page, pts: (msg.pts || []).slice(), c: msg.c, w: msg.w, h: !!msg.h };
+        else if (Array.isArray(msg.pts)) { for (const p of msg.pts) model.wet.pts.push(p); }
+        requestRender();
+        break;
       case 'wetClear':
         model.wet = null; requestRender();
         break;
@@ -113,7 +122,51 @@ const enginkMirror = (() => {
 
   // ---- rendering ----
   function fitScale(cssW, cssH) {
-    return Math.min(cssW / PAGE_W, cssH / PAGE_H) * 0.96 * look.zoom;
+    const base = look.mode === 'width' ? (cssW / PAGE_W) * 0.98 : Math.min(cssW / PAGE_W, cssH / PAGE_H) * 0.96;
+    return base * look.zoom;
+  }
+
+  /** Keep the page reachable: it can scroll until its edge is a little past the view's edge, no further. */
+  function clampPan(cssW, cssH) {
+    const s = fitScale(cssW, cssH), pw = PAGE_W * s, ph = PAGE_H * s, m = 40;
+    const lim = (page, view) => Math.max(0, (page - view) / 2 + m);
+    const lx = lim(pw, cssW), ly = lim(ph, cssH);
+    look.panX = Math.min(lx, Math.max(-lx, look.panX));
+    look.panY = Math.min(ly, Math.max(-ly, look.panY));
+  }
+
+  /** Scroll the page to its top (used when switching to fill-width). */
+  function toTop() {
+    const cssW = stageEl.clientWidth, cssH = stageEl.clientHeight;
+    const ph = PAGE_H * fitScale(cssW, cssH);
+    look.panX = 0; look.panY = Math.max(0, (ph - cssH) / 2);
+  }
+
+  /** Zoom by [f] keeping the page point under the screen point (mx, my) still. */
+  function zoomAt(f, mx, my) {
+    const cssW = stageEl.clientWidth, cssH = stageEl.clientHeight;
+    const s0 = fitScale(cssW, cssH);
+    const ox0 = (cssW - PAGE_W * s0) / 2 + look.panX, oy0 = (cssH - PAGE_H * s0) / 2 + look.panY;
+    const ux = (mx - ox0) / s0, uy = (my - oy0) / s0;
+    look.zoom = Math.min(8, Math.max(0.3, look.zoom * f));
+    const s1 = fitScale(cssW, cssH);
+    look.panX = mx - (cssW - PAGE_W * s1) / 2 - ux * s1;
+    look.panY = my - (cssH - PAGE_H * s1) / 2 - uy * s1;
+  }
+
+  function setFullscreen(on) {
+    const wrap = root && root.querySelector('.engink-wrap');
+    if (!wrap) return;
+    if (on) {
+      // Fill the EngOrg window below its titlebar (so the window controls stay reachable).
+      const tb = document.getElementById('titlebar');
+      const top = tb && tb.offsetParent !== null ? Math.max(0, tb.getBoundingClientRect().bottom) : 0;
+      wrap.style.top = top + 'px';
+    }
+    wrap.classList.toggle('engink-full', on);
+    const b = barEl && barEl.querySelector('[data-act="full"]');
+    if (b) { b.classList.toggle('active', on); b.title = on ? 'Exit full screen (Esc)' : 'Full screen'; }
+    requestRender();
   }
 
   function drawPaper(paper, pageColor, s) {
@@ -173,6 +226,7 @@ const enginkMirror = (() => {
 
     if (!model.notebook) return;
     const nb = model.notebook;
+    clampPan(cssW, cssH);
     const s = fitScale(cssW, cssH);
     const pageW = PAGE_W * s, pageH = PAGE_H * s;
     const ox = (cssW - pageW) / 2 + look.panX;
@@ -214,11 +268,23 @@ const enginkMirror = (() => {
     if (pageLabel) pageLabel.textContent = `${curPage() + 1} / ${pageCount()}`;
   }
 
+  function syncModeButtons() {
+    if (!barEl) return;
+    barEl.querySelector('[data-act="width"]').classList.toggle('active', look.mode === 'width');
+  }
+
   function refreshStatus() {
     if (!built) return;
     const sv = model.server;
     const conn = model.connected;
     const followOn = model.pinnedPage == null;
+    // Once a tablet is connected the pairing details fold away (the status chip brings them back),
+    // so the notebook gets the room.
+    const statusBtn = barEl.querySelector('[data-act="pair"]');
+    statusBtn.innerHTML = conn.length
+      ? `<span class="engink-dot on"></span>${escapeHtml(conn.map(c => c.device).join(', '))}`
+      : `<span class="engink-dot"></span>${sv.running ? 'Waiting for tablet' : 'Server off'}`;
+    pairEl.classList.toggle('collapsed', conn.length > 0 && !model.showPair);
     pairEl.innerHTML = sv.running
       ? `<div class="engink-pair-grid">
            <div class="engink-pair-cell"><span class="engink-k">This PC</span><b>${escapeHtml(sv.host)}:${sv.port}</b></div>
@@ -393,6 +459,7 @@ const enginkMirror = (() => {
       <div class="engink-wrap">
         <div class="engink-bar">
           <span class="engink-title">EngInk mirror</span>
+          <button class="engink-btn engink-status" data-act="pair" title="Show or hide the pairing details"></button>
           <button class="engink-btn" data-act="toggle">Start server</button>
           <button class="engink-btn" data-act="follow" title="Follow the tablet's current page">Follow tablet</button>
           <div class="engink-pagenav">
@@ -402,7 +469,9 @@ const enginkMirror = (() => {
           </div>
           <button class="engink-btn engink-ic" data-act="zoomout" title="Zoom out">−</button>
           <button class="engink-btn engink-ic" data-act="zoomin" title="Zoom in">+</button>
-          <button class="engink-btn engink-ic" data-act="fit" title="Fit page">⤢</button>
+          <button class="engink-btn engink-ic" data-act="fit" title="Fit the whole page">⤢</button>
+          <button class="engink-btn" data-act="width" title="Fill the width (scroll to move down the page)">↔ Width</button>
+          <button class="engink-btn engink-ic" data-act="full" title="Full screen">⛶</button>
           <button class="engink-btn" data-act="pdf">Export PDF</button>
         </div>
         <div class="engink-pair"></div>
@@ -418,24 +487,45 @@ const enginkMirror = (() => {
     barEl.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-act]'); if (!b) return;
       const act = b.dataset.act;
+      if (act === 'pair') { model.showPair = !model.showPair; refreshStatus(); return; }
       if (act === 'toggle') {
         if (model.server.running) { await window.api.engink.stop(); model.server.running = false; refreshStatus(); }
         else { model.server = { running: false, ...(await window.api.engink.start()) }; model.server.running = true; refreshStatus(); }
       } else if (act === 'follow') { model.pinnedPage = null; look.zoom = 1; look.panX = 0; look.panY = 0; refreshStatus(); requestRender(); }
       else if (act === 'prev') { model.pinnedPage = Math.max(0, curPage() - 1); updatePageLabel(); refreshStatus(); requestRender(); }
       else if (act === 'next') { model.pinnedPage = Math.min(pageCount() - 1, curPage() + 1); updatePageLabel(); refreshStatus(); requestRender(); }
-      else if (act === 'zoomin') { look.zoom = Math.min(6, look.zoom * 1.25); requestRender(); }
-      else if (act === 'zoomout') { look.zoom = Math.max(0.3, look.zoom * 0.8); requestRender(); }
-      else if (act === 'fit') { look.zoom = 1; look.panX = 0; look.panY = 0; requestRender(); }
+      else if (act === 'zoomin') { zoomAt(1.25, stageEl.clientWidth / 2, stageEl.clientHeight / 2); requestRender(); }
+      else if (act === 'zoomout') { zoomAt(0.8, stageEl.clientWidth / 2, stageEl.clientHeight / 2); requestRender(); }
+      else if (act === 'fit') { look.mode = 'page'; look.zoom = 1; look.panX = 0; look.panY = 0; syncModeButtons(); requestRender(); }
+      else if (act === 'width') { look.mode = 'width'; look.zoom = 1; toTop(); syncModeButtons(); requestRender(); }
+      else if (act === 'full') setFullscreen(!root.querySelector('.engink-wrap.engink-full'));
       else if (act === 'pdf') exportPdf();
     });
 
     // Inspect: wheel to zoom, drag to pan (desktop-side only; the tablet is unaffected).
+    // Wheel / two-finger scroll moves around the page; Ctrl+wheel (or a trackpad pinch) zooms at the cursor.
     stageEl.addEventListener('wheel', (e) => {
       e.preventDefault();
-      look.zoom = Math.min(6, Math.max(0.3, look.zoom * (e.deltaY < 0 ? 1.1 : 0.9)));
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? stageEl.clientHeight : 1;
+      if (e.ctrlKey || e.metaKey) {
+        const r = stageEl.getBoundingClientRect();
+        zoomAt(Math.exp(-e.deltaY * unit * 0.0025), e.clientX - r.left, e.clientY - r.top);
+      } else {
+        const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * unit;
+        const dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * unit;
+        look.panX -= dx; look.panY -= dy;
+      }
       requestRender();
     }, { passive: false });
+    // Esc leaves full screen; PageUp / PageDown / arrows scroll.
+    root.tabIndex = -1;
+    root.addEventListener('keydown', (e) => {
+      const full = root.querySelector('.engink-wrap.engink-full');
+      if (e.key === 'Escape' && full) { setFullscreen(false); e.stopPropagation(); return; }
+      const step = { ArrowDown: 60, ArrowUp: -60, PageDown: stageEl.clientHeight * 0.85, PageUp: -stageEl.clientHeight * 0.85 }[e.key];
+      if (step) { look.panY -= step; requestRender(); e.preventDefault(); }
+    });
+    stageEl.addEventListener('pointerdown', () => root.focus({ preventScroll: true }));
     let drag = null;
     stageEl.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; stageEl.setPointerCapture(e.pointerId); });
     stageEl.addEventListener('pointermove', (e) => { if (!drag) return; look.panX += e.clientX - drag.x; look.panY += e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY }; requestRender(); });
@@ -467,6 +557,6 @@ const enginkMirror = (() => {
       refreshStatus();
       requestRender();
     },
-    deactivate() { active = false; },
+    deactivate() { active = false; setFullscreen(false); },
   };
 })();

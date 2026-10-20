@@ -83,7 +83,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     interface MirrorSink {
         fun paneOpened(pane: PageCanvas)
         fun pageEdited(pane: PageCanvas, index: Int)
-        fun wetStroke(pane: PageCanvas, page: Int, pts: List<PointF>, color: Int, widthPx: Float, hl: Boolean)
+        /** The in-progress stroke grew by [pts] (page-local); [reset] = these replace what was sent (new / straightened stroke). */
+        fun wetStroke(pane: PageCanvas, page: Int, pts: List<PointF>, reset: Boolean, color: Int, widthPx: Float, hl: Boolean)
         fun wetCleared(pane: PageCanvas)
         fun transformed(pane: PageCanvas)
     }
@@ -492,10 +493,26 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val showBall = leashPx() > 1f && samples.isNotEmpty() && !straightened
         wetOverlay.setBall(ballX, ballY, headX, headY, (wPx / 2f).coerceAtLeast(dp(7).toFloat()), showBall)
         mirror?.let { m ->
-            val conv = samplesToPage() ?: return@let
-            m.wetStroke(this, conv.first, conv.second, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter)
+            // Only the samples added since the last send (converting the whole stroke on every move
+            // made writing slow down as strokes grew). A shorter list means it was replaced: resend all.
+            if (samples.isEmpty()) return@let
+            val reset = samples.size < mirrorSent || straightened != mirrorStraight
+            val from = if (reset) 0 else mirrorSent
+            if (from >= samples.size) return@let
+            val start = hitTest(samples.first().x, samples.first().y)
+            if (!start.onPage) return@let
+            val top = finishedView.pageTop(start.page)
+            val pts = ArrayList<PointF>(samples.size - from)
+            for (k in from until samples.size) {
+                val s = samples[k]
+                pts.add(PointF(((s.x - tx) / scale).coerceIn(0f, FinishedStrokesView.PAGE_W), ((s.y - ty) / scale - top).coerceIn(0f, FinishedStrokesView.PAGE_H)))
+            }
+            mirrorSent = samples.size; mirrorStraight = straightened
+            m.wetStroke(this, start.page, pts, reset || from == 0, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter)
         }
     }
+    private var mirrorSent = 0          // samples of the current stroke already handed to the mirror
+    private var mirrorStraight = false
 
     /** Pen held still after a stroke: replace it with a straight line from its first point. */
     private fun straightenStroke() {
@@ -637,7 +654,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 }
                 if (addArmed) { addArmed = false; if (!cancel) addPage() }
                 else when (mode) {
-                    Mode.DRAW -> { if (!cancel) { if (host.pendingShape != null) commitPendingShape() else commitSamples() }; straightened = false; wetOverlay.clear(); samples.clear(); mirror?.wetCleared(this) }
+                    Mode.DRAW -> { if (!cancel) { if (host.pendingShape != null) commitPendingShape() else commitSamples() }; straightened = false; wetOverlay.clear(); samples.clear(); mirrorSent = 0; mirror?.wetCleared(this) }
                     Mode.ERASE -> if (dirtyErase) { dirtyErase = false; savePage(currentPage()) }
                     Mode.SELECT -> endSelect()
                     else -> {}
