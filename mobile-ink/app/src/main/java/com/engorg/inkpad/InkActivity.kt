@@ -76,6 +76,8 @@ class InkActivity : ComponentActivity() {
     private var graphButton: ImageButton? = null
     private var claudeButton: ImageButton? = null
     private var claude: ClaudePanel? = null
+    private var calcButton: ImageButton? = null
+    private var calc: CalculatorWindow? = null
     private lateinit var rootFrame: FrameLayout
 
     // Brush width in page units. The size slider maps GEOMETRICALLY across [minBrush, maxBrush] so
@@ -634,6 +636,7 @@ class InkActivity : ComponentActivity() {
             addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
             addView(iconBtn(Icons.TABLE) { showTableMenu(it) }.also { tableButton = it })
             addView(iconBtn(Icons.GRAPH) { spawnGraph() }.also { graphButton = it })
+            addView(iconBtn(Icons.CALC) { toggleCalculator() }.also { calcButton = it })
             addView(sep())
             addView(colorButton)
             addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
@@ -666,6 +669,20 @@ class InkActivity : ComponentActivity() {
         panes.forEach { it.onToolChanged() }
         updateTools()
         pane.spawnGraph()
+    }
+
+    /** Open / close the floating calculator. */
+    private fun toggleCalculator() {
+        val c = calc ?: CalculatorWindow(this, rootFrame).also { calc = it; it.onClosed = { updateCalcButton() } }
+        c.toggle()
+        updateCalcButton()
+    }
+
+    private fun updateCalcButton() {
+        val b = calcButton ?: return
+        val on = calc?.isOpen == true
+        b.background = pill(if (on) accent else light)
+        b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
     }
 
     /** Open / close the Claude feedback panel (scans the focused pane's page). */

@@ -728,7 +728,7 @@ class MathField(context: Context) : View(context) {
         if (e.actionMasked == MotionEvent.ACTION_UP) {
             if (!isFocused) requestFocus()
             placeCursor(e.x, e.y)
-            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(this, 0)
+            if (softKeyboard) (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.showSoftInput(this, 0)
         }
         return true
     }
@@ -766,7 +766,10 @@ class MathField(context: Context) : View(context) {
         onFocus?.invoke(gain)
     }
 
-    override fun onCheckIsTextEditor() = true
+    /** False when an on-screen keypad drives the field (the calculator): tapping then never pops the system keyboard. */
+    var softKeyboard = true
+
+    override fun onCheckIsTextEditor() = softKeyboard
 
     private var composing = ""
 

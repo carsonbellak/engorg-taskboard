@@ -18,6 +18,13 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.12': {
+      title: "What's new",
+      intro: 'EngInk has a calculator.',
+      slides: [
+        { emoji: '🧮', title: 'Calculator', body: 'Tap the calculator button on the EngInk toolbar. Type with its keypad: fractions, roots and integrals build as you type, the answer shows as you go, with the exact fraction when there is one, and = saves it to the history. Tap an answer to reuse it, or type ans. ƒ more has inverse trig, n!, nCr, integrals, sums and more. Drag the header to move it.' },
+      ],
+    },
     '1.5.10': {
       title: "What's new",
       intro: 'EngInk shapes can be filled — even with water.',
