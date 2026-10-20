@@ -1836,6 +1836,8 @@
 
     // EngInk mirror: listen from startup so a tablet that starts mirroring pops a card here.
     if (typeof enginkMirror !== 'undefined' && !EMB) enginkMirror.listen();
+    // EngInk "Attach & submit": this PC uploads the tablet's PDFs to Gradescope.
+    if (typeof assignmentSubmit !== 'undefined' && !EMB) assignmentSubmit.start();
 
     // Restore last view (handle legacy 'schedule' -> 'calendar', and remove 'tasks')
     let savedView = dataManager.settings.activeView;

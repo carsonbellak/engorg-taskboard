@@ -651,6 +651,7 @@ class InkActivity : ComponentActivity() {
             addView(iconBtn(Icons.SPLIT) { showAddPane(it) })
             addView(iconBtn(Icons.CAST) { showMirrorDialog() }.also { mirrorButton = it })
             addView(iconBtn(Icons.EMAIL) { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
+            addView(iconBtn(Icons.SUBMIT) { showSubmitDialog() })
             addView(iconBtn(Icons.SPARKLE) { toggleClaude() }.also { claudeButton = it })
         }
         return HorizontalScrollView(this).apply {
@@ -1483,6 +1484,154 @@ class InkActivity : ComponentActivity() {
             .putInt("tableRows", tableRows).putInt("tableCols", tableCols).putBoolean("tableBorder", tableBorder).apply()
         InkSettings.markChanged(this)
     }
+
+    // ---------- attach & submit to an assignment ----------
+    /**
+     * Pick one of your open assignments (read from your EngOrg account) and hand this notebook to it:
+     * Gradescope ones are uploaded by EngOrg on your PC (which then marks it done, and opens
+     * Gradescope's page matching when the assignment needs it); anything else, or any failure, saves
+     * the PDF to Downloads and opens the assignment page.
+     */
+    private fun showSubmitDialog() {
+        val pane = focused ?: return
+        val acct = CloudAuth.account(this)
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val pad = dp(20)
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply { cornerRadius = dp(22).toFloat(); setColor(AppTheme.surface) }
+            setPadding(pad, pad, pad, dp(16))
+        }
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            addView(ImageView(this@InkActivity).apply { setImageBitmap(Icons.bitmap(Icons.SUBMIT, dp(22))); setColorFilter(AppTheme.accent); layoutParams = LinearLayout.LayoutParams(dp(22), dp(22)).apply { rightMargin = dp(10) } })
+            addView(TextView(this@InkActivity).apply { text = "Attach & submit"; setTextColor(AppTheme.text); textSize = 17f; setTypeface(null, android.graphics.Typeface.BOLD) })
+        })
+        col.addView(android.widget.ScrollView(this).apply { addView(body) }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(12) })
+        val dialog = Dialog(this).apply {
+            setContentView(col, ViewGroup.LayoutParams(dp(380), WRAP_CONTENT))
+            window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        }
+        fun note(t: String, color: Int = muted) = TextView(this).apply { text = t; setTextColor(color); textSize = 13f; setLineSpacing(0f, 1.2f); setPadding(0, dp(4), 0, dp(4)) }
+        fun button(label: String, primary: Boolean, onClick: () -> Unit) = TextView(this).apply {
+            text = label; textSize = 14f; gravity = Gravity.CENTER; setTypeface(null, android.graphics.Typeface.BOLD); stateListAnimator = null
+            background = pill(if (primary) accent else light); setTextColor(if (primary) AppTheme.onAccent() else onSurface)
+            setPadding(dp(14), dp(11), dp(14), dp(11))
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
+            setOnClickListener { onClick() }
+        }
+        fun dueText(d: String): String {
+            if (d.isBlank()) return "no due date"
+            return try {
+                // java.time needs Android 8; SimpleDateFormat works back to minSdk 24.
+                val date = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(d.take(10)) ?: return "due $d"
+                fun dayNo(t: Long) = (t + java.util.TimeZone.getDefault().getOffset(t)) / 86_400_000L
+                val days = dayNo(date.time) - dayNo(System.currentTimeMillis())
+                val day = when (days) { 0L -> "today"; 1L -> "tomorrow"; -1L -> "yesterday"; else -> java.text.SimpleDateFormat("EEE MMM d", java.util.Locale.getDefault()).format(date) }
+                "due $day" + (if (d.length > 11) " " + d.substring(11, minOf(16, d.length)) else "")
+            } catch (_: Exception) { "due $d" }
+        }
+        if (acct == null) {
+            body.addView(note("EngInk needs your EngOrg sign-in for this. Open Ink from the EngOrg app while you're signed in, then try again.", AppTheme.text))
+            body.addView(button("Close", false) { dialog.dismiss() })
+            dialog.show(); return
+        }
+        val fs = FirestoreRest(acct)
+        val ui = android.os.Handler(android.os.Looper.getMainLooper())
+
+        fun showResult(a: AssignmentSubmit.Assignment, o: AssignmentSubmit.Outcome) {
+            body.removeAllViews()
+            when (o) {
+                is AssignmentSubmit.Outcome.Submitted -> {
+                    body.addView(note(if (o.matchPages) "Uploaded to Gradescope and marked done." else "Submitted to Gradescope and marked done.", AppTheme.text).apply { textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) })
+                    if (o.matchPages) body.addView(note("Gradescope needs you to match pages to questions. It's open on your PC. You can also do it here."))
+                    o.url?.let { u -> body.addView(button(if (o.matchPages) "Match pages on the tablet" else "Open in Gradescope", false) { try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u))) } catch (_: Exception) { } }) }
+                }
+                is AssignmentSubmit.Outcome.Fallback -> {
+                    body.addView(note("Not submitted automatically", AppTheme.text).apply { textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) })
+                    body.addView(note(o.why))
+                    body.addView(note(
+                        (o.saved?.let { "The PDF is saved to $it. " } ?: "") +
+                        (if (a.url != null) "The assignment page is open, so upload it there." else "This note has no assignment link, so upload it yourself.")))
+                    body.addView(button("Mark it done in EngOrg", false) {
+                        Thread { val ok = try { AssignmentSubmit.requestDone(fs, a); true } catch (_: Exception) { false }
+                            ui.post { Toast.makeText(this, if (ok) "Marked done (EngOrg updates it next time it's open)" else "Couldn't reach your EngOrg account", Toast.LENGTH_SHORT).show() } }.start()
+                    })
+                }
+            }
+            body.addView(button("Done", true) { dialog.dismiss() })
+        }
+
+        fun confirm(a: AssignmentSubmit.Assignment) {
+            body.removeAllViews()
+            body.addView(TextView(this).apply { text = a.title; setTextColor(AppTheme.text); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD) })
+            body.addView(note(listOf(a.sourceLabel, a.course, dueText(a.due)).filter { it.isNotBlank() }.joinToString(" · ")))
+            var onlyPage = false
+            val scope = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
+            lateinit var paint: () -> Unit
+            fun chip(label: String, sel: () -> Boolean, set: () -> Unit) = TextView(this).apply {
+                text = label; textSize = 13f; gravity = Gravity.CENTER; stateListAnimator = null
+                setPadding(dp(12), dp(7), dp(12), dp(7))
+                layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(6) }
+                tag = sel; setOnClickListener { set(); paint() }
+            }
+            val c1 = chip("Whole notebook (${pane.pageCount()} pages)", { !onlyPage }) { onlyPage = false }
+            val c2 = chip("Just page ${pane.currentPage() + 1}", { onlyPage }) { onlyPage = true }
+            paint = { for (c in listOf(c1, c2)) { @Suppress("UNCHECKED_CAST") val on = (c.tag as () -> Boolean)(); c.background = pill(if (on) accent else light); c.setTextColor(if (on) AppTheme.onAccent() else onSurface) } }
+            scope.addView(c1); scope.addView(c2); paint()
+            body.addView(scope)
+            body.addView(note(if (a.viaGradescope)
+                "EngOrg on your PC uploads it to Gradescope and marks it done. If the assignment needs pages matched to questions, Gradescope opens so you can do that. Keep EngOrg open and signed in on the PC."
+            else "${a.sourceLabel} can't be submitted automatically, so this saves the PDF to Downloads and opens the assignment for you to upload."))
+            val status = note("")
+            body.addView(button(if (a.viaGradescope) "Submit" else "Save PDF & open assignment", true) {
+                body.removeAllViews()
+                body.addView(TextView(this).apply { text = a.title; setTextColor(AppTheme.text); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD) })
+                body.addView(status); status.text = "Making the PDF…"
+                dialog.setCancelable(false)
+                val pdf = pane.exportPdf(cacheDir, if (onlyPage) pane.currentPage() else null)
+                if (pdf == null) { status.text = "Couldn't build the PDF."; dialog.setCancelable(true); return@button }
+                Thread {
+                    val o = AssignmentSubmit.submit(this, fs, a, pdf) { msg -> ui.post { status.text = msg } }
+                    ui.post { dialog.setCancelable(true); showResult(a, o) }
+                }.start()
+            })
+            body.addView(button("Back", false) { showList() })
+        }
+
+        showListFn = {
+            body.removeAllViews()
+            body.addView(note("Loading your assignments…"))
+            Thread {
+                val res = try { Result.success(AssignmentSubmit.load(fs)) } catch (e: Exception) { Result.failure(e) }
+                ui.post {
+                    if (!dialog.isShowing) return@post
+                    body.removeAllViews()
+                    val list = res.getOrNull()
+                    if (list == null) { body.addView(note(res.exceptionOrNull()?.message ?: "Couldn't load your assignments.", AppTheme.text)); return@post }
+                    if (list.isEmpty()) { body.addView(note("No open assignments in EngOrg.")); return@post }
+                    body.addView(note("Which assignment is this notebook for?"))
+                    for (a in list.take(60)) body.addView(LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(AppTheme.elevated) }
+                        setPadding(dp(12), dp(9), dp(12), dp(9))
+                        layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
+                        addView(TextView(this@InkActivity).apply { text = a.title; setTextColor(AppTheme.text); textSize = 14.5f; setTypeface(null, android.graphics.Typeface.BOLD); maxLines = 2 })
+                        addView(TextView(this@InkActivity).apply {
+                            text = listOf(a.sourceLabel + (if (a.viaGradescope) " · auto-submit" else ""), a.course, dueText(a.due)).filter { it.isNotBlank() }.joinToString(" · ")
+                            setTextColor(muted); textSize = 12f
+                        })
+                        setOnClickListener { confirm(a) }
+                    })
+                }
+            }.start()
+        }
+        showList()
+        dialog.show()
+    }
+    private var showListFn: () -> Unit = {}
+    private fun showList() = showListFn()
 
     // ---------- PDF export + email ----------
     private fun emailNotebook(repick: Boolean = false) {

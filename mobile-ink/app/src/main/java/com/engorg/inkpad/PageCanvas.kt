@@ -1563,14 +1563,15 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     // ---------- PDF export ----------
     /** Render this notebook to a PDF in [cacheDir] and return the file (null on failure). */
-    fun exportPdf(cacheDir: File): File? {
+    fun exportPdf(cacheDir: File, only: Int? = null): File? {
         saveAllPages()
         val doc = PdfDocument()
         val s = 0.75f
         val w = (FinishedStrokesView.PAGE_W * s).toInt(); val h = (FinishedStrokesView.PAGE_H * s).toInt()
         try {
-            for (i in finishedView.pages.indices) {
-                val info = PdfDocument.PageInfo.Builder(w, h, i + 1).create()
+            val which = if (only != null && only in finishedView.pages.indices) listOf(only) else finishedView.pages.indices.toList()
+            for ((n, i) in which.withIndex()) {
+                val info = PdfDocument.PageInfo.Builder(w, h, n + 1).create()
                 val pg = doc.startPage(info)
                 finishedView.renderPageInto(pg.canvas, i, s)
                 doc.finishPage(pg)

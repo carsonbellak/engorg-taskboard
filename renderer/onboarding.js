@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.16': {
+      title: "What's new",
+      intro: 'Hand in homework straight from EngInk.',
+      slides: [
+        { emoji: '📤', title: 'Attach & submit', body: 'In an EngInk notebook, tap the submit button on the toolbar and pick the assignment (your open ones, soonest due first). For Gradescope, EngOrg on this PC uploads the PDF and marks the assignment done. If it needs pages matched to questions, Gradescope opens here so you can match them. Keep EngOrg open and signed in.' },
+        { emoji: '📥', title: 'Everything else', body: 'Variate and Brightspace can’t take submissions from EngOrg. For those, or if the PC doesn’t answer, the tablet saves the PDF to Downloads/EngInk and opens the assignment so you can upload it there.' },
+      ],
+    },
     '1.5.13': {
       title: "What's new",
       intro: 'Mirroring EngInk to your PC actually works now.',

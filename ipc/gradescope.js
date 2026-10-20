@@ -467,6 +467,61 @@ module.exports = function register() {
     }
   });
 
+  // Submit a PDF to an assignment (EngInk "Attach & submit"). Reads the real upload form on the
+  // assignment's /submissions/new page (PDF homework and file-upload assignments name the file
+  // field differently), posts the file with that page's CSRF token, then reads where Gradescope
+  // redirected: …/submissions/<id>/select_pages = uploaded, the student now matches pages to
+  // questions; …/submissions/<id> = submitted; anything else (back to the course) = rejected.
+  ipcMain.handle('gradescope:submitPdf', async (event, courseId, assignmentId, base64, filename) => {
+    try {
+      if (!/^\d+$/.test(String(courseId || '')) || !/^\d+$/.test(String(assignmentId || ''))) return { error: 'This assignment has no Gradescope link.' };
+      const bytes = Buffer.from(String(base64 || ''), 'base64');
+      if (!bytes.length || bytes.length > 45 * 1024 * 1024) return { error: 'The PDF is empty or too large for Gradescope.' };
+      if (bytes.subarray(0, 4).toString('latin1') !== '%PDF') return { error: 'The file received is not a PDF.' };
+      const name = (String(filename || 'notebook.pdf').replace(/[^\w .()-]/g, '').trim() || 'notebook') .replace(/(\.pdf)?$/i, '.pdf');
+
+      await ensureAuth();
+      const newUrl = `${BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/new`;
+      let page = await gsFetch(newUrl);
+      if (/\/login(\?|$)/.test(page.url || '')) { _authAt = 0; await ensureAuth(); page = await gsFetch(newUrl); }
+      const html = await page.text();
+      const token = extractAuthToken(html);
+      if (!token) return { error: 'Couldn’t open the assignment on Gradescope (it may be closed).' };
+
+      // The upload form's file field and hidden inputs (fallback: what PDF homework uses).
+      const formM = html.match(/<form[^>]*action="[^"]*\/assignments\/\d+\/submissions"[^>]*>([\s\S]*?)<\/form>/i);
+      const scope = formM ? formM[1] : html;
+      const fileM = scope.match(/<input[^>]*type="file"[^>]*name="([^"]+)"/i) || scope.match(/<input[^>]*name="([^"]+)"[^>]*type="file"/i);
+      const fileField = fileM ? htmlDecode(fileM[1]) : (/submission\[files\]\[\]/.test(html) ? 'submission[files][]' : 'submission[pdf_attachment]');
+      const fields = [['utf8', '✓'], ['authenticity_token', token]];
+      for (const tag of scope.match(/<input[^>]*type="hidden"[^>]*>/gi) || []) {
+        const n = (tag.match(/name="([^"]+)"/) || [])[1]; const v = (tag.match(/value="([^"]*)"/) || [])[1] || '';
+        if (n && n !== 'authenticity_token' && n !== 'utf8') fields.push([htmlDecode(n), htmlDecode(v)]);
+      }
+      if (!fields.some(([n]) => n === 'submission[method]')) fields.push(['submission[method]', 'upload']);
+
+      // multipart/form-data, built by hand (net.fetch takes a Buffer body).
+      const boundary = '----EngOrg' + Date.now().toString(16) + Math.random().toString(16).slice(2);
+      const parts = [];
+      for (const [n, v] of fields) parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${v}\r\n`, 'utf8'));
+      parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${fileField}"; filename="${name}"\r\nContent-Type: application/pdf\r\n\r\n`, 'utf8'));
+      parts.push(bytes, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
+
+      const res = await net.fetch(`${BASE}/courses/${courseId}/assignments/${assignmentId}/submissions`, {
+        session: gsSession(), method: 'POST',
+        headers: { 'User-Agent': 'Mozilla/5.0 (EngOrg-TaskBoard)', 'Accept': 'text/html,application/xhtml+xml', 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Referer': newUrl },
+        body: Buffer.concat(parts),
+      });
+      const finalUrl = res.url || '';
+      try { await res.text(); } catch {}
+      const sub = finalUrl.match(/\/submissions\/(\d+)/);
+      if (!sub) return { error: 'Gradescope didn’t accept the upload (the assignment may be closed or not take PDFs).' };
+      return { ok: true, submissionId: sub[1], url: finalUrl, needsMatching: /select_pages/.test(finalUrl) };
+    } catch (e) {
+      return { error: e.message || String(e) };
+    }
+  });
+
   // Download a single assignment's attachment files (best-effort) to a local,
   // device-only folder, returning [{ name, path }] for the note to reference.
   // Called lazily by the renderer once per assignment (not on every sync).

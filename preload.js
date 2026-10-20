@@ -237,6 +237,7 @@ const __api = {
     disconnect: () => ipcRenderer.invoke('gradescope:disconnect'),
     fetchAssignments: () => ipcRenderer.invoke('gradescope:fetchAssignments'),
     fetchAttachments: (courseId, assignmentId) => ipcRenderer.invoke('gradescope:fetchAttachments', courseId, assignmentId),
+    submitPdf: (courseId, assignmentId, base64, filename) => ipcRenderer.invoke('gradescope:submitPdf', courseId, assignmentId, base64, filename),
   },
   // Variate link (Purdue StudioKit) — assignment due dates → calendar. SSO login, so
   // connect() opens a sign-in window rather than taking credentials.
