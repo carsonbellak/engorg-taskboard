@@ -39,6 +39,9 @@ object MirrorManager : PageCanvas.MirrorSink {
     private val client = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build()
 
     private var ws: WebSocket? = null
+    private var cloud: CloudMirror? = null
+    /** True while mirroring through the EngOrg account instead of the Wi-Fi. */
+    val viaInternet get() = cloud != null
     private var bound: PageCanvas? = null
     private var pairCode = ""
     @Volatile var connected = false; private set
@@ -97,7 +100,32 @@ object MirrorManager : PageCanvas.MirrorSink {
 
     fun disconnect() {
         try { ws?.close(1000, null) } catch (_: Exception) {}
-        ws = null; connected = false
+        ws = null
+        cloud?.stop(); cloud = null
+        connected = false
+    }
+
+    /**
+     * Mirror through the signed-in EngOrg account (Firestore) — works on any network, including Wi-Fi
+     * that blocks devices from reaching each other. The desktop picks it up as long as EngOrg is
+     * running and signed in to the same account.
+     */
+    fun connectInternet(ctx: android.content.Context, onResult: (Boolean, String) -> Unit) {
+        disconnect()
+        val acct = CloudAuth.account(ctx) ?: run {
+            onResult(false, "Not signed in. Open EngInk from the EngOrg app while you're signed in, then try again."); return
+        }
+        val c = CloudMirror(ctx.applicationContext, acct)
+        cloud = c
+        c.start { err ->
+            if (cloud !== c) return@start
+            if (err != null) { cloud = null; c.stop(); onResult(false, err); return@start }
+            connected = true
+            peerLabel = "your PC (over the internet)"
+            bound?.let { reflect(it) }
+            onState?.invoke(true, "Mirroring over the internet")
+            onResult(true, "Connected")
+        }
     }
 
     // ---- discovery (UDP broadcast) ----
@@ -144,7 +172,10 @@ object MirrorManager : PageCanvas.MirrorSink {
     }
 
     // ---- serialization ----
-    private fun send(o: JSONObject) { try { ws?.send(o.toString()) } catch (_: Exception) {} }
+    private fun send(o: JSONObject) {
+        cloud?.let { it.send(o); return }
+        try { ws?.send(o.toString()) } catch (_: Exception) {}
+    }
 
     private fun ptsJson(pts: List<PointF>): JSONArray {
         val a = JSONArray()

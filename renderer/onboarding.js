@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.13': {
+      title: "What's new",
+      intro: 'Mirroring EngInk to your PC actually works now.',
+      slides: [
+        { emoji: '🔌', title: 'Mirror fixed', body: 'The tablet was blocking its own connection to the PC ("cleartext not permitted"). That’s fixed, so picking your PC in EngInk’s Mirror window connects.' },
+        { emoji: '🌐', title: 'Mirror over the internet', body: 'On Wi-Fi that stops devices from seeing each other (common in apartments and on campus), tap Mirror over the internet. It goes through your EngOrg account: no address or code, just keep EngOrg open and signed in on the PC. Strokes show up when you lift the pen.' },
+      ],
+    },
     '1.5.12': {
       title: "What's new",
       intro: 'EngInk has a calculator.',

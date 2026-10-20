@@ -109,6 +109,8 @@ class MainActivity : ComponentActivity() {
                                 // every Android device. If this device changed them more recently
                                 // (e.g. the app was killed in Ink before onResume could push), keep
                                 // the local prefs and push them up instead of pulling the stale copy.
+                                // The signed-in account, so Ink can mirror to the PC over the internet.
+                                view.evaluateJavascript(AUTH_JS) { auth -> CloudAuth.saveFromJs(this@MainActivity, auth) }
                                 view.evaluateJavascript(INK_SETTINGS_JS) { settings ->
                                     val applied = InkSettings.applyJson(this@MainActivity, settings)
                                     val cur = InkSettings.toJson(this@MainActivity)
@@ -218,6 +220,18 @@ class MainActivity : ComponentActivity() {
     if(u && u.email) return JSON.stringify([{email:u.email, name:(u.displayName||''), photo:(u.photoURL||'')}]);
   }catch(_){}
   return "[]";
+})()
+"""
+
+        // The Firebase account the PWA is signed in to (uid + refresh token + project), so the native
+        // mirror can write to Firestore directly. "null" when signed out.
+        private const val AUTH_JS = """
+(function(){
+  try{
+    var u = firebase.auth().currentUser; var o = firebase.app().options;
+    if(u && u.refreshToken) return JSON.stringify({uid:u.uid, rt:u.refreshToken, key:o.apiKey, pid:o.projectId});
+  }catch(_){}
+  return "null";
 })()
 """
 

@@ -225,7 +225,8 @@ const enginkMirror = (() => {
            <div class="engink-pair-cell engink-code"><span class="engink-k">Pairing code</span><b>${escapeHtml(sv.code)}</b></div>
            <div class="engink-pair-cell"><span class="engink-k">Connected</span><b>${conn.length ? escapeHtml(conn.map(c => c.device).join(', ')) : '—'}</b></div>
          </div>
-         <div class="engink-hint">On your tablet: open <b>EngInk</b> → tap the <b>Mirror</b> icon → pick this PC (or type <b>${escapeHtml(sv.host)}:${sv.port}</b>) and enter the code.</div>`
+         <div class="engink-hint">On your tablet: open <b>EngInk</b> → tap the <b>Mirror</b> icon → pick this PC (or type <b>${escapeHtml(sv.host)}:${sv.port}</b> and the code above).
+           If it can't find this PC, tap <b>Mirror over the internet</b> instead. That works on any Wi-Fi with no code, as long as you're signed in to EngOrg here.</div>`
       : `<div class="engink-hint">The mirror server is stopped. Start it, then connect from your tablet's EngInk app.</div>`;
 
     barEl.querySelector('[data-act="toggle"]').textContent = sv.running ? 'Stop server' : 'Start server';
@@ -312,6 +313,80 @@ const enginkMirror = (() => {
     subscribed = true;
   }
 
+  // ---- internet mirroring (through the signed-in EngOrg account) ----
+  // When the tablet can't reach this PC on the Wi-Fi (apartment / campus networks often block
+  // device-to-device traffic), it mirrors through Firestore instead: users/{uid}/data/inkMirror holds
+  // the session (device, notebook, viewport, heartbeat) and its `pages` subcollection one gzipped page
+  // each. We translate that into the same messages the LAN socket delivers, so everything downstream
+  // (the canvas, the popup, Export PDF) is shared.
+  const cloud = (() => {
+    let unsubMeta = null, unsubPages = null, session = null, notebookId = null, lastBeat = 0, staleT = null;
+    const FRESH_MS = 2 * 60 * 1000;   // a session counts as live if the tablet spoke this recently
+    const STALE_MS = 3 * 60 * 1000;   // …and ends if its heartbeat stops this long
+
+    async function gunzip(b64) {
+      const bin = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+      const stream = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'));
+      return await new Response(stream).text();
+    }
+
+    function end() {
+      if (unsubPages) { unsubPages(); unsubPages = null; }
+      if (session) handle({ t: 'client', connected: false, device: session.device });
+      session = null; notebookId = null;
+      clearInterval(staleT); staleT = null;
+    }
+
+    function watchPages(base, id) {
+      if (unsubPages) unsubPages();
+      unsubPages = base.doc('inkMirror').collection('pages').where('session', '==', id).onSnapshot(snap => {
+        snap.docChanges().forEach(async (ch) => {
+          if (ch.type === 'removed') return;
+          const d = ch.doc.data();
+          try { handle({ t: 'page', index: d.index, recs: JSON.parse(await gunzip(d.z)) }); } catch (e) { console.warn('EngInk cloud page failed', e); }
+        });
+      }, err => console.warn('EngInk cloud pages:', err && err.code));
+    }
+
+    function onMeta(snap) {
+      const d = snap.exists ? snap.data() : null;
+      const live = d && d.active && (Date.now() - (d.updatedAt || 0) < FRESH_MS);
+      if (!live) { if (session && (!d || !d.active)) end(); return; }
+      lastBeat = d.updatedAt || Date.now();
+      const base = firebaseSync.db.collection('users').doc(firebaseSync.user.uid).collection('data');
+      if (!session || session.id !== d.session) {
+        if (session) end();
+        session = { id: d.session, device: (d.device || 'Tablet') + ' (over the internet)' };
+        handle({ t: 'client', connected: true, device: session.device });
+        watchPages(base, d.session);
+        clearInterval(staleT);
+        staleT = setInterval(() => { if (Date.now() - lastBeat > STALE_MS) end(); }, 30000);
+      }
+      try {
+        const nb = d.notebook ? JSON.parse(d.notebook) : null;
+        if (nb && nb.id !== notebookId) { notebookId = nb.id; handle(Object.assign({ t: 'open' }, nb)); watchPages(base, d.session); }
+        if (d.view) handle(Object.assign({ t: 'view' }, JSON.parse(d.view)));
+      } catch (_) { /* malformed meta — wait for the next write */ }
+    }
+
+    function attach() {
+      detach();
+      if (typeof firebaseSync === 'undefined' || !firebaseSync.user || !firebaseSync.db) return;
+      const base = firebaseSync.db.collection('users').doc(firebaseSync.user.uid).collection('data');
+      unsubMeta = base.doc('inkMirror').onSnapshot({ includeMetadataChanges: false }, onMeta, err => console.warn('EngInk cloud:', err && err.code));
+    }
+    function detach() { if (unsubMeta) { unsubMeta(); unsubMeta = null; } end(); }
+
+    let started = false;
+    return {
+      start() {
+        if (started) return; started = true;
+        window.addEventListener('auth-changed', (e) => { if (e.detail && e.detail.signedIn) attach(); else detach(); });
+        attach();   // already signed in before we got here
+      },
+    };
+  })();
+
   // ---- build DOM ----
   function build() {
     root.innerHTML = `
@@ -379,7 +454,7 @@ const enginkMirror = (() => {
       subscribe();
     },
     /** Start following the tablet stream at app startup (the server itself auto-starts in main). */
-    listen() { subscribe(); },
+    listen() { subscribe(); cloud.start(); },
     async activate() {
       active = true;
       hideConnectCard();

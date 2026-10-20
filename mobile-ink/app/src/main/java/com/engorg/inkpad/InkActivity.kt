@@ -1654,6 +1654,21 @@ class InkActivity : ComponentActivity() {
                     setOnClickListener { MirrorManager.disconnect(); render() }
                 })
             } else {
+                // Over the internet: works on any network (no address, no code).
+                body.addView(pillRow {
+                    addView(ImageView(this@InkActivity).apply { setImageBitmap(Icons.bitmap(Icons.CAST, dp(20))); setColorFilter(AppTheme.accent); layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(12) } })
+                    val sub = TextView(this@InkActivity).apply { text = "Works on any Wi-Fi. Your PC just needs EngOrg open and signed in."; setTextColor(muted); textSize = 12f }
+                    addView(LinearLayout(this@InkActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(TextView(this@InkActivity).apply { text = "Mirror over the internet"; setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) })
+                        addView(sub)
+                    })
+                    setOnClickListener {
+                        sub.text = "Connecting…"
+                        MirrorManager.connectInternet(this@InkActivity) { ok, msg -> if (ok) render() else sub.text = msg }
+                    }
+                })
+                body.addView(TextView(this).apply { text = "On the same Wi-Fi"; setTextColor(muted); textSize = 12f; setTypeface(null, android.graphics.Typeface.BOLD); setPadding(0, dp(16), 0, dp(2)) })
                 val status = TextView(this).apply { text = "Searching for computers on your Wi-Fi…"; setTextColor(muted); textSize = 13f }
                 body.addView(status)
                 val listWrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -1661,12 +1676,12 @@ class InkActivity : ComponentActivity() {
 
                 fun connectTo(host: String, port: Int, code: String) {
                     status.text = "Connecting to $host…"
-                    MirrorManager.connect(host, port, code) { ok, msg -> if (ok) render() else status.text = msg }
+                    MirrorManager.connect(host, port, code) { ok, msg -> if (ok) render() else status.text = "$msg. If your Wi-Fi blocks devices from reaching each other, use Mirror over the internet above." }
                 }
 
                 MirrorManager.discover { peers ->
                     if (!dialog.isShowing) return@discover
-                    status.text = if (peers.isEmpty()) "No computers found. Enter the address shown in EngInk on your PC." else "Tap your computer:"
+                    status.text = if (peers.isEmpty()) "No computers found on this Wi-Fi. Many apartment and campus networks block devices from seeing each other. If so, use Mirror over the internet above." else "Tap your computer:"
                     listWrap.removeAllViews()
                     for (p in peers) listWrap.addView(pillRow {
                         addView(ImageView(this@InkActivity).apply { setImageBitmap(Icons.bitmap(Icons.CAST, dp(20))); setColorFilter(AppTheme.text); layoutParams = LinearLayout.LayoutParams(dp(20), dp(20)).apply { rightMargin = dp(12) } })
@@ -1679,7 +1694,10 @@ class InkActivity : ComponentActivity() {
                     })
                 }
 
-                body.addView(TextView(this).apply { text = "Or enter it manually"; setTextColor(muted); textSize = 12f; setPadding(0, dp(16), 0, dp(2)) })
+                body.addView(TextView(this).apply {
+                    text = "Or type it in. On your PC, open EngOrg → Engineering → EngInk to see its address (This PC) and the 6-digit pairing code."
+                    setTextColor(muted); textSize = 12f; setPadding(0, dp(16), 0, dp(2))
+                })
                 val hostInput = mirrorInput("IP address (e.g. 192.168.0.10)")
                 val codeInput = mirrorInput("6-digit code").apply { inputType = android.text.InputType.TYPE_CLASS_NUMBER }
                 body.addView(hostInput, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) })
