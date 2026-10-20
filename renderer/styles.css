@@ -13221,6 +13221,28 @@ embed.eco-media-content { object-fit: fill; }
 .engink-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted, #94A3B8); }
 .engink-dot.on { background: #22C55E; box-shadow: 0 0 0 3px rgba(34,197,94,.18); }
 .engink-pair.collapsed { display: none; }
+/* Mirror → Submit to an assignment */
+.engink-submit-back { position: fixed; inset: 0; z-index: 2500; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; }
+.engink-submit {
+  width: min(440px, 92vw); max-height: 80vh; display: flex; flex-direction: column;
+  background: var(--bg-card, #1E293B); color: var(--text-primary, #F1F5F9);
+  border: 1px solid var(--border-color, #334155); border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,.35);
+}
+.engink-submit-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px; font-weight: 700; font-size: 14px; }
+.engink-submit-body { padding: 0 14px 14px; overflow-y: auto; }
+.engink-submit-note { font-size: 12.5px; color: var(--text-muted, #94A3B8); line-height: 1.45; margin: 4px 0 8px; }
+.engink-submit-title { font-size: 15px; font-weight: 700; margin-top: 2px; }
+.engink-submit-row {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left;
+  padding: 9px 11px; margin-top: 6px; border-radius: 10px; cursor: pointer;
+  background: var(--bg-elevated, #273449); color: inherit; border: 1px solid transparent; font: inherit;
+}
+.engink-submit-row:hover { border-color: var(--accent, #818CF8); }
+.engink-submit-row b { font-size: 13.5px; }
+.engink-submit-row span { font-size: 11.5px; color: var(--text-muted, #94A3B8); }
+.engink-submit-scope { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.engink-submit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
 /* Full screen inside the EngOrg window (top is set to the titlebar's bottom when it opens). */
 .engink-wrap.engink-full {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 2300;

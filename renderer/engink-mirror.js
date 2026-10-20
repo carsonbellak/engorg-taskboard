@@ -335,6 +335,159 @@ const enginkMirror = (() => {
     setTimeout(() => window.print(), 60);
   }
 
+  // ---- submit to an assignment (from the PC) ----
+  // The mirrored pages become a PDF here (pdf-lib, already loaded for the File Merger) and go
+  // straight to Gradescope through this PC's login — the same upload the tablet's Attach & submit
+  // asks EngOrg to do. Other platforms (or a failed upload): save the PDF and open the assignment.
+
+  /** Render the mirrored pages ([only] = one page index) to PDF bytes, 2× for crisp handwriting. */
+  async function buildPdf(only) {
+    const nb = model.notebook;
+    const doc = await PDFLib.PDFDocument.create();
+    const idx = only != null ? [only] : Array.from({ length: nb.pageCount }, (_, i) => i);
+    const k = 2;
+    for (const i of idx) {
+      const c = document.createElement('canvas');
+      c.width = PAGE_W * k; c.height = PAGE_H * k;
+      const cx = c.getContext('2d');
+      cx.fillStyle = rgb(nb.pageColor); cx.fillRect(0, 0, c.width, c.height);
+      const savedCtx = ctx; ctx = cx;
+      cx.save(); cx.beginPath(); cx.rect(0, 0, c.width, c.height); cx.clip();
+      drawPaper(nb.paper, nb.pageColor, k);
+      drawRecs(model.pages.get(i), k);
+      cx.restore();
+      ctx = savedCtx;
+      const png = await new Promise(res => c.toBlob(b => res(b), 'image/png'));
+      const img = await doc.embedPng(new Uint8Array(await png.arrayBuffer()));
+      const page = doc.addPage([612, 792]);   // US Letter, like the tablet's own export
+      page.drawImage(img, { x: 0, y: 0, width: 612, height: 792 });
+    }
+    return await doc.save();
+  }
+
+  function toBase64(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+
+  function openAssignments() {
+    const projects = new Map((dataManager.projects || []).map(p => [p.id, p.courseShort || p.name || '']));
+    return (dataManager.tasks || [])
+      .filter(t => !t.completed && t.status !== 'done' && (t.category === 'assignment' || ['gradescope', 'variate', 'brightspace'].includes(t.source)))
+      .map(t => ({
+        t, course: projects.get(t.projectId) || '',
+        gs: !!(t.gradescopeCourseId && t.gradescopeAssignmentId),
+        url: ((t.links || []).find(l => /^https?:/.test(l.url || '')) || {}).url || '',
+      }))
+      .sort((a, b) => (!a.t.dueDate) - (!b.t.dueDate) || String(a.t.dueDate || '').localeCompare(String(b.t.dueDate || '')));
+  }
+
+  function dueLabel(d) {
+    if (!d) return 'no due date';
+    const day = new Date(String(d).slice(0, 10) + 'T00:00');
+    if (isNaN(day)) return 'due ' + d;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const n = Math.round((day - today) / 86400000);
+    const txt = n === 0 ? 'today' : n === 1 ? 'tomorrow' : n === -1 ? 'yesterday' : day.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    return 'due ' + txt + (String(d).length > 11 ? ' ' + String(d).slice(11, 16) : '');
+  }
+
+  function openSubmit() {
+    if (!model.notebook) { alertCard('Open a notebook on your tablet first.'); return; }
+    const back = document.createElement('div');
+    back.className = 'engink-submit-back';
+    back.innerHTML = '<div class="engink-submit"><div class="engink-submit-head"><span>📤 Submit to an assignment</span><button class="engink-connect-x" data-x>×</button></div><div class="engink-submit-body"></div></div>';
+    document.body.appendChild(back);
+    const body = back.querySelector('.engink-submit-body');
+    const close = () => back.remove();
+    back.addEventListener('click', (e) => { if (e.target === back || e.target.closest('[data-x]')) close(); });
+
+    const list = () => {
+      const items = openAssignments();
+      body.innerHTML = items.length
+        ? '<div class="engink-submit-note">Which assignment is this notebook for?</div>' + items.slice(0, 80).map((it, i) => `
+            <button class="engink-submit-row" data-i="${i}">
+              <b>${escapeHtml(it.t.title || 'Untitled')}</b>
+              <span>${escapeHtml([({ gradescope: 'Gradescope', variate: 'Variate', brightspace: 'Brightspace' })[it.t.source] || 'Assignment', it.gs ? 'auto-submit' : '', it.course, dueLabel(it.t.dueDate)].filter(Boolean).join(' · '))}</span>
+            </button>`).join('')
+        : '<div class="engink-submit-note">No open assignments in EngOrg.</div>';
+      body.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => confirm(items[+b.dataset.i])));
+    };
+
+    const confirm = (it) => {
+      let only = null;
+      const pageNow = curPage();
+      const paint = () => body.querySelectorAll('[data-scope]').forEach(c => c.classList.toggle('active', (c.dataset.scope === 'page') === (only != null)));
+      body.innerHTML = `
+        <div class="engink-submit-title">${escapeHtml(it.t.title || 'Untitled')}</div>
+        <div class="engink-submit-note">${escapeHtml([it.course, dueLabel(it.t.dueDate)].filter(Boolean).join(' · '))}</div>
+        <div class="engink-submit-scope">
+          <button class="engink-btn" data-scope="all">Whole notebook (${model.notebook.pageCount} pages)</button>
+          <button class="engink-btn" data-scope="page">Just page ${pageNow + 1}</button>
+        </div>
+        <div class="engink-submit-note">${it.gs
+          ? 'Uploads to Gradescope and marks it done. If the assignment needs pages matched to questions, Gradescope opens so you can do that.'
+          : 'This one can’t be submitted automatically: you’ll save the PDF, then the assignment opens so you can upload it.'}</div>
+        <div class="engink-submit-actions">
+          <button class="engink-btn" data-back>Back</button>
+          <button class="engink-btn active" data-go>${it.gs ? 'Submit' : 'Save PDF & open assignment'}</button>
+        </div>`;
+      paint();
+      body.querySelectorAll('[data-scope]').forEach(c => c.addEventListener('click', () => { only = c.dataset.scope === 'page' ? pageNow : null; paint(); }));
+      body.querySelector('[data-back]').addEventListener('click', list);
+      body.querySelector('[data-go]').addEventListener('click', () => run(it, only));
+    };
+
+    const result = (title, html, actions) => {
+      body.innerHTML = `<div class="engink-submit-title">${escapeHtml(title)}</div><div class="engink-submit-note">${html}</div>
+        <div class="engink-submit-actions">${actions || ''}<button class="engink-btn active" data-done>Done</button></div>`;
+      body.querySelector('[data-done]').addEventListener('click', close);
+    };
+
+    const markDone = (t) => {
+      if (t.completed) return;
+      dataManager.updateTaskStatus(t.id, 'done').then(() => window.dispatchEvent(new CustomEvent('tasks-changed'))).catch(() => {});
+    };
+
+    const fallback = async (it, bytes, why) => {
+      const name = (model.notebook.title || 'Notebook').replace(/[^\w .-]/g, '').trim() + '.pdf';
+      const saved = await window.api.fileMerger.save(bytes, name).catch(() => null);
+      if (it.url) window.api.openExternal(it.url);
+      result('Not submitted automatically',
+        `${escapeHtml(why)}<br>${saved && saved.path ? 'Saved to ' + escapeHtml(saved.path) + '. ' : ''}${it.url ? 'The assignment is open in your browser, so upload it there.' : 'This note has no assignment link, so upload it yourself.'}`,
+        '<button class="engink-btn" data-mark>Mark it done</button>');
+      const m = body.querySelector('[data-mark]');
+      m.addEventListener('click', () => { markDone(it.t); m.textContent = 'Marked done ✓'; m.disabled = true; });
+    };
+
+    const run = async (it, only) => {
+      body.innerHTML = `<div class="engink-submit-title">${escapeHtml(it.t.title || 'Untitled')}</div><div class="engink-submit-note" data-status>Making the PDF…</div>`;
+      const status = body.querySelector('[data-status]');
+      let bytes;
+      try { bytes = await buildPdf(only); } catch (e) { result('Couldn’t make the PDF', escapeHtml(e.message || String(e))); return; }
+      if (!it.gs) { fallback(it, bytes, 'This assignment isn’t on Gradescope.'); return; }
+      status.textContent = 'Uploading to Gradescope…';
+      const res = await window.api.gradescope.submitPdf(it.t.gradescopeCourseId, it.t.gradescopeAssignmentId, toBase64(bytes),
+        (model.notebook.title || 'Notebook') + '.pdf').catch(e => ({ error: e.message }));
+      if (!res || res.error) { fallback(it, bytes, (res && res.error) || 'Gradescope didn’t accept it.'); return; }
+      markDone(it.t);
+      if (res.needsMatching && res.url) window.api.openExternal(res.url);
+      result(res.needsMatching ? 'Uploaded: match your pages' : 'Submitted',
+        res.needsMatching ? 'It’s uploaded and marked done. Gradescope is open in your browser so you can assign pages to questions.' : 'Submitted to Gradescope and marked done.',
+        res.url ? '<button class="engink-btn" data-open>Open in Gradescope</button>' : '');
+      const o = body.querySelector('[data-open]');
+      if (o) o.addEventListener('click', () => window.api.openExternal(res.url));
+    };
+
+    list();
+  }
+
+  function alertCard(msg) {
+    if (typeof window._showConfirm === 'function') window._showConfirm({ title: 'EngInk', message: msg, confirmText: 'OK' });
+    else console.warn(msg);
+  }
+
   // ---- "tablet connected" card (bottom right, like the Windows-theme popup) ----
   let card = null, cardHideT = null;
   function showConnectCard(device) {
@@ -472,6 +625,7 @@ const enginkMirror = (() => {
           <button class="engink-btn engink-ic" data-act="fit" title="Fit the whole page">⤢</button>
           <button class="engink-btn" data-act="width" title="Fill the width (scroll to move down the page)">↔ Width</button>
           <button class="engink-btn engink-ic" data-act="full" title="Full screen">⛶</button>
+          <button class="engink-btn" data-act="submit" title="Hand this notebook in to an assignment">📤 Submit</button>
           <button class="engink-btn" data-act="pdf">Export PDF</button>
         </div>
         <div class="engink-pair"></div>
@@ -500,6 +654,7 @@ const enginkMirror = (() => {
       else if (act === 'width') { look.mode = 'width'; look.zoom = 1; toTop(); syncModeButtons(); requestRender(); }
       else if (act === 'full') setFullscreen(!root.querySelector('.engink-wrap.engink-full'));
       else if (act === 'pdf') exportPdf();
+      else if (act === 'submit') openSubmit();
     });
 
     // Inspect: wheel to zoom, drag to pan (desktop-side only; the tablet is unaffected).
