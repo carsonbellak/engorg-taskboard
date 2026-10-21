@@ -39,9 +39,10 @@
       { sep: true },
       // Route zoom through windowSplit so a split PANE zooms only itself (its own
       // CSS zoom), while the non-split window still uses real browser zoom.
-      { label: 'Reset Zoom', onClick: () => (ws ? ws.zoomReset() : api.menu.action('zoomReset')) },
-      { label: 'Zoom In', onClick: () => (ws ? ws.zoomIn() : api.menu.action('zoomIn')) },
-      { label: 'Zoom Out', onClick: () => (ws ? ws.zoomOut() : api.menu.action('zoomOut')) },
+      // keepOpen: the menu stays up after a click (until hovered off) so you can step several levels.
+      { label: 'Reset Zoom', keepOpen: true, onClick: () => (ws ? ws.zoomReset() : api.menu.action('zoomReset')) },
+      { label: 'Zoom In', keepOpen: true, onClick: () => (ws ? ws.zoomIn() : api.menu.action('zoomIn')) },
+      { label: 'Zoom Out', keepOpen: true, onClick: () => (ws ? ws.zoomOut() : api.menu.action('zoomOut')) },
       { sep: true },
       { label: 'Toggle Fullscreen', action: 'toggleFullscreen', accel: 'F11' },
     ];
@@ -75,6 +76,8 @@
       { label: 'Minimize', action: 'minimize' },
       { label: 'Close', action: 'close' },
     ] },
+    // Direct-action button: fully quits the app and ends every process it spawned.
+    { label: '⏻ Quit', className: 'tb-menu-quit', title: 'Quit EngOrg and end all its processes', onClick: () => api.menu.action('quitAll') },
     // Direct-action button (no dropdown): opens the companion web app in the browser.
     { label: '🌐 Web App', onClick: () => api.openExternal('https://assistant-taskboard.firebaseapp.com') },
   ];
@@ -85,12 +88,14 @@
 
   let openDropdown = null; // top-level <div class="tb-dropdown">
   let menuActive = false;  // hover-to-switch is enabled while a menu is open
+  let closeOnLeave = false; // set by a keepOpen item: dismiss once the cursor leaves the dropdowns
 
   function closeMenu() {
     bar.querySelectorAll('.tb-dropdown').forEach((d) => d.remove());
     openDropdown = null;
     menuRoot.querySelectorAll('.tb-menu-btn.open').forEach((b) => b.classList.remove('open'));
     menuActive = false;
+    closeOnLeave = false;
   }
 
   function closeSubmenus() { bar.querySelectorAll('.tb-dropdown.tb-submenu').forEach((d) => d.remove()); }
@@ -113,7 +118,8 @@
         // Only top-level items dismiss an open flyout when hovered.
         if (!isSubmenu) item.addEventListener('mouseenter', closeSubmenus);
         item.addEventListener('click', (e) => {
-          e.stopPropagation(); closeMenu();
+          e.stopPropagation();
+          if (it.keepOpen) closeOnLeave = true; else closeMenu();
           if (it.onClick) it.onClick(); else if (it.action) api.menu.action(it.action);
         });
       }
@@ -159,6 +165,8 @@
     if (menu.onClick) {
       // Direct-action button — runs immediately, no dropdown.
       btn.classList.add('tb-menu-action');
+      if (menu.className) btn.classList.add(menu.className);
+      if (menu.title) btn.title = menu.title;
       btn.addEventListener('click', (e) => { e.stopPropagation(); closeMenu(); menu.onClick(); });
       btn.addEventListener('mouseenter', () => { if (menuActive) closeMenu(); });
       menuRoot.appendChild(btn);
@@ -172,6 +180,14 @@
     // Classic menu behavior: once one menu is open, hovering switches to another.
     btn.addEventListener('mouseenter', () => { if (menuActive && !btn.classList.contains('open')) openMenu(btn, menu); });
     menuRoot.appendChild(btn);
+  });
+
+  // After a keepOpen click, leaving the dropdown (or its flyouts) dismisses it.
+  bar.addEventListener('mouseout', (e) => {
+    if (!closeOnLeave || !e.target.closest('.tb-dropdown')) return;
+    const to = e.relatedTarget;
+    if (to && to.closest && to.closest('.tb-dropdown')) return;
+    closeMenu();
   });
 
   // Dismiss menus on outside click or Escape.

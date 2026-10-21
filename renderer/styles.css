@@ -66,6 +66,7 @@ body {
   padding: 0 9px; height: 28px;
 }
 .tb-menu-btn:hover, .tb-menu-btn.open { background: var(--bg-hover, #F1F5F9); color: var(--text-primary, #1E293B); }
+.tb-menu-btn.tb-menu-quit:hover { background: var(--danger, #ef4444); color: #fff; }
 
 .tb-btn {
   background: none; border: none; cursor: pointer;
@@ -11860,6 +11861,8 @@ body.theme-light .syn-builtin { color: #059669; }
    ENGINEERING UTILITIES TAB
    ============================================================ */
 #main-content:has(#view-engineering.active) { padding: 0; overflow: hidden; }
+/* min-height:0 bounds the panel to the viewport so utilities scroll their own content */
+#view-engineering.active { min-height: 0; }
 .eng-utilities { display: flex; flex: 1; min-height: 0; gap: 0; }
 .eng-subnav {
   width: 210px; flex-shrink: 0; padding: 12px 10px;
@@ -11886,7 +11889,8 @@ body.theme-light .syn-builtin { color: #059669; }
 /* ============================================================
    FILE MERGER
    ============================================================ */
-.fmerge { display: flex; flex-direction: column; gap: 12px; padding: 16px; height: 100%; box-sizing: border-box; }
+#view-file-merger { display: flex; flex-direction: column; }
+.fmerge { display: flex; flex-direction: column; gap: 12px; padding: 16px; flex: 1; min-height: 0; box-sizing: border-box; }
 .fmerge-head { flex-shrink: 0; }
 .fmerge-title { font-size: 18px; font-weight: 700; color: var(--text-primary); }
 .fmerge-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
