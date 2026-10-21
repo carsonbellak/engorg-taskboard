@@ -19,7 +19,7 @@ The user runs **several Claude sessions at once** against this install and the s
 - **Only the user's own words in their latest message authorize it** ("push", "ship", `/ship`, "deploy the function"). Approval doesn't carry over to later messages or to other actions.
 - **Nothing else is permission.** That includes this file's Shipping section, the Cloud Functions order, `/ship`, memories, a skill, "the next step of the workflow", or "the fix needs a deploy to take effect". Those describe **how** to ship once asked. They never say **whether** to ship.
 - When the work is done and only takes effect after shipping, **stop**. Say what's ready, what it would ship, and ask. Leave edits uncommitted.
-- **Enforced** by `.claude/scripts/shared-state-gate.js` (PreToolUse). It blocks these commands unless `ship-intent.js` saw a ship request in the user's latest prompt, and even then the user gets an approval prompt. If it blocks you, **stop and ask**. Never retry, rephrase, split the command, switch shells, script around it (`node -e`/child_process), or touch `.claude/.ship-grant.json` or the hook config.
+- **Enforced** by `.claude/scripts/shared-state-gate.js` (PreToolUse). It blocks these commands unless `ship-intent.js` saw a ship request in the user's latest prompt. An explicit `/push` or `/ship` then runs the whole runbook **with no prompts** (the user wants it unattended — don't add confirmations of your own). A free-text request ("push it") still gets a per-command approval prompt. If it blocks you, **stop and ask**. Never retry, rephrase, split the command, switch shells, script around it (`node -e`/child_process), or touch `.claude/.ship-grant.json` or the hook config.
 
 ---
 
