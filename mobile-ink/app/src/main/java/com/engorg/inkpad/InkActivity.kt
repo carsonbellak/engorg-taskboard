@@ -1497,10 +1497,9 @@ class InkActivity : ComponentActivity() {
 
     // ---------- attach & submit to an assignment ----------
     /**
-     * Pick one of your open assignments (read from your EngOrg account) and hand this notebook to it:
-     * Gradescope ones are uploaded by EngOrg on your PC (which then marks it done, and opens
-     * Gradescope's page matching when the assignment needs it); anything else, or any failure, saves
-     * the PDF to Downloads and opens the assignment page.
+     * Pick one of your open assignments (read from your EngOrg account) and submit this notebook to
+     * it from the tablet: Gradescope ones upload directly (page matching opens here if needed);
+     * anything else opens its page in the in-app browser, whose upload button gets the PDF.
      */
     private fun showSubmitDialog() {
         val pane = focused ?: return
@@ -1549,33 +1548,83 @@ class InkActivity : ComponentActivity() {
         }
         val fs = FirestoreRest(acct)
         val ui = android.os.Handler(android.os.Looper.getMainLooper())
+        android.webkit.CookieManager.getInstance()   // first touch on the UI thread (Gradescope reads it off-thread)
 
-        fun showResult(a: AssignmentSubmit.Assignment, o: AssignmentSubmit.Outcome) {
-            body.removeAllViews()
-            when (o) {
-                is AssignmentSubmit.Outcome.Submitted -> {
-                    body.addView(note(if (o.matchPages) "Uploaded to Gradescope and marked done." else "Submitted to Gradescope and marked done.", AppTheme.text).apply { textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) })
-                    if (o.matchPages) body.addView(note("Gradescope needs you to match pages to questions. It's open on your PC. You can also do it here."))
-                    o.url?.let { u -> body.addView(button(if (o.matchPages) "Match pages on the tablet" else "Open in Gradescope", false) { try { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(u))) } catch (_: Exception) { } }) }
-                }
-                is AssignmentSubmit.Outcome.Fallback -> {
-                    body.addView(note("Not submitted automatically", AppTheme.text).apply { textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) })
-                    body.addView(note(o.why))
-                    body.addView(note(
-                        (o.saved?.let { "The PDF is saved to $it. " } ?: "") +
-                        (if (a.url != null) "The assignment page is open, so upload it there." else "This note has no assignment link, so upload it yourself.")))
-                    body.addView(button("Mark it done in EngOrg", false) {
-                        Thread { val ok = try { AssignmentSubmit.requestDone(fs, a); true } catch (_: Exception) { false }
-                            ui.post { Toast.makeText(this, if (ok) "Marked done (EngOrg updates it next time it's open)" else "Couldn't reach your EngOrg account", Toast.LENGTH_SHORT).show() } }.start()
-                    })
-                }
+        fun heading(a: AssignmentSubmit.Assignment) = TextView(this).apply { text = a.title; setTextColor(AppTheme.text); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        fun bold(t: String) = note(t, AppTheme.text).apply { textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD) }
+        // Marking done is a request EngOrg on the PC applies next time it's open.
+        fun markDone(a: AssignmentSubmit.Assignment, toast: Boolean) = Thread {
+            val ok = try { AssignmentSubmit.requestDone(fs, a); true } catch (_: Exception) { false }
+            if (toast) ui.post { Toast.makeText(this, if (ok) "Marked done (EngOrg updates it next time it's open)" else "Couldn't reach your EngOrg account", Toast.LENGTH_SHORT).show() }
+        }.start()
+        fun saveCopy(pdf: File) = Thread {
+            val where = try { AssignmentSubmit.saveToDownloads(this, pdf) } catch (_: Exception) { null }
+            ui.post { Toast.makeText(this, where?.let { "Saved to $it" } ?: "Couldn't save the PDF", Toast.LENGTH_SHORT).show() }
+        }.start()
+
+        // The assignment's own page in the in-app browser; its upload button gets this PDF.
+        fun openToUpload(a: AssignmentSubmit.Assignment, url: String, pdf: File) {
+            showWebSheet(a.title, url, pdf) {
+                body.removeAllViews()
+                body.addView(heading(a))
+                body.addView(note("Uploaded it there? Mark it done so EngOrg knows.", AppTheme.text))
+                body.addView(button("Mark it done in EngOrg", true) { markDone(a, true); dialog.dismiss() })
+                body.addView(button("Open the page again", false) { openToUpload(a, url, pdf) })
+                body.addView(button("Close", false) { dialog.dismiss() })
             }
-            body.addView(button("Done", true) { dialog.dismiss() })
+        }
+
+        fun showSubmitted(a: AssignmentSubmit.Assignment, o: AssignmentSubmit.Outcome.Submitted) {
+            body.removeAllViews()
+            body.addView(heading(a))
+            body.addView(bold(if (o.matchPages) "Uploaded to Gradescope." else "Submitted to Gradescope."))
+            body.addView(note(if (o.matchPages) "Gradescope needs you to match pages to questions." else "EngOrg marks it done next time it's open."))
+            body.addView(button(if (o.matchPages) "Match pages" else "View the submission", o.matchPages) { showWebSheet("Gradescope", o.url, null) })
+            body.addView(button("Done", !o.matchPages) { dialog.dismiss() })
+        }
+
+        fun showFailed(a: AssignmentSubmit.Assignment, why: String, pdf: File) {
+            body.removeAllViews()
+            body.addView(heading(a))
+            body.addView(bold("Not submitted"))
+            body.addView(note(why))
+            val url = a.url ?: if (a.viaGradescope) "${Gradescope.BASE}/courses/${a.gsCourseId}/assignments/${a.gsAssignmentId}" else null
+            if (url != null) body.addView(button("Upload it on the assignment page", true) { openToUpload(a, url, pdf) })
+            body.addView(button("Save PDF to Downloads", false) { saveCopy(pdf) })
+            body.addView(button("Mark it done in EngOrg", false) { markDone(a, true) })
+            body.addView(button("Close", false) { dialog.dismiss() })
+        }
+
+        // Upload from the tablet; the first time (or once the login expires) sign in, then try once more.
+        fun runSubmit(a: AssignmentSubmit.Assignment, pdf: File, status: TextView, triedLogin: Boolean) {
+            status.text = "Uploading to Gradescope…"
+            dialog.setCancelable(false)
+            Thread {
+                val o = AssignmentSubmit.submit(this, a, pdf)
+                ui.post {
+                    dialog.setCancelable(true)
+                    if (!dialog.isShowing) return@post
+                    when (o) {
+                        is AssignmentSubmit.Outcome.Submitted -> {
+                            markDone(a, false); showSubmitted(a, o)
+                            if (o.matchPages) showWebSheet("Match pages", o.url, null)
+                        }
+                        is AssignmentSubmit.Outcome.NeedsLogin -> if (triedLogin) showFailed(a, "Gradescope still wants a sign-in.", pdf) else {
+                            status.text = "Sign in to Gradescope (only needed once on this tablet)…"
+                            var signedIn = false
+                            showWebSheet("Sign in to Gradescope", Gradescope.LOGIN_URL, null, watch = { u -> Gradescope.isSignedInUrl(u).also { if (it) signedIn = true } }) {
+                                if (signedIn) runSubmit(a, pdf, status, true) else showFailed(a, "Not signed in to Gradescope.", pdf)
+                            }
+                        }
+                        is AssignmentSubmit.Outcome.Failed -> showFailed(a, o.why, pdf)
+                    }
+                }
+            }.start()
         }
 
         fun confirm(a: AssignmentSubmit.Assignment) {
             body.removeAllViews()
-            body.addView(TextView(this).apply { text = a.title; setTextColor(AppTheme.text); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD) })
+            body.addView(heading(a))
             body.addView(note(listOf(a.sourceLabel, a.course, dueText(a.due)).filter { it.isNotBlank() }.joinToString(" · ")))
             var onlyPage = false
             val scope = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(8), 0, 0) }
@@ -1591,22 +1640,20 @@ class InkActivity : ComponentActivity() {
             paint = { for (c in listOf(c1, c2)) { @Suppress("UNCHECKED_CAST") val on = (c.tag as () -> Boolean)(); c.background = pill(if (on) accent else light); c.setTextColor(if (on) AppTheme.onAccent() else onSurface) } }
             scope.addView(c1); scope.addView(c2); paint()
             body.addView(scope)
-            body.addView(note(if (a.viaGradescope)
-                "EngOrg on your PC uploads it to Gradescope and marks it done. If the assignment needs pages matched to questions, Gradescope opens so you can do that. Keep EngOrg open and signed in on the PC."
-            else "${a.sourceLabel} can't be submitted automatically, so this saves the PDF to Downloads and opens the assignment for you to upload."))
-            val status = note("")
-            body.addView(button(if (a.viaGradescope) "Submit" else "Save PDF & open assignment", true) {
-                body.removeAllViews()
-                body.addView(TextView(this).apply { text = a.title; setTextColor(AppTheme.text); textSize = 16f; setTypeface(null, android.graphics.Typeface.BOLD) })
-                body.addView(status); status.text = "Making the PDF…"
-                dialog.setCancelable(false)
-                val pdf = pane.exportPdf(cacheDir, if (onlyPage) pane.currentPage() else null)
-                if (pdf == null) { status.text = "Couldn't build the PDF."; dialog.setCancelable(true); return@button }
-                Thread {
-                    val o = AssignmentSubmit.submit(this, fs, a, pdf) { msg -> ui.post { status.text = msg } }
-                    ui.post { dialog.setCancelable(true); showResult(a, o) }
-                }.start()
-            })
+            body.addView(note(when {
+                a.viaGradescope -> "Uploads it to Gradescope from this tablet. The first time, you sign in to Gradescope here. If it needs pages matched to questions, that opens next."
+                a.url != null -> "Opens the ${a.sourceLabel} page here. Tap its upload button and EngInk hands it this PDF."
+                else -> "This note has no assignment link, so save the PDF and upload it yourself."
+            }))
+            fun makePdf(): File? = pane.exportPdf(cacheDir, if (onlyPage) pane.currentPage() else null)
+                .also { if (it == null) Toast.makeText(this, "Couldn't build the PDF.", Toast.LENGTH_SHORT).show() }
+            if (a.viaGradescope) body.addView(button("Submit", true) {
+                val pdf = makePdf() ?: return@button
+                val status = note("")
+                body.removeAllViews(); body.addView(heading(a)); body.addView(status)
+                runSubmit(a, pdf, status, false)
+            }) else if (a.url != null) body.addView(button("Open & upload here", true) { makePdf()?.let { openToUpload(a, a.url, it) } })
+            body.addView(button("Save PDF to Downloads", false) { makePdf()?.let { saveCopy(it) } })
             body.addView(button("Back", false) { showList() })
         }
 
@@ -1629,7 +1676,7 @@ class InkActivity : ComponentActivity() {
                         layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
                         addView(TextView(this@InkActivity).apply { text = a.title; setTextColor(AppTheme.text); textSize = 14.5f; setTypeface(null, android.graphics.Typeface.BOLD); maxLines = 2 })
                         addView(TextView(this@InkActivity).apply {
-                            text = listOf(a.sourceLabel + (if (a.viaGradescope) " · auto-submit" else ""), a.course, dueText(a.due)).filter { it.isNotBlank() }.joinToString(" · ")
+                            text = listOf(a.sourceLabel + (if (a.viaGradescope) " · submits from here" else ""), a.course, dueText(a.due)).filter { it.isNotBlank() }.joinToString(" · ")
                             setTextColor(muted); textSize = 12f
                         })
                         setOnClickListener { confirm(a) }
@@ -1642,6 +1689,60 @@ class InkActivity : ComponentActivity() {
     }
     private var showListFn: () -> Unit = {}
     private fun showList() = showListFn()
+
+    /**
+     * A full-screen in-app browser for submitting. Its cookies are the tablet's Gradescope login
+     * ([Gradescope] shares them). [pdf] is handed to any upload button the page opens; [watch] sees
+     * each page visited and returns true to close the sheet. [onClose] runs however it closes.
+     */
+    private fun showWebSheet(title: String, url: String, pdf: File?, watch: ((String) -> Boolean)? = null, onClose: () -> Unit = {}) {
+        val web = android.webkit.WebView(this)
+        val cookies = android.webkit.CookieManager.getInstance().apply { setAcceptCookie(true); setAcceptThirdPartyCookies(web, true) }
+        web.settings.apply { javaScriptEnabled = true; domStorageEnabled = true; useWideViewPort = true; loadWithOverviewMode = true; builtInZoomControls = true; displayZoomControls = false }
+        val dialog = Dialog(this)
+        web.webViewClient = object : android.webkit.WebViewClient() {
+            override fun doUpdateVisitedHistory(view: android.webkit.WebView?, u: String?, isReload: Boolean) {
+                if (u != null && watch?.invoke(u) == true) web.post { dialog.dismiss() }
+            }
+        }
+        web.webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onShowFileChooser(view: android.webkit.WebView?, cb: android.webkit.ValueCallback<Array<android.net.Uri>>?, params: android.webkit.WebChromeClient.FileChooserParams?): Boolean {
+                val f = pdf ?: return false
+                cb?.onReceiveValue(arrayOf(FileProvider.getUriForFile(this@InkActivity, "com.engorg.inkpad.fileprovider", f)))
+                Toast.makeText(this@InkActivity, "Attached ${f.name}", Toast.LENGTH_SHORT).show()
+                return true
+            }
+        }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(18), dp(10), dp(12), dp(10)); setBackgroundColor(AppTheme.surface)
+            addView(TextView(this@InkActivity).apply { text = title; setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD); maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END },
+                LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            if (pdf != null) addView(TextView(this@InkActivity).apply { text = "Upload buttons get this notebook's PDF"; setTextColor(onSurface); alpha = 0.7f; textSize = 12f; setPadding(dp(10), 0, dp(10), 0) })
+            addView(TextView(this@InkActivity).apply {
+                text = "Done"; textSize = 14f; setTypeface(null, android.graphics.Typeface.BOLD); stateListAnimator = null
+                background = pill(accent); setTextColor(AppTheme.onAccent()); setPadding(dp(18), dp(8), dp(18), dp(8))
+                setOnClickListener { dialog.dismiss() }
+            })
+        }
+        dialog.setContentView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.surface)
+            addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+            addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        })
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(AppTheme.surface))
+            clearFlags(android.view.WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)   // let the page's fields raise the keyboard
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        dialog.setOnKeyListener { _, code, ev ->
+            if (code == android.view.KeyEvent.KEYCODE_BACK && web.canGoBack()) { if (ev.action == android.view.KeyEvent.ACTION_UP) web.goBack(); true } else false
+        }
+        dialog.setOnDismissListener { cookies.flush(); web.stopLoading(); web.destroy(); onClose() }
+        dialog.show()
+        dialog.window?.setLayout(MATCH_PARENT, MATCH_PARENT)
+        web.loadUrl(url)
+    }
 
     // ---------- PDF export + email ----------
     private fun emailNotebook(repick: Boolean = false) {

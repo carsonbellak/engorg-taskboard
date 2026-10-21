@@ -598,6 +598,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     event.getToolType(event.actionIndex) == MotionEvent.TOOL_TYPE_FINGER) {
                     abortSelectGesture(); mode = Mode.PAN
                 }
+                // Pan from where the fingers are now (the anchor may be stale from a select gesture).
+                if (mode == Mode.PAN) panFocus(event).let { lastPanX = it.x; lastPanY = it.y }
                 return true
             }
             MotionEvent.ACTION_POINTER_UP -> {
@@ -605,12 +607,15 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (mode != Mode.PAN) return true   // never hand a stylus stroke/lasso over to a palm
                 val up = event.actionIndex
                 if (event.getPointerId(up) == activePointerId) activePointerId = event.getPointerId(if (up == 0) 1 else 0)
-                val idx = event.findPointerIndex(activePointerId)
-                if (idx >= 0) { lastPanX = event.getX(idx); lastPanY = event.getY(idx) }
+                panFocus(event, up).let { lastPanX = it.x; lastPanY = it.y }
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
-                if (scaleDetector.isInProgress) return true
+                if (scaleDetector.isInProgress) {
+                    // The pinch pans on its own; keep the anchor current so panning resumes without a jump.
+                    if (mode == Mode.PAN) panFocus(event).let { lastPanX = it.x; lastPanY = it.y }
+                    return true
+                }
                 val idx = event.findPointerIndex(activePointerId)
                 if (idx < 0) return true
                 if (addArmed) { if (hypot(event.getX(idx) - lastPanX, event.getY(idx) - lastPanY) > dp(12)) addArmed = false; return true }
@@ -627,13 +632,16 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                         }
                     }
                     Mode.PAN -> {
-                        val x = event.getX(idx); val y = event.getY(idx)
+                        val f = panFocus(event); val x = f.x; val y = f.y
                         tx += x - lastPanX; ty += y - lastPanY
                         lastPanX = x; lastPanY = y
                         clampTransform(); applyTransform()
                     }
                     Mode.ERASE -> eraseAt(event.getX(idx), event.getY(idx))
                     Mode.SELECT -> {
+                        // A finger waits a beat before it moves the selection or draws a lasso: a second
+                        // finger landing then makes it a pan, with nothing to snap back.
+                        if (event.getToolType(idx) == MotionEvent.TOOL_TYPE_FINGER && event.eventTime - tapDownAt < 120) return true
                         if (hypot(event.getX(idx) - lpDown.x, event.getY(idx) - lpDown.y) > dp(10)) removeCallbacks(longPress)
                         moveSelect(event.getX(idx), event.getY(idx))
                     }
@@ -665,6 +673,17 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             }
         }
         return false
+    }
+
+    /** The center of the fingers on the glass (the pan anchor), leaving out pointer [skip] (one lifting). */
+    private fun panFocus(event: MotionEvent, skip: Int = -1): PointF {
+        var x = 0f; var y = 0f; var n = 0
+        for (k in 0 until event.pointerCount) {
+            if (k == skip || event.getToolType(k) != MotionEvent.TOOL_TYPE_FINGER) continue
+            x += event.getX(k); y += event.getY(k); n++
+        }
+        if (n == 0) { val k = event.findPointerIndex(activePointerId).coerceAtLeast(0); return PointF(event.getX(k), event.getY(k)) }
+        return PointF(x / n, y / n)
     }
 
     private fun beginDraw(event: MotionEvent, idx: Int) {
@@ -1153,16 +1172,21 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private var tapDown: PointF? = null
     private var tapDownAt = 0L
 
-    /** The graph button: a new graph on the page in view, open and ready to type. */
+    /**
+     * The graph button: a new graph on the page in view, open and ready to type. It's sized to what's
+     * on screen (at most 600×330 page units), so zoomed in it still fits with room around it.
+     */
     fun spawnGraph() {
         if (finishedView.pages.isEmpty()) return
         closeGraph(); clearSelection()
         val page = currentPage()
-        val w = 600f; val h = 330f
         val pw = FinishedStrokesView.PAGE_W; val ph = FinishedStrokesView.PAGE_H
         val vw = finishedView.width.toFloat(); val vh = finishedView.height.toFloat()
+        val k = min(1f, min(vw / scale * 0.8f / 600f, vh / scale * 0.5f / 330f))
+        val w = 600f * k; val h = 330f * k
+        val headerU = dp(48) / scale   // the graph window's toolbar sits above the card
         val cx = ((vw / 2f - tx) / scale).coerceIn(w / 2f, pw - w / 2f)
-        val cy = ((vh / 2f - ty) / scale - finishedView.pageTop(page)).coerceIn(h / 2f + 50f, ph - h / 2f)
+        val cy = ((vh / 2f - ty) / scale - finishedView.pageTop(page)).coerceIn(min(h / 2f + headerU, ph - h / 2f), ph - h / 2f)
         val spec = ShapeSpec(ShapeType.GRAPH, arrayListOf(PointF(cx - w / 2f, cy - h / 2f), PointF(cx + w / 2f, cy + h / 2f)))
         spec.graph = GraphCard(false, listOf(GraphRow("", Color.rgb(0xC7, 0x44, 0x40))), false, 0.0, 0.0, 20.0,
             Graph3DView.DEFAULT_YAW, Graph3DView.DEFAULT_PITCH, Graph3DView.DEFAULT_RANGE, true)
@@ -1213,6 +1237,13 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                     val a = s.verts[0]; val b = s.verts[1]
                     val l = min(a.x, b.x); val t = min(a.y, b.y)
                     a.set(l, t); b.set(min(l + w, FinishedStrokesView.PAGE_W), min(t + h, FinishedStrokesView.PAGE_H))
+                }
+            }
+            override fun resizeFromTopLeft(w: Float, h: Float, done: Boolean) {
+                replaceGraph(save = done) { s ->
+                    val a = s.verts[0]; val b = s.verts[1]
+                    val r = max(a.x, b.x); val bt = max(a.y, b.y)
+                    a.set(max(0f, r - w), max(0f, bt - h)); b.set(r, bt)
                 }
             }
             override fun insertInk(ink: List<GraphInk>, w: Float, h: Float) = insertGraph(ink, w, h)

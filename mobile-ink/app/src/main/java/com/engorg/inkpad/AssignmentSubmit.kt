@@ -2,15 +2,20 @@ package com.engorg.inkpad
 
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import android.util.Base64
+import android.webkit.CookieManager
+import android.webkit.WebSettings
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
@@ -86,14 +91,12 @@ class FirestoreRest(private val acct: CloudAuth.Account) {
 }
 
 /**
- * "Attach & submit to assignment": the notebook as a PDF, handed to the right place.
+ * "Attach & submit to assignment": the notebook as a PDF, submitted from the tablet itself.
  *
- * Gradescope assignments go to EngOrg on the PC (which holds the Gradescope login): the PDF is
- * written in chunks to users/{uid}/data/inkSubmit/requests/{id}/chunks and a pending request beside
- * it; the PC claims it, uploads, marks the note done and reports back. If the PC doesn't claim it in
- * time the request is cancelled first (only if still unclaimed, so it can't be submitted twice) and
- * we fall back. Everything else (Variate, Brightspace, unlinked notes) and every failure: the PDF goes
- * to Downloads and the assignment page opens so it can be uploaded by hand.
+ * Gradescope assignments are uploaded straight from here ([Gradescope]), signed in through the
+ * in-app browser once (its cookies are the login). Everything else (Variate, Brightspace) opens the
+ * assignment in the in-app browser, whose upload button is handed the PDF. Marking the note done is
+ * a request EngOrg on the PC applies next time it's open.
  */
 object AssignmentSubmit {
     class Assignment(
@@ -131,67 +134,23 @@ object AssignmentSubmit {
     }
 
     sealed class Outcome {
-        /** Uploaded by the PC; [matchPages] = Gradescope wants pages assigned (opened on the PC). */
-        class Submitted(val matchPages: Boolean, val url: String?) : Outcome()
-        /** Not submitted: [why], with the PDF saved to Downloads ([saved] = where) and the assignment opened. */
-        class Fallback(val why: String, val saved: String?) : Outcome()
+        /** Gradescope took it ([url] = where it landed); [matchPages] = it wants pages assigned to questions. */
+        class Submitted(val matchPages: Boolean, val url: String) : Outcome()
+        /** The tablet isn't signed in to Gradescope (or the sign-in expired). */
+        object NeedsLogin : Outcome()
+        /** Not submitted, because [why]. */
+        class Failed(val why: String) : Outcome()
     }
 
-    /**
-     * Submit [pdf] to [a]. Blocking (call off the UI thread); [progress] gets short status lines.
-     * Never submits twice: a request the PC hasn't claimed is cancelled before falling back.
-     */
-    fun submit(ctx: Context, fs: FirestoreRest, a: Assignment, pdf: File, progress: (String) -> Unit): Outcome {
-        if (!a.viaGradescope) return fallback(ctx, a, pdf, "${a.sourceLabel} assignments can’t be submitted automatically.")
-        val id = UUID.randomUUID().toString().replace("-", "").take(20)
-        val path = "inkSubmit/requests/$id"
-        try {
-            progress("Sending the PDF to EngOrg on your PC…")
-            val b64 = Base64.encodeToString(pdf.readBytes(), Base64.NO_WRAP)
-            val parts = b64.chunked(700_000)
-            parts.forEachIndexed { k, d -> fs.patch("$path/chunks/c$k", JSONObject().put("i", FirestoreRest.i(k.toLong())).put("d", FirestoreRest.s(d))) }
-            fs.patch(path, JSONObject()
-                .put("type", FirestoreRest.s("submit")).put("status", FirestoreRest.s("pending"))
-                .put("taskId", FirestoreRest.s(a.id)).put("title", FirestoreRest.s(a.title))
-                .put("courseId", FirestoreRest.s(a.gsCourseId!!)).put("assignmentId", FirestoreRest.s(a.gsAssignmentId!!))
-                .put("filename", FirestoreRest.s(pdf.name)).put("chunks", FirestoreRest.i(parts.size.toLong()))
-                .put("createdAt", FirestoreRest.i(System.currentTimeMillis())).put("device", FirestoreRest.s(Build.MODEL ?: "Tablet")))
-        } catch (e: Exception) {
-            return fallback(ctx, a, pdf, e.message ?: "Couldn’t reach your EngOrg account.")
-        }
-
-        progress("Waiting for your PC to upload it…")
-        val start = System.currentTimeMillis()
-        var claimed = false
-        while (true) {
-            Thread.sleep(2000)
-            val doc = try { fs.get(path) } catch (_: Exception) { null } ?: continue
-            val f = doc.optJSONObject("fields")
-            val status = FirestoreRest.decode(f?.optJSONObject("status")) as? String ?: "pending"
-            when (status) {
-                "uploading" -> if (!claimed) { claimed = true; progress("Uploading to Gradescope…") }
-                "submitted" -> return Outcome.Submitted(FirestoreRest.decode(f?.optJSONObject("needsMatching")) == true, FirestoreRest.decode(f?.optJSONObject("openUrl")) as? String)
-                "failed" -> return fallback(ctx, a, pdf, (FirestoreRest.decode(f?.optJSONObject("message")) as? String) ?: "Gradescope didn’t accept it.")
-                "expired", "cancelled" -> return fallback(ctx, a, pdf, "Your PC didn’t pick it up in time.")
-            }
-            val waited = System.currentTimeMillis() - start
-            if (!claimed && waited > 60_000) {
-                // Cancel only if still unclaimed, so the PC can't submit it after we fall back.
-                val cancelled = try { fs.patch(path, JSONObject().put("status", FirestoreRest.s("cancelled")), listOf("status"), doc.optString("updateTime")) } catch (_: Exception) { false }
-                if (cancelled) return fallback(ctx, a, pdf, "Your PC didn’t answer. Is EngOrg open and signed in there?")
-            }
-            if (waited > 5 * 60_000) return fallback(ctx, a, pdf, "Gradescope is taking too long. Check the assignment page.")
-        }
+    /** Upload [pdf] to Gradescope assignment [a]. Blocking (call off the UI thread). */
+    fun submit(ctx: Context, a: Assignment, pdf: File): Outcome {
+        if (!a.viaGradescope) return Outcome.Failed("${a.sourceLabel} assignments can’t be submitted automatically.")
+        return try { Gradescope.submitPdf(ctx, a.gsCourseId!!, a.gsAssignmentId!!, pdf) }
+        catch (e: Exception) { Outcome.Failed(e.message ?: "Couldn’t reach Gradescope.") }
     }
 
-    /** Save the PDF to Downloads/EngInk and open the assignment so it can be uploaded by hand. */
-    fun fallback(ctx: Context, a: Assignment, pdf: File, why: String): Outcome {
-        val saved = try { saveToDownloads(ctx, pdf) } catch (_: Exception) { null }
-        a.url?.let { u -> try { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Exception) { } }
-        return Outcome.Fallback(why, saved)
-    }
-
-    private fun saveToDownloads(ctx: Context, pdf: File): String? {
+    /** Copy the PDF to Downloads/EngInk; returns where, or null. */
+    fun saveToDownloads(ctx: Context, pdf: File): String? {
         if (Build.VERSION.SDK_INT >= 29) {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, pdf.name)
@@ -212,5 +171,85 @@ object AssignmentSubmit {
         val id = UUID.randomUUID().toString().replace("-", "").take(20)
         fs.patch("inkSubmit/requests/$id", JSONObject().put("type", FirestoreRest.s("done")).put("status", FirestoreRest.s("pending"))
             .put("taskId", FirestoreRest.s(a.id)).put("title", FirestoreRest.s(a.title)).put("createdAt", FirestoreRest.i(System.currentTimeMillis())))
+    }
+}
+
+/**
+ * Gradescope from the tablet. There's no API, so this does what a browser does: open the assignment's
+ * /submissions/new page, read its upload form (PDF homework and file-upload assignments name the file
+ * field differently) and post the PDF with that page's CSRF token. Gradescope's redirect says how it
+ * went: …/submissions/<id>/select_pages = uploaded, pages still to match; …/submissions/<id> =
+ * submitted; anything else = rejected. The login is the in-app browser's: requests share the WebView
+ * cookie store, so signing in there once (LOGIN_URL) signs this in too.
+ */
+object Gradescope {
+    const val BASE = "https://www.gradescope.com"
+    const val LOGIN_URL = "$BASE/login"
+
+    private val jar = object : CookieJar {
+        override fun loadForRequest(url: HttpUrl): List<Cookie> {
+            val raw = CookieManager.getInstance().getCookie(url.toString()) ?: return emptyList()
+            return raw.split(";").mapNotNull { Cookie.parse(url, it.trim()) }
+        }
+        override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+            val cm = CookieManager.getInstance()
+            for (c in cookies) cm.setCookie(url.toString(), c.toString())
+            cm.flush()
+        }
+    }
+    private val http by lazy {
+        OkHttpClient.Builder().cookieJar(jar).connectTimeout(20, TimeUnit.SECONDS).readTimeout(120, TimeUnit.SECONDS).writeTimeout(120, TimeUnit.SECONDS).build()
+    }
+
+    /** Is [url] a page you only see once signed in (where Gradescope lands after its login)? */
+    fun isSignedInUrl(url: String): Boolean {
+        val u = url.toHttpUrlOrNull() ?: return false
+        return u.host.endsWith("gradescope.com") && (u.encodedPath.startsWith("/account") || u.encodedPath.startsWith("/courses"))
+    }
+    private fun isLoginUrl(u: HttpUrl) = u.encodedPath.startsWith("/login")
+
+    private fun htmlDecode(s: String) = s.replace("&quot;", "\"").replace("&#39;", "'").replace("&#x27;", "'", true)
+        .replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&").replace("&nbsp;", " ")
+    private fun authToken(html: String) = (Regex("""name="authenticity_token"\s+value="([^"]+)"""").find(html)
+        ?: Regex("""name="csrf-token"\s+content="([^"]+)"""").find(html))?.groupValues?.get(1)?.let(::htmlDecode)
+
+    fun submitPdf(ctx: Context, courseId: String, assignmentId: String, pdf: File): AssignmentSubmit.Outcome {
+        if (!courseId.all(Char::isDigit) || !assignmentId.all(Char::isDigit)) return AssignmentSubmit.Outcome.Failed("This assignment has no Gradescope link.")
+        if (pdf.length() > 45L * 1024 * 1024) return AssignmentSubmit.Outcome.Failed("The PDF is too large for Gradescope.")
+        val ua = try { WebSettings.getDefaultUserAgent(ctx) } catch (_: Exception) { "Mozilla/5.0 (Linux; Android) EngInk" }
+        val newUrl = "$BASE/courses/$courseId/assignments/$assignmentId/submissions/new"
+        val html = http.newCall(Request.Builder().url(newUrl).header("User-Agent", ua).header("Accept", "text/html,application/xhtml+xml").get().build()).execute().use { r ->
+            if (isLoginUrl(r.request.url)) return AssignmentSubmit.Outcome.NeedsLogin
+            if (!r.isSuccessful) return AssignmentSubmit.Outcome.Failed("Gradescope didn’t open the assignment (HTTP ${r.code}).")
+            r.body?.string().orEmpty()
+        }
+        val token = authToken(html) ?: return AssignmentSubmit.Outcome.Failed("Couldn’t open the assignment on Gradescope (it may be closed).")
+
+        // The upload form's file field and hidden inputs (fallback: what PDF homework uses).
+        val scope = Regex("""<form[^>]*action="[^"]*/assignments/\d+/submissions"[^>]*>([\s\S]*?)</form>""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1) ?: html
+        val fileField = (Regex("""<input[^>]*type="file"[^>]*name="([^"]+)"""", RegexOption.IGNORE_CASE).find(scope)
+            ?: Regex("""<input[^>]*name="([^"]+)"[^>]*type="file"""", RegexOption.IGNORE_CASE).find(scope))?.groupValues?.get(1)?.let(::htmlDecode)
+            ?: if (html.contains("submission[files][]")) "submission[files][]" else "submission[pdf_attachment]"
+        val form = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("utf8", "✓").addFormDataPart("authenticity_token", token)
+        var hasMethod = false
+        for (m in Regex("""<input[^>]*type="hidden"[^>]*>""", RegexOption.IGNORE_CASE).findAll(scope)) {
+            val n = Regex("""name="([^"]+)"""").find(m.value)?.groupValues?.get(1)?.let(::htmlDecode) ?: continue
+            if (n == "authenticity_token" || n == "utf8") continue
+            if (n == "submission[method]") hasMethod = true
+            form.addFormDataPart(n, htmlDecode(Regex("""value="([^"]*)"""").find(m.value)?.groupValues?.get(1).orEmpty()))
+        }
+        if (!hasMethod) form.addFormDataPart("submission[method]", "upload")
+        val name = pdf.name.replace(Regex("""[^\w .()-]"""), "").trim().ifBlank { "notebook" }.replace(Regex("""(\.pdf)?$""", RegexOption.IGNORE_CASE), ".pdf")
+        form.addFormDataPart(fileField, name, pdf.asRequestBody("application/pdf".toMediaType()))
+
+        val post = Request.Builder().url("$BASE/courses/$courseId/assignments/$assignmentId/submissions")
+            .header("User-Agent", ua).header("Accept", "text/html,application/xhtml+xml").header("Referer", newUrl).post(form.build()).build()
+        http.newCall(post).execute().use { r ->
+            val final = r.request.url
+            if (isLoginUrl(final)) return AssignmentSubmit.Outcome.NeedsLogin
+            if (!Regex("""/submissions/\d+""").containsMatchIn(final.encodedPath))
+                return AssignmentSubmit.Outcome.Failed("Gradescope didn’t accept the upload (the assignment may be closed or not take PDFs).")
+            return AssignmentSubmit.Outcome.Submitted(final.encodedPath.contains("select_pages"), final.toString())
+        }
     }
 }

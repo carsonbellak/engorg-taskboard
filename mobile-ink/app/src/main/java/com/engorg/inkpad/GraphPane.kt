@@ -43,11 +43,13 @@ import kotlin.math.pow
  * The grapher as a window that lives on a notebook page. It sits exactly over its graph card,
  * moves and zooms with the page, and edits that card in place: Desmos-style math input on the left
  * (fractions, exponents, roots and ∫ / Σ with tappable bounds build as you type), the 2D or 3D graph
- * on the right. A toolbar floats just above it; drag that to move the graph on the page, the corner
- * grip to resize it. When you tap away it turns back into the card, which draws the same way.
+ * on the right. A toolbar floats just above it; drag that to move the graph on the page, a corner
+ * grip (top left or bottom right) to resize it. When you tap away it turns back into the card, which
+ * draws the same way.
  *
  * Layout is done at [K] pixels per page unit, then the whole window is scaled by pageScale / K, so it
- * keeps its proportions on the page at any zoom.
+ * keeps its proportions on the page as you zoom. [K] is fixed when it opens: never less than the page
+ * zoom then, so a graph opened zoomed in has a normal-sized toolbar and text instead of a blown-up one.
  */
 @SuppressLint("ClickableViewAccessibility", "SetTextI18n", "ViewConstructor")
 class GraphPane(
@@ -65,6 +67,8 @@ class GraphPane(
         fun moveBy(dx: Float, dy: Float, done: Boolean)
         /** Resize the card to [w]×[h] page units. */
         fun resizeTo(w: Float, h: Float, done: Boolean)
+        /** Resize the card to [w]×[h] page units, keeping its bottom-right corner where it is. */
+        fun resizeFromTopLeft(w: Float, h: Float, done: Boolean)
         /** Drop the current graph onto the page as ink strokes. */
         fun insertInk(ink: List<GraphInk>, w: Float, h: Float)
         fun closed()
@@ -73,7 +77,7 @@ class GraphPane(
     }
 
     private val dens = act.resources.displayMetrics.density
-    private val K = dens   // layout pixels per page unit
+    private var K = dens   // layout pixels per page unit (set in open)
     private fun dp(v: Int) = (v * dens).toInt()
     private fun dpf(v: Float) = v * dens
     private fun alpha(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
@@ -117,6 +121,7 @@ class GraphPane(
         val (b, i) = GraphCardRenderer.cardColors(dark)
         bg = b; ink = i
         boxW = w; boxH = h
+        K = maxOf(dens, cb.pageScale())
         dim3 = card.dim3; degrees = card.degrees
         rows.clear(); rows.addAll(GraphCard.copyRows(card.rows))
         build()
@@ -205,6 +210,8 @@ class GraphPane(
         body.addView(plots, LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
         col.addView(body, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         root.addView(col, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        // Just above the card's top-left corner (left of the toolbar), clear of the first row's dot.
+        root.addView(buildGrip(topLeft = true), FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP or Gravity.START).apply { topMargin = headerH - dp(26) })
         graph.onViewChanged = { scheduleCommit() }
         graph3.onViewChanged = { scheduleCommit() }
         layoutBody()
@@ -241,7 +248,7 @@ class GraphPane(
     private fun buildHeader(): LinearLayout {
         val h = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(4), dp(6), dp(6))
+            setPadding(dp(30), dp(4), dp(6), dp(6))   // room for the top-left resize grip
         }
         val bar = LinearLayout(act).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -286,22 +293,36 @@ class GraphPane(
         return h
     }
 
-    /** Bottom-right grip: drag to resize the graph on the page. */
-    private fun buildGrip(): View {
+    /**
+     * A corner grip: drag to resize the graph on the page. Bottom right grows it right/down; [topLeft]
+     * grows it up/left with the bottom-right corner held. It can't shrink below about 220×140 dp on
+     * screen (or 60×40 page units), so the window stays usable at any zoom.
+     */
+    private fun buildGrip(topLeft: Boolean = false): View {
         val v = object : View(act) {
-            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = dpf(1.6f); strokeCap = Paint.Cap.ROUND; color = alpha(ink, 0x80) }
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeWidth = dpf(1.6f); strokeCap = Paint.Cap.ROUND; color = alpha(if (topLeft) AppTheme.text else ink, 0x80) }
             override fun onDraw(c: Canvas) {
-                val r = width - dpf(5f); val b = height - dpf(5f)
-                for (k in 1..3) { val o = dpf(5f) * k; c.drawLine(r - o, b, r, b - o, p) }
+                val b = height - dpf(5f)
+                if (topLeft) { val l = dpf(5f); for (k in 1..3) { val o = dpf(5f) * k; c.drawLine(l + o, b, l, b - o, p) } }
+                else { val r = width - dpf(5f); for (k in 1..3) { val o = dpf(5f) * k; c.drawLine(r - o, b, r, b - o, p) } }
             }
         }
         var rx = 0f; var ry = 0f; var w0 = 0f; var h0 = 0f
         v.setOnTouchListener { _, e ->
             val s = cb.pageScale()
+            val minW = maxOf(60f, dpf(220f) / s); val minH = maxOf(40f, dpf(140f) / s)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { rx = e.rawX; ry = e.rawY; w0 = boxW; h0 = boxH; v.parent?.requestDisallowInterceptTouchEvent(true) }
-                MotionEvent.ACTION_MOVE -> { cb.resizeTo((w0 + (e.rawX - rx) / s).coerceAtLeast(260f), (h0 + (e.rawY - ry) / s).coerceAtLeast(160f), false); reposition() }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { cb.resizeTo(boxW, boxH, true); scheduleCommit() }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = (e.rawX - rx) / s; val dy = (e.rawY - ry) / s
+                    if (topLeft) cb.resizeFromTopLeft((w0 - dx).coerceAtLeast(minW), (h0 - dy).coerceAtLeast(minH), false)
+                    else cb.resizeTo((w0 + dx).coerceAtLeast(minW), (h0 + dy).coerceAtLeast(minH), false)
+                    reposition()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (topLeft) cb.resizeFromTopLeft(boxW, boxH, true) else cb.resizeTo(boxW, boxH, true)
+                    scheduleCommit()
+                }
             }
             true
         }
