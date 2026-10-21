@@ -652,7 +652,11 @@ class InkActivity : ComponentActivity() {
             addView(iconBtn(Icons.CAST) { showMirrorDialog() }.also { mirrorButton = it })
             addView(iconBtn(Icons.EMAIL) { emailNotebook() }.apply { setOnLongClickListener { emailNotebook(repick = true); true } })
             addView(iconBtn(Icons.SUBMIT) { showSubmitDialog() })
-            addView(iconBtn(Icons.SPARKLE) { toggleClaude() }.also { claudeButton = it })
+            // ✨: Ask in Claude (tap = this page, long-press = all pages). The API-key panel is kept
+            // behind AskInClaude.USE_API_PANEL while the Claude-app route is on trial.
+            addView(iconBtn(Icons.SPARKLE) { if (AskInClaude.USE_API_PANEL) toggleClaude() else askInClaude(all = false) }.apply {
+                if (!AskInClaude.USE_API_PANEL) setOnLongClickListener { askInClaude(all = true); true }
+            }.also { claudeButton = it })
         }
         return HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -684,6 +688,12 @@ class InkActivity : ComponentActivity() {
         val on = calc?.isOpen == true
         b.background = pill(if (on) accent else light)
         b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
+    }
+
+    /** Send the focused pane's page (or all inked pages) to the Claude app, beside EngInk. */
+    private fun askInClaude(all: Boolean) {
+        val pane = focused ?: return
+        AskInClaude.open(this, pane, all)
     }
 
     /** Open / close the Claude feedback panel (scans the focused pane's page). */
