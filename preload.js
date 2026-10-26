@@ -325,6 +325,13 @@ const __api = {
     selectFiles: () => ipcRenderer.invoke('fileMerger:selectFiles'),
     save: (bytes, defaultName) => ipcRenderer.invoke('fileMerger:save', bytes, defaultName),
   },
+  // Share tab — the transfer runs over Firestore in the renderer (renderer/share.js); main
+  // only names this PC and writes received files into Downloads (never overwriting).
+  share: {
+    deviceName: () => ipcRenderer.invoke('share:deviceName'),
+    saveDownload: (bytes, name) => ipcRenderer.invoke('share:saveDownload', bytes, name),
+    showInFolder: (filePath) => ipcRenderer.invoke('share:showInFolder', filePath),
+  },
   // EngInk live mirror — LAN server the native EngInk (Android) app streams strokes to; the
   // Engineering > EngInk utility reflects them read-only. onMessage delivers both the tablet's
   // notebook/stroke traffic and synthetic server/client status events.

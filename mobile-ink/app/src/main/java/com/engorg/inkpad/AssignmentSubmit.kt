@@ -225,31 +225,63 @@ object Gradescope {
         }
         val token = authToken(html) ?: return AssignmentSubmit.Outcome.Failed("Couldn’t open the assignment on Gradescope (it may be closed).")
 
-        // The upload form's file field and hidden inputs (fallback: what PDF homework uses).
-        val scope = Regex("""<form[^>]*action="[^"]*/assignments/\d+/submissions"[^>]*>([\s\S]*?)</form>""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1) ?: html
+        // The upload form's file field and hidden inputs (fallback: what PDF homework uses). Hidden
+        // inputs come from that form only: page-wide ones belong to other forms (a Rails `_method`
+        // override among them would turn the upload into a PATCH/DELETE).
+        val formBody = Regex("""<form[^>]*action="[^"]*/assignments/\d+/submissions"[^>]*>([\s\S]*?)</form>""", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+        val scope = formBody ?: html
         val fileField = (Regex("""<input[^>]*type="file"[^>]*name="([^"]+)"""", RegexOption.IGNORE_CASE).find(scope)
             ?: Regex("""<input[^>]*name="([^"]+)"[^>]*type="file"""", RegexOption.IGNORE_CASE).find(scope))?.groupValues?.get(1)?.let(::htmlDecode)
             ?: if (html.contains("submission[files][]")) "submission[files][]" else "submission[pdf_attachment]"
         val form = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("utf8", "✓").addFormDataPart("authenticity_token", token)
         var hasMethod = false
-        for (m in Regex("""<input[^>]*type="hidden"[^>]*>""", RegexOption.IGNORE_CASE).findAll(scope)) {
+        for (m in Regex("""<input[^>]*type="hidden"[^>]*>""", RegexOption.IGNORE_CASE).findAll(formBody.orEmpty())) {
             val n = Regex("""name="([^"]+)"""").find(m.value)?.groupValues?.get(1)?.let(::htmlDecode) ?: continue
-            if (n == "authenticity_token" || n == "utf8") continue
+            if (n == "authenticity_token" || n == "utf8" || n == "_method") continue
             if (n == "submission[method]") hasMethod = true
             form.addFormDataPart(n, htmlDecode(Regex("""value="([^"]*)"""").find(m.value)?.groupValues?.get(1).orEmpty()))
         }
         if (!hasMethod) form.addFormDataPart("submission[method]", "upload")
         val name = pdf.name.replace(Regex("""[^\w .()-]"""), "").trim().ifBlank { "notebook" }.replace(Regex("""(\.pdf)?$""", RegexOption.IGNORE_CASE), ".pdf")
         form.addFormDataPart(fileField, name, pdf.asRequestBody("application/pdf".toMediaType()))
+        val before = currentSubmissionId(ua, courseId, assignmentId)
 
+        // Posted the way Gradescope's own (AJAX) upload form does: the PDF form answers JSON
+        // ({ url: …/select_pages }), the file-upload form redirects. Either shape counts.
         val post = Request.Builder().url("$BASE/courses/$courseId/assignments/$assignmentId/submissions")
-            .header("User-Agent", ua).header("Accept", "text/html,application/xhtml+xml").header("Referer", newUrl).post(form.build()).build()
+            .header("User-Agent", ua).header("Accept", "application/json, text/javascript, text/html;q=0.9, */*;q=0.5")
+            .header("X-Requested-With", "XMLHttpRequest").header("X-CSRF-Token", token)
+            .header("Referer", newUrl).header("Origin", BASE).post(form.build()).build()
+        val subRe = Regex("""/submissions/\d+""")
         http.newCall(post).execute().use { r ->
             val final = r.request.url
             if (isLoginUrl(final)) return AssignmentSubmit.Outcome.NeedsLogin
-            if (!Regex("""/submissions/\d+""").containsMatchIn(final.encodedPath))
-                return AssignmentSubmit.Outcome.Failed("Gradescope didn’t accept the upload (the assignment may be closed or not take PDFs).")
-            return AssignmentSubmit.Outcome.Submitted(final.encodedPath.contains("select_pages"), final.toString())
+            val body = r.body?.string().orEmpty()
+            var landed: String? = final.toString().takeIf { subRe.containsMatchIn(final.encodedPath) }
+            var detail = ""
+            if (landed == null) {
+                val j = try { JSONObject(body) } catch (_: Exception) { null }
+                val u = j?.let { o -> listOf("url", "redirect_url", "location", "redirect").map { o.optString(it) }.firstOrNull { subRe.containsMatchIn(it) } }
+                val hit = u ?: Regex("""["'(]((?:https://www\.gradescope\.com)?/courses/\d+/assignments/\d+/submissions/\d+[^"')\s]*)""").find(body)?.groupValues?.get(1)
+                if (hit != null) landed = "$BASE/".toHttpUrlOrNull()?.resolve(htmlDecode(hit))?.toString()
+                detail = j?.let { o -> o.optString("error").ifBlank { o.optString("message") }.ifBlank { o.optJSONArray("errors")?.join(", ")?.replace("\"", "").orEmpty() } }.orEmpty()
+            }
+            // Last check: the assignment now opens on a newer submission than before the upload.
+            if (landed == null) {
+                val after = currentSubmissionId(ua, courseId, assignmentId)
+                if (after != null && after != before) landed = "$BASE/courses/$courseId/assignments/$assignmentId/submissions/$after"
+            }
+            if (landed == null) return AssignmentSubmit.Outcome.Failed(
+                if (detail.isNotBlank()) "Gradescope: ${htmlDecode(detail.replace(Regex("<[^>]*>"), ""))}"
+                else "Gradescope didn’t accept the upload (HTTP ${r.code}; the assignment may be closed or not take PDFs).")
+            return AssignmentSubmit.Outcome.Submitted(landed.contains("select_pages"), landed)
         }
     }
+
+    /** The latest submission id for an assignment (opening a submitted one lands on it), or null. */
+    private fun currentSubmissionId(ua: String, courseId: String, assignmentId: String): String? = try {
+        http.newCall(Request.Builder().url("$BASE/courses/$courseId/assignments/$assignmentId").header("User-Agent", ua).get().build()).execute().use { r ->
+            Regex("""/submissions/(\d+)""").find(r.request.url.encodedPath)?.groupValues?.get(1)
+        }
+    } catch (_: Exception) { null }
 }

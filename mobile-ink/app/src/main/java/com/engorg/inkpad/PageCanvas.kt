@@ -1535,7 +1535,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     private fun loadPage(pageId: String): FinishedStrokesView.Page {
-        val page = FinishedStrokesView.Page()
+        val page = FinishedStrokesView.Page(bgFile = store.pageBgFile(pageId).takeIf { it.exists() })
         try {
             val f = store.pageFile(pageId)
             if (!f.exists()) return page

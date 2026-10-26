@@ -2,6 +2,7 @@ package com.engorg.inkpad
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
@@ -14,7 +15,12 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
+import android.os.Handler
+import android.os.Looper
+import android.util.LruCache
 import android.view.View
+import java.io.File
+import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -47,7 +53,10 @@ class FinishedStrokesView(context: Context) : View(context) {
     /** A painted area of a shape (page-local path) and its outline color (0 = none). */
     class FillPath(val path: Path, val color: Int, val edge: Int = 0)
 
-    class Page(val recs: ArrayList<Rec> = ArrayList())
+    /** [bgFile] is an optional baked background image under the ink (an imported PDF page). */
+    class Page(val recs: ArrayList<Rec> = ArrayList(), val bgFile: File? = null) {
+        fun isBlank() = recs.isEmpty() && bgFile == null
+    }
 
     /** Actions in the floating menu over a selection (or the lone Paste pill after an empty tap). */
     enum class MenuAction(val label: String) {
@@ -127,6 +136,37 @@ class FinishedStrokesView(context: Context) : View(context) {
             }
             bmp.setPixels(px, 0, s, 0, 0, s, s)
             BitmapShader(bmp, Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+        }
+
+        // Page backgrounds (imported PDF pages) are big (~7 MB each decoded), so they're decoded on
+        // demand off the UI thread into one byte-bounded cache shared by every pane, never all at once.
+        private val bgCache = object : LruCache<String, Bitmap>(56 * 1024 * 1024) {
+            override fun sizeOf(key: String, value: Bitmap) = value.byteCount
+        }
+        private val bgLoading = HashSet<String>()
+        private val bgExec = Executors.newSingleThreadExecutor { r -> Thread(r, "page-bg").apply { isDaemon = true } }
+        private val mainHandler = Handler(Looper.getMainLooper())
+
+        private fun decodeBg(f: File): Bitmap? = runCatching {
+            // Backgrounds are opaque, so 565 halves the memory with no visible loss.
+            BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.RGB_565 })
+        }.getOrNull()
+
+        /** The page's background if decoded; otherwise starts decoding it and calls [ready] once it is. */
+        private fun pageBg(page: Page, ready: () -> Unit): Bitmap? {
+            val f = page.bgFile ?: return null
+            bgCache.get(f.path)?.let { return it }
+            if (bgLoading.add(f.path)) bgExec.execute {
+                val bmp = decodeBg(f)
+                mainHandler.post { bgLoading.remove(f.path); if (bmp != null) { bgCache.put(f.path, bmp); ready() } }
+            }
+            return null
+        }
+
+        /** Blocking variant for exports, which must include the background. */
+        private fun pageBgNow(page: Page): Bitmap? {
+            val f = page.bgFile ?: return null
+            return bgCache.get(f.path) ?: decodeBg(f)?.also { bgCache.put(f.path, it) }
         }
 
         // Reusable stroker for converting a centerline into a fillable outline (see buildStrokeOutline).
@@ -321,6 +361,8 @@ class FinishedStrokesView(context: Context) : View(context) {
     private val fillPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL }
     private val paperPaint = Paint().apply { isAntiAlias = true }
     private val pagePaint = Paint().apply { isAntiAlias = true }
+    private val bgPaint = Paint().apply { isFilterBitmap = true }
+    private val bgRect = RectF()
     private val shadowPaint = Paint().apply { isAntiAlias = true; color = Color.argb(50, 0, 0, 0) }
     private val borderPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 1f; color = Color.argb(40, 0, 0, 0) }
     private val selPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; strokeWidth = 2f; pathEffect = DashPathEffect(floatArrayOf(10f, 8f), 0f) }
@@ -481,6 +523,7 @@ class FinishedStrokesView(context: Context) : View(context) {
             canvas.drawRect(l + 5, t + 7, r + 5, b + 7, shadowPaint)
             pagePaint.color = pageColor
             canvas.drawRect(l, t, r, b, pagePaint)
+            pageBg(pages[i]) { invalidate() }?.let { bgRect.set(l, t, r, b); canvas.drawBitmap(it, null, bgRect, bgPaint) }
             val save = canvas.save()
             canvas.clipRect(l, t, r, b)
             drawPaper(canvas, l, t, scale)
@@ -493,10 +536,11 @@ class FinishedStrokesView(context: Context) : View(context) {
         drawOverlay(canvas)
     }
 
-    /** Renders one page (background + paper + strokes) at [s] scale, origin (0,0) — used for PDF export. */
+    /** Renders one page (page color + background image + paper + strokes) at [s] scale, origin (0,0) — used for PDF export. */
     fun renderPageInto(canvas: Canvas, i: Int, s: Float) {
         pagePaint.color = pageColor
         canvas.drawRect(0f, 0f, PAGE_W * s, PAGE_H * s, pagePaint)
+        pageBgNow(pages[i])?.let { bgRect.set(0f, 0f, PAGE_W * s, PAGE_H * s); canvas.drawBitmap(it, null, bgRect, bgPaint) }
         val save = canvas.save()
         canvas.clipRect(0f, 0f, PAGE_W * s, PAGE_H * s)
         drawPaper(canvas, 0f, 0f, s)

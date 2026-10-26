@@ -1,4 +1,7 @@
-const CACHE_NAME = 'engorg-v34';
+const CACHE_NAME = 'engorg-v35';
+// Holds what the Android share sheet sent (see the share-target handler below) until app.js
+// picks it up, so it must survive the activate-time cache cleanup.
+const SHARE_INBOX = 'engorg-share-inbox';
 // VAPID public key — must match the value set in Firebase secrets and app.js
 const VAPID_PUBLIC_KEY = 'BDmHi7C-yoOita_aL7JFADc18CiVCcn0Jw43XPIQZ_4Bu4J279M1PgRnktePqsJh_-UGkhikhwnnUOdUsBEeQhM';
 const ASSETS = [
@@ -24,7 +27,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE_NAME && k !== SHARE_INBOX).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -96,11 +99,36 @@ self.addEventListener('pushsubscriptionchange', event => {
   );
 });
 
+// ===================== SHARE TARGET (Android share sheet) =====================
+// manifest.json share_target POSTs title/text/url + files here. Hosting can't take a POST,
+// so stash it all in SHARE_INBOX and hand the app a redirect; app.js consumeShareTarget()
+// sends it to the user's Share inbox once signed in, then deletes the stash.
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== 'POST' || url.origin !== self.location.origin || url.pathname !== '/share-target') return;
+  event.respondWith((async () => {
+    try {
+      const form = await event.request.formData();
+      const files = form.getAll('files').filter(f => f && typeof f !== 'string' && f.size > 0);
+      await caches.delete(SHARE_INBOX);
+      const cache = await caches.open(SHARE_INBOX);
+      await Promise.all(files.map((f, i) => cache.put('/__share/file-' + i, new Response(f, {
+        headers: { 'Content-Type': f.type || 'application/octet-stream', 'X-Name': encodeURIComponent(f.name || 'file') }
+      }))));
+      await cache.put('/__share/meta', new Response(JSON.stringify({
+        title: form.get('title') || '', text: form.get('text') || '', url: form.get('url') || '', files: files.length
+      }), { headers: { 'Content-Type': 'application/json' } }));
+    } catch (e) { /* fall through: the app opens without a share */ }
+    return Response.redirect('/?share-target=1', 303);
+  })());
+});
+
 // ===================== FETCH (network-first caching) =====================
 
 // Fetch: network-first for app files, skip for Firebase/Google
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
+  if (event.request.method !== 'GET') return; // POSTs (API calls, share target) aren't cacheable
 
   // Always go to network for Firebase/Google APIs
   if (url.hostname.includes('googleapis.com') ||

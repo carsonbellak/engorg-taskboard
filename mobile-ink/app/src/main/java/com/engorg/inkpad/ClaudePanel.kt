@@ -470,10 +470,10 @@ class ClaudePanel(
      */
     private fun snapshot(pane: PageCanvas, all: Boolean): List<Pair<Int, String>>? {
         val pages = pane.finishedView.pages
-        val idx = if (all) pages.indices.filter { pages[it].recs.isNotEmpty() }.take(MAX_PAGES)
+        val idx = if (all) pages.indices.filter { !pages[it].isBlank() }.take(MAX_PAGES)
                   else listOf(pane.currentPage()).filter { it in pages.indices }
         if (idx.isEmpty()) { toastInPanel(if (all) "This notebook is empty." else "Nothing on this page yet."); return null }
-        if (!all && pages[idx[0]].recs.isEmpty()) { toastInPanel("Nothing on this page yet."); return null }
+        if (!all && pages[idx[0]].isBlank()) { toastInPanel("Nothing on this page yet."); return null }
         val s = (if (all && idx.size > 4) 1200f else 1568f) / FinishedStrokesView.PAGE_H
         val w = (FinishedStrokesView.PAGE_W * s).toInt(); val h = (FinishedStrokesView.PAGE_H * s).toInt()
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)

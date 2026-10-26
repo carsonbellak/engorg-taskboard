@@ -69,8 +69,15 @@ const engineeringUtilities = (() => {
       activate() { fileMerger.mount(document.getElementById('view-file-merger')); fileMerger.activate(); },
       deactivate() { fileMerger.deactivate(); },
     },
+    share: {
+      id: 'share', name: 'Share', icon: '📤',
+      description: 'Send links, notes and files between your PCs and phone through your EngOrg account. Drop, paste or type, and it shows up on every signed-in device.',
+      paneId: 'eng-util-share',
+      activate() { shareView.mount(document.getElementById('view-share')); shareView.activate(); },
+      deactivate() { shareView.deactivate(); },
+    },
   };
-  const BUILTIN_ORDER = ['printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger'];
+  const BUILTIN_ORDER = ['share', 'printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {
@@ -79,6 +86,12 @@ const engineeringUtilities = (() => {
       list = ['kicad-importer'];
       if (dataManager.settings.printerEnabled) list.push('printer', 'slicer');
       dataManager.updateSettings({ installedUtilities: list });
+    }
+    // Share arrived after most installs were set up: install it once so it shows up without a
+    // trip to the store (uninstalling it afterwards sticks).
+    if (!dataManager.settings.shareUtilSeeded) {
+      if (!list.includes('share')) list = [...list, 'share'];
+      dataManager.updateSettings({ installedUtilities: list, shareUtilSeeded: true });
     }
     return list;
   }
@@ -162,6 +175,7 @@ const engineeringUtilities = (() => {
     nav.querySelectorAll('.eng-nav-item').forEach(b => {
       b.addEventListener('click', () => select(b.dataset.util));
     });
+    if (typeof shareView !== 'undefined') shareView.refreshBadge(); // re-attach its unread badge
   }
 
   // ---- Pane switching -----------------------------------------------------

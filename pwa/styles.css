@@ -2371,3 +2371,123 @@ img.ios-install-icon { object-fit: cover; border-radius: 22.5%; }
 @media (prefers-reduced-motion: reduce) {
   .overlay, .overlay-sheet, #app-content.view-enter { animation: none; }
 }
+
+/* === SHARE VIEW (mirrors the desktop Share utility, renderer/styles.css .shr-*) === */
+.shr {
+  --shr-link: #3B82F6; --shr-note: #F59E0B; --shr-file: #8B5CF6;
+  padding: 12px 16px 28px; display: flex; flex-direction: column; gap: 12px;
+}
+.shr svg { flex: none; }
+.shr-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.shr-sub { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.35; color: var(--text-muted); }
+.shr-device {
+  flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 5px 6px 5px 10px; border-radius: 99px;
+  color: var(--text-muted); background: var(--bg-card); border: 1px solid var(--border);
+}
+.shr-device:focus-within { border-color: var(--accent); color: var(--accent); }
+.shr-device input {
+  width: 108px; padding: 0 2px; border: none; outline: none; background: transparent;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text); -webkit-user-select: text; user-select: text;
+}
+
+.shr-compose { border-radius: 16px; background: var(--bg-card); border: 1px solid var(--border); transition: border-color .15s, box-shadow .15s; }
+.shr-compose:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-light); }
+.shr-compose textarea {
+  display: block; width: 100%; box-sizing: border-box; min-height: 56px; max-height: 200px; padding: 14px 14px 4px;
+  border: none; outline: none; resize: none; background: transparent;
+  font: inherit; font-size: 16px; line-height: 1.45; color: var(--text); -webkit-user-select: text; user-select: text;
+}
+.shr-compose textarea::placeholder { color: var(--text-muted); }
+.shr-compose-bar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 8px; }
+.shr-tool {
+  width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px;
+  color: var(--text-secondary); background: transparent; border: none; cursor: pointer;
+}
+.shr-tool:active { background: var(--bg-elevated); }
+.shr-hint { flex: 1; min-width: 0; font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shr-send {
+  display: inline-flex; align-items: center; gap: 7px; padding: 10px 18px; border-radius: 12px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 600; color: #fff; background: var(--accent); border: none; transition: transform .12s;
+}
+.shr-send:active { transform: scale(.96); }
+
+.shr-status { display: none; padding: 10px 14px; border-radius: 12px; font-size: 13.5px; font-weight: 600; }
+.shr-status.show { display: block; }
+.shr-status.info { background: var(--accent-light); color: var(--accent); }
+.shr-status.success { background: rgba(34,197,94,.15); color: var(--success); }
+.shr-status.error { background: rgba(239,68,68,.15); color: var(--danger); }
+
+.shr-inbox-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.shr-filters { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.shr-filters::-webkit-scrollbar { display: none; }
+.shr-chip {
+  flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--text-secondary); background: transparent; border: 1px solid var(--border);
+}
+.shr-chip span { font-size: 11.5px; color: var(--text-muted); }
+.shr-chip.active { background: var(--accent-light); border-color: transparent; color: var(--accent); }
+.shr-chip.active span { color: inherit; opacity: .75; }
+.shr-clear { flex: none; padding: 6px 4px; border: none; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.shr-list { display: flex; flex-direction: column; gap: 8px; }
+.shr-day { margin: 10px 2px 0; font-size: 11.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.shr-day:first-child { margin-top: 0; }
+.shr-item {
+  --k: var(--shr-file);
+  position: relative; display: flex; align-items: center; gap: 12px; padding: 10px 6px 10px 10px; border-radius: 14px;
+  background: var(--bg-card); border: 1px solid var(--border); transition: transform .12s;
+}
+.shr-item:active { transform: scale(.985); }
+.shr-k-link { --k: var(--shr-link); }
+.shr-k-text { --k: var(--shr-note); }
+.shr-k-file { --k: var(--shr-file); }
+.shr-item.is-new { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.shr-tile {
+  flex: none; width: 42px; height: 42px; border-radius: 11px; display: flex; align-items: center; justify-content: center; overflow: hidden;
+  color: var(--k, var(--shr-file)); background: color-mix(in srgb, var(--k, var(--shr-file)) 16%, transparent);
+}
+.shr-item.has-thumb .shr-tile { width: 54px; height: 54px; background: var(--bg-elevated); }
+.shr-tile img { width: 100%; height: 100%; object-fit: cover; }
+.shr-body { flex: 1; min-width: 0; }
+.shr-main { font-size: 15px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shr-main-text { font-weight: 500; white-space: pre-wrap; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.shr-url { margin-top: 1px; font-size: 12.5px; color: var(--shr-link); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shr-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 9px; margin-top: 4px; font-size: 12px; color: var(--text-muted); }
+.shr-from { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: var(--text-secondary); }
+.shr-state { color: var(--accent); font-weight: 600; }
+.shr-progress { margin-top: 7px; height: 3px; border-radius: 99px; background: var(--bg-elevated); overflow: hidden; }
+.shr-progress > div { height: 100%; border-radius: inherit; background: var(--accent); transition: width .2s; }
+.shr-acts { flex: none; display: flex; align-items: center; }
+.shr-act {
+  width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px;
+  color: var(--text-secondary); background: transparent; border: none; cursor: pointer;
+}
+.shr-act:active { background: var(--bg-elevated); }
+.shr-act-del { color: var(--text-muted); }
+
+.shr-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 34px 20px; text-align: center;
+  color: var(--text-muted); border: 1px dashed var(--border); border-radius: 16px;
+}
+.shr-empty > svg { opacity: .7; margin-bottom: 4px; }
+.shr-empty-title { font-size: 16px; font-weight: 700; color: var(--text); }
+.shr-empty-sub { max-width: 320px; font-size: 13.5px; line-height: 1.5; }
+.shr-empty-sm { padding: 20px; font-size: 13.5px; }
+
+/* Unread badge on the Share (or More) nav icon. */
+.nav-icon { position: relative; }
+.shr-badge {
+  position: absolute; top: -4px; right: -9px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 99px;
+  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; background: var(--danger); color: #fff;
+}
+/* Incoming-item toast (tap → Share view). */
+.shr-toast {
+  position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 10px); z-index: 3000;
+  display: flex; align-items: center; gap: 12px; width: min(92vw, 420px); box-sizing: border-box; padding: 10px 14px 10px 10px; border-radius: 18px;
+  color: var(--text); background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0,0,0,.32);
+  opacity: 0; transform: translate(-50%, -14px); pointer-events: none; transition: opacity .22s, transform .22s;
+}
+.shr-toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.shr-toast .shr-tile { width: 38px; height: 38px; }
+.shr-toast .shr-k-link { --k: #3B82F6; } .shr-toast .shr-k-text { --k: #F59E0B; } .shr-toast .shr-k-file { --k: #8B5CF6; }
+.shr-toast-body { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 14px; }
+.shr-toast-body span { font-size: 13px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

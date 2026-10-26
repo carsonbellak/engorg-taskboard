@@ -393,11 +393,12 @@ class LibraryActivity : ComponentActivity() {
         return row
     }
 
-    // ---- Noteshelf import ----
+    // ---- import (a PDF → a new notebook to write on, or a Noteshelf export .zip) ----
     private fun runImport(uri: Uri) {
+        val pdf = PdfImport.isPdf(this, uri)
         val pad = dp(24)
         val status = TextView(this).apply {
-            text = "Reading export…"; setTextColor(AppTheme.text); textSize = 14f
+            text = if (pdf) "Reading PDF…" else "Reading export…"; setTextColor(AppTheme.text); textSize = 14f
             gravity = Gravity.CENTER; setPadding(0, dp(16), 0, 0)
         }
         val box = LinearLayout(this).apply {
@@ -413,6 +414,21 @@ class LibraryActivity : ComponentActivity() {
             setCancelable(false)
         }
         dialog.show()
+        if (pdf) {
+            PdfImport.importPdf(
+                this, uri, store, currentFolder,
+                onProgress = { s -> status.text = s },
+                onDone = { nb, err ->
+                    if (!isFinishing && !isDestroyed) {
+                        dialog.dismiss()
+                        rebuild()
+                        if (nb != null) openNotebook(nb)
+                        else Toast.makeText(this, "Import failed: ${err ?: "unknown error"}", Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+            return
+        }
         NoteshelfImport.importZip(
             this, uri, store,
             onProgress = { s -> status.text = s },

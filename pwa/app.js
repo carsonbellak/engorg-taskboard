@@ -233,7 +233,7 @@ const PWA_NAV_ITEMS = [
   { id: 'notes', label: 'Notes' }, { id: 'board', label: 'Board' }, { id: 'ink', label: 'EngInk' },
   { id: 'ecosystem', label: 'Tree' }, { id: 'timeline', label: 'Timeline' }, { id: 'calendar', label: 'Calendar' },
   { id: 'purchases', label: 'Orders' }, { id: 'stats', label: 'Stats' }, { id: 'timers', label: 'Timers' },
-  { id: 'printer', label: 'Printer' },
+  { id: 'printer', label: 'Printer' }, { id: 'share', label: 'Share' },
 ].filter(n => n.id !== 'ink' || NATIVE_AUTH); // EngInk exists only in the Android shell
 const PWA_SETTINGS_DEFAULTS = {
   theme: 'sync',           // 'sync' = follow the desktop theme; otherwise a COLOR_THEMES id
@@ -746,6 +746,9 @@ function setupListeners(uid) {
       if (currentView === 'timers') render();
     });
   listeners.push(unsubTimers);
+
+  // Share inbox (SHARE VIEW): links, notes and files sent between the user's devices.
+  listeners.push(startShareListener());
 }
 
 function removeListeners() {
@@ -844,7 +847,8 @@ let _renderScheduled = false;
 function scheduleRender() {
   if (_renderScheduled) return;
   _renderScheduled = true;
-  requestAnimationFrame(() => { _renderScheduled = false; render(); });
+  // The Share view doesn't show synced task data, and a rebuild would drop focus from its text box.
+  requestAnimationFrame(() => { _renderScheduled = false; if (currentView !== 'share') render(); });
 }
 
 function render() {
@@ -881,6 +885,7 @@ function render() {
     case 'stats': content.innerHTML = renderStats(); break;
     case 'printer': content.innerHTML = renderPrinter(); renderPrinterFeed(); bindPrinterEvents(); break;
     case 'timers': content.innerHTML = renderTimers(); bindTimerEvents(); startTimerCountdown(); break;
+    case 'share': content.innerHTML = renderShare(); bindShareEvents(); break;
   }
 }
 
@@ -4391,4 +4396,443 @@ function mountEcosystem(container) {
   container.querySelector('.eco-toolbar').addEventListener('click', (e) => { if (e.target.closest('[data-a="fit"]')) ecoFit(); });
 
   ecoRender();
+}
+
+// ===================== SHARE VIEW =====================
+// Send links, notes and files between your own devices. Mirrors the desktop Share utility
+// (renderer/share.js) — same Firestore layout, so desktop and phone share one inbox:
+//   users/{uid}/data/shares/items/{id}             one doc per item
+//   users/{uid}/data/shares/items/{id}/chunks/{n}  file bytes as ≤900 KB Firestore Blobs
+// A file item is written with ready:false, then its chunks, then ready:true. Items expire after
+// SHARE_TTL_DAYS (swept by whichever device is open). The Android share sheet lands here too:
+// manifest share_target → sw.js stashes the POST in the SHARE_INBOX cache → consumeShareTarget().
+const SHARE_CHUNK = 900 * 1024;
+const SHARE_MAX_FILE = 25 * 1024 * 1024;
+const SHARE_MAX_TEXT = 200000;
+const SHARE_TTL_DAYS = 7;
+const SHARE_POOL = 3;
+const SHARE_INBOX = 'engorg-share-inbox';
+let shareItems = [], shareDraft = '', shareStatus = null, shareStatusT = null, shareListenSince = 0, shareSwept = false;
+let shareFilter = 'all', shareNewSince = 0;
+const shareProgress = new Map();   // id → { done, total, dir }
+const shareFiles = new Map();      // id → File already downloaded this session
+const shareAnnounced = new Set();
+
+const shareSvg = (d, w = 18) => `<svg viewBox="0 0 24 24" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const SHARE_IC = {
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>',
+  note: '<path d="M5 4h14v16H5z"/><path d="M8.5 9h7M8.5 12.5h7M8.5 16h4"/>',
+  file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  clip: '<path d="M20.5 11.5 12 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L9.7 17.7a1.7 1.7 0 0 1-2.4-2.4L15 7.6"/>',
+  paste: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M9.5 11h5M9.5 15h5"/>',
+  send: '<path d="M21 3 10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+  open: '<path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
+  download: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
+  device: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  inbox: '<path d="M4 13h4l1.5 2.5h5L16 13h4"/><path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/>',
+};
+
+function shareDeviceId() {
+  let id = localStorage.getItem('engorg_share_device_id');
+  if (!id) { id = 'dev_' + Math.random().toString(36).slice(2, 10); localStorage.setItem('engorg_share_device_id', id); }
+  return id;
+}
+function shareDefaultName() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? 'Android phone' : 'Android tablet';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows browser';
+  return 'Browser';
+}
+const shareMyName = () => localStorage.getItem('engorg_share_device') || shareDefaultName();
+const shareCol = () => db.collection('users').doc(auth.currentUser.uid).collection('data').doc('shares').collection('items');
+const shareChunkId = (i) => String(i).padStart(4, '0');
+const shareIsUrl = (s) => /^https?:\/\/\S+$/i.test(s);
+const shareNewId = () => 'shr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+function shareFmtSize(n) {
+  if (!n && n !== 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+  return (n / 1024 / 1024).toFixed(1) + ' MB';
+}
+function shareFmtAgo(ms) {
+  const s = Math.max(0, (Date.now() - ms) / 1000);
+  if (s < 45) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + 'm ago';
+  if (s < 86400) return Math.round(s / 3600) + 'h ago';
+  return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+function shareDayLabel(ms) {
+  const d = new Date(ms), t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = Math.round((t - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
+  if (diff <= 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+function setShareStatus(msg, kind) {
+  shareStatus = msg ? { msg, kind: kind || 'info' } : null;
+  clearTimeout(shareStatusT);
+  if (msg) shareStatusT = setTimeout(() => { shareStatus = null; renderShareStatus(); }, 5000);
+  renderShareStatus();
+}
+async function sharePool(n, fn) {
+  let next = 0;
+  const worker = async () => { while (next < n) { const i = next++; await fn(i); } };
+  await Promise.all(Array.from({ length: Math.min(SHARE_POOL, n) }, worker));
+}
+function shareMeta() {
+  return { from: shareMyName(), fromId: shareDeviceId(), fromPlatform: 'pwa', createdMs: Date.now(),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+}
+
+async function shareSendText(text) {
+  text = String(text || '').trim();
+  if (!text || !auth.currentUser) return false;
+  if (text.length > SHARE_MAX_TEXT) return shareSendFile(new File([text], 'shared-text.txt', { type: 'text/plain' }));
+  try {
+    await shareCol().doc(shareNewId()).set({ kind: shareIsUrl(text) ? 'link' : 'text', text, ready: true, ...shareMeta() });
+    setShareStatus(shareIsUrl(text) ? 'Link sent to your devices.' : 'Note sent to your devices.', 'success');
+    return true;
+  } catch (e) { setShareStatus('Couldn’t send: ' + (e.message || e), 'error'); return false; }
+}
+
+async function shareThumb(file) {
+  if (!/^image\//.test(file.type || '') || file.size > 30 * 1024 * 1024 || typeof createImageBitmap !== 'function') return null;
+  try {
+    const bmp = await createImageBitmap(file);
+    const k = Math.min(1, 240 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(bmp.width * k)); c.height = Math.max(1, Math.round(bmp.height * k));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close && bmp.close();
+    return c.toDataURL('image/jpeg', 0.7);
+  } catch (e) { return null; }
+}
+
+async function shareSendFile(file) {
+  if (!auth.currentUser) return false;
+  if (file.size > SHARE_MAX_FILE) { setShareStatus(`${file.name} is ${shareFmtSize(file.size)}. The limit is ${shareFmtSize(SHARE_MAX_FILE)}.`, 'error'); return false; }
+  const id = shareNewId();
+  const ref = shareCol().doc(id);
+  const total = Math.max(1, Math.ceil(file.size / SHARE_CHUNK));
+  try {
+    const thumb = await shareThumb(file);
+    await ref.set({ kind: 'file', name: file.name || 'file', mime: file.type || '', size: file.size,
+      chunks: total, thumb: thumb || null, ready: false, ...shareMeta() });
+    shareProgress.set(id, { done: 0, total, dir: 'up' }); renderShareList();
+    const buf = new Uint8Array(await file.arrayBuffer());
+    await sharePool(total, async (i) => {
+      await ref.collection('chunks').doc(shareChunkId(i))
+        .set({ i, data: firebase.firestore.Blob.fromUint8Array(buf.subarray(i * SHARE_CHUNK, (i + 1) * SHARE_CHUNK)) });
+      const p = shareProgress.get(id); if (p) { p.done++; renderShareRow(id); }
+    });
+    await ref.update({ ready: true });
+    shareProgress.delete(id); renderShareRow(id);
+    setShareStatus(`Sent ${file.name}.`, 'success');
+    return true;
+  } catch (e) {
+    shareProgress.delete(id);
+    setShareStatus(`Couldn’t send ${file.name}: ${e.message || e}`, 'error');
+    shareRemove(id).catch(() => {});
+    return false;
+  }
+}
+async function shareSendFiles(list) {
+  for (const f of [...(list || [])]) await shareSendFile(f);
+}
+
+async function shareFetchFile(item) {
+  if (shareFiles.has(item.id)) return shareFiles.get(item.id);
+  if (!item.ready) throw new Error('Still uploading from the other device.');
+  const ref = shareCol().doc(item.id);
+  const parts = new Array(item.chunks);
+  shareProgress.set(item.id, { done: 0, total: item.chunks, dir: 'down' }); renderShareRow(item.id);
+  try {
+    await sharePool(item.chunks, async (i) => {
+      const d = await ref.collection('chunks').doc(shareChunkId(i)).get();
+      if (!d.exists) throw new Error('The file is incomplete. Share it again.');
+      parts[i] = d.data().data.toUint8Array();
+      const p = shareProgress.get(item.id); if (p) { p.done++; renderShareRow(item.id); }
+    });
+  } finally { shareProgress.delete(item.id); renderShareRow(item.id); }
+  const file = new File(parts, item.name || 'file', { type: item.mime || 'application/octet-stream' });
+  shareFiles.set(item.id, file);
+  return file;
+}
+
+// Phones: the share sheet (Save to Files / Photos / any app). Elsewhere: a normal download.
+// A long download can outlive the tap's user activation, so a refused share leaves the file
+// cached and asks for one more tap (which then opens the sheet instantly).
+async function shareSave(item) {
+  const file = await shareFetchFile(item);
+  const touch = navigator.maxTouchPoints > 0;
+  if (touch && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return; }
+    catch (e) {
+      if (e && e.name === 'AbortError') return;
+      if (e && e.name === 'NotAllowedError') { setShareStatus('Downloaded. Tap it again to choose where it goes.', 'info'); return; }
+    }
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function shareRemove(id) {
+  const ref = shareCol().doc(id);
+  const chunks = await ref.collection('chunks').get();
+  const batch = db.batch();
+  chunks.docs.forEach(d => batch.delete(d.ref));
+  batch.delete(ref);
+  await batch.commit();
+}
+
+async function shareSweep() {
+  if (shareSwept) return; shareSwept = true;
+  try {
+    const old = await shareCol().where('createdMs', '<', Date.now() - SHARE_TTL_DAYS * 86400000).get();
+    for (const d of old.docs) await shareRemove(d.id).catch(() => {});
+  } catch (e) { console.warn('Share sweep:', e && e.code); }
+}
+
+// Called from setupListeners(); returns the unsubscribe so removeListeners() tears it down.
+function startShareListener() {
+  shareListenSince = Date.now();
+  const unsub = shareCol().orderBy('createdMs', 'desc').limit(60).onSnapshot(snap => {
+    shareItems = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    snap.docChanges().forEach(ch => {
+      const it = { id: ch.doc.id, ...ch.doc.data() };
+      if (ch.type !== 'removed' && it.ready && it.fromId !== shareDeviceId() && it.createdMs >= shareListenSince - 5000 && !shareAnnounced.has(it.id)) {
+        shareAnnounced.add(it.id);
+        if (currentView !== 'share') shareToast(it);
+      }
+    });
+    if (currentView === 'share') { shareMarkSeen(); renderShareList(); }
+    refreshShareBadge();
+  }, err => console.warn('Share listener:', err && err.code));
+  shareSweep();
+  consumeShareTarget();
+  return unsub;
+}
+
+function shareMarkSeen() { try { localStorage.setItem('engorg_share_seen', String(Date.now())); } catch (e) {} }
+// Unread count on the Share tab, or on "More" when Share sits in the overflow sheet.
+function refreshShareBadge() {
+  const seen = +localStorage.getItem('engorg_share_seen') || 0;
+  const n = currentView === 'share' ? 0 : shareItems.filter(i => i.fromId !== shareDeviceId() && (i.createdMs || 0) > seen).length;
+  const tab = document.querySelector('.nav-item[data-navid="share"]');
+  const more = document.getElementById('nav-more');
+  const target = tab && tab.style.display === 'none' && more ? more : tab;
+  const icon = target && target.querySelector('.nav-icon');
+  document.querySelectorAll('#bottom-nav .shr-badge').forEach(b => { if (b.parentElement !== icon) b.remove(); });
+  if (!icon) return;
+  let b = icon.querySelector('.shr-badge');
+  if (!n) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('span'); b.className = 'shr-badge'; icon.appendChild(b); }
+  b.textContent = n > 9 ? '9+' : String(n);
+}
+
+let _shareToastEl = null, _shareToastT = null;
+function shareToast(it) {
+  if (!_shareToastEl) {
+    _shareToastEl = document.createElement('div');
+    _shareToastEl.className = 'shr-toast';
+    _shareToastEl.setAttribute('role', 'status');
+    document.body.appendChild(_shareToastEl);
+    _shareToastEl.addEventListener('click', () => {
+      _shareToastEl.classList.remove('show');
+      document.querySelector('.nav-item[data-navid="share"]')?.click();
+    });
+  }
+  const kind = it.kind === 'link' ? 'link' : it.kind === 'text' ? 'note' : 'file';
+  const what = it.kind === 'file' ? escapeHtml(it.name) : escapeHtml((it.text || '').slice(0, 80));
+  _shareToastEl.innerHTML = `<span class="shr-tile shr-k-${it.kind}">${it.thumb ? `<img src="${escapeHtml(it.thumb)}" alt="">` : shareSvg(SHARE_IC[kind], 18)}</span>
+    <span class="shr-toast-body"><b>${escapeHtml(it.from || 'Another device')}</b><span>${what}</span></span>`;
+  requestAnimationFrame(() => _shareToastEl.classList.add('show'));
+  clearTimeout(_shareToastT); _shareToastT = setTimeout(() => _shareToastEl.classList.remove('show'), 6000);
+}
+
+const SHARE_KIND_OF = { link: 'links', text: 'notes', file: 'files' };
+
+// Tapping a row does its main thing (open link / copy note / save file); the buttons are explicit.
+function shareRowHtml(it) {
+  const p = shareProgress.get(it.id);
+  const mine = it.fromId === shareDeviceId();
+  const btn = (a, icon, label) => `<button class="shr-act" data-act="${a}" aria-label="${label}">${shareSvg(SHARE_IC[icon], 18)}</button>`;
+  let tile, main, extra = '', acts = '';
+  if (it.kind === 'link') {
+    let host = ''; try { host = new URL(it.text).hostname.replace(/^www\./, ''); } catch (e) {}
+    tile = shareSvg(SHARE_IC.link, 20);
+    main = `<div class="shr-main">${escapeHtml(host || it.text)}</div><div class="shr-url">${escapeHtml(it.text)}</div>`;
+    acts = btn('copy', 'copy', 'Copy link');
+  } else if (it.kind === 'text') {
+    tile = shareSvg(SHARE_IC.note, 20);
+    main = `<div class="shr-main shr-main-text">${escapeHtml(it.text)}</div>`;
+  } else {
+    tile = it.thumb ? `<img src="${escapeHtml(it.thumb)}" alt="">` : shareSvg(SHARE_IC.file, 20);
+    main = `<div class="shr-main">${escapeHtml(it.name)}</div>`;
+    extra = `<span>${shareFmtSize(it.size)}</span>`;
+    acts = it.ready ? btn('save', 'download', 'Save') : '';
+  }
+  const state = p ? `<span class="shr-state">${p.dir === 'up' ? 'Sending' : 'Downloading'} ${Math.round(100 * p.done / p.total)}%</span>`
+    : (it.kind === 'file' && !it.ready ? '<span class="shr-state">Uploading…</span>' : '');
+  const bar = p ? `<div class="shr-progress"><div style="width:${Math.round(100 * p.done / p.total)}%"></div></div>` : '';
+  const isNew = !mine && (it.createdMs || 0) > shareNewSince;
+  return `<div class="shr-item shr-k-${it.kind}${it.thumb ? ' has-thumb' : ''}${isNew ? ' is-new' : ''}" data-id="${escapeHtml(it.id)}" data-act="primary">
+    <div class="shr-tile">${tile}</div>
+    <div class="shr-body">${main}
+      <div class="shr-meta"><span class="shr-from">${shareSvg(it.fromPlatform === 'pwa' ? SHARE_IC.phone : SHARE_IC.device, 12)}${mine ? 'This device' : escapeHtml(it.from || 'Another device')}</span><span>${shareFmtAgo(it.createdMs || 0)}</span>${extra}${state}</div>${bar}
+    </div>
+    <div class="shr-acts">${acts}<button class="shr-act shr-act-del" data-act="delete" aria-label="Delete from every device">${shareSvg(SHARE_IC.trash, 18)}</button></div>
+  </div>`;
+}
+
+function shareListHtml() {
+  const list = shareFilter === 'all' ? shareItems : shareItems.filter(i => SHARE_KIND_OF[i.kind] === shareFilter);
+  if (!shareItems.length) {
+    return `<div class="shr-empty">${shareSvg(SHARE_IC.inbox, 34)}<div class="shr-empty-title">Nothing shared yet</div>
+      <div class="shr-empty-sub">Send something from here or from the desktop app (Engineering Utilities → Share). It shows up on every device you're signed in on.</div></div>`;
+  }
+  if (!list.length) return `<div class="shr-empty shr-empty-sm">No ${shareFilter} right now.</div>`;
+  let html = '', day = '';
+  list.forEach(it => {
+    const d = shareDayLabel(it.createdMs || 0);
+    if (d !== day) { day = d; html += `<div class="shr-day">${escapeHtml(d)}</div>`; }
+    html += shareRowHtml(it);
+  });
+  return html;
+}
+function shareFiltersHtml() {
+  const n = (k) => k === 'all' ? shareItems.length : shareItems.filter(i => SHARE_KIND_OF[i.kind] === k).length;
+  return [['all', 'All'], ['links', 'Links'], ['notes', 'Notes'], ['files', 'Files']].map(([k, label]) =>
+    `<button class="shr-chip${shareFilter === k ? ' active' : ''}" data-filter="${k}">${label}<span>${n(k)}</span></button>`).join('');
+}
+
+function renderShare() {
+  if (!auth.currentUser) return '<div class="shr"><div class="shr-empty">Sign in to share between your devices.</div></div>';
+  return `<div class="shr">
+    <div class="shr-head">
+      <div class="shr-sub">Send to your other devices. Items are removed after ${SHARE_TTL_DAYS} days.</div>
+      <label class="shr-device">${shareSvg(SHARE_IC.phone, 14)}<input id="shr-device" maxlength="40" value="${escapeHtml(shareMyName())}" spellcheck="false" aria-label="This device's name"></label>
+    </div>
+    <div class="shr-compose">
+      <textarea id="shr-text" rows="2" placeholder="Paste a link or write a note…">${escapeHtml(shareDraft)}</textarea>
+      <div class="shr-compose-bar">
+        <input type="file" id="shr-file-input" multiple hidden>
+        <button class="shr-tool" id="shr-attach" aria-label="Attach files">${shareSvg(SHARE_IC.clip, 20)}</button>
+        <button class="shr-tool" id="shr-paste" aria-label="Paste">${shareSvg(SHARE_IC.paste, 20)}</button>
+        <span class="shr-hint">Files up to ${shareFmtSize(SHARE_MAX_FILE)}</span>
+        <button class="shr-send" id="shr-send">${shareSvg(SHARE_IC.send, 16)}<span>Send</span></button>
+      </div>
+    </div>
+    <div class="shr-status"></div>
+    <div class="shr-inbox-head"><div class="shr-filters"></div><button class="shr-clear" id="shr-clear">Clear all</button></div>
+    <div class="shr-list"></div>
+  </div>`;
+}
+
+function renderShareRow(id) {
+  if (currentView !== 'share') return;
+  const el = document.querySelector(`#app-content .shr-item[data-id="${CSS.escape(id)}"]`);
+  const it = shareItems.find(i => i.id === id);
+  if (el && it) el.outerHTML = shareRowHtml(it); else if (!el && it) renderShareList();
+}
+function renderShareList() {
+  if (currentView !== 'share') return;
+  const list = document.querySelector('#app-content .shr-list');
+  if (!list) return;
+  list.innerHTML = shareListHtml();
+  const f = document.querySelector('#app-content .shr-filters'); if (f) f.innerHTML = shareFiltersHtml();
+  const head = document.querySelector('#app-content .shr-inbox-head'); if (head) head.style.display = shareItems.length ? '' : 'none';
+}
+function renderShareStatus() {
+  const el = currentView === 'share' && document.querySelector('#app-content .shr-status');
+  if (!el) return;
+  el.className = 'shr-status' + (shareStatus ? ' show ' + shareStatus.kind : '');
+  el.textContent = shareStatus ? shareStatus.msg : '';
+}
+
+function bindShareEvents() {
+  shareNewSince = +localStorage.getItem('engorg_share_seen') || 0;   // highlight what arrived since the last visit
+  shareMarkSeen(); refreshShareBadge();
+  const ta = document.getElementById('shr-text');
+  if (!ta) return;
+  renderShareList(); renderShareStatus();
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(200, ta.scrollHeight) + 'px'; };
+  ta.addEventListener('input', () => { shareDraft = ta.value; grow(); });
+  if (shareDraft) grow();
+  document.getElementById('shr-send').addEventListener('click', async () => {
+    if (await shareSendText(ta.value)) { ta.value = ''; shareDraft = ''; grow(); }
+  });
+  const fi = document.getElementById('shr-file-input');
+  document.getElementById('shr-attach').addEventListener('click', () => fi.click());
+  fi.addEventListener('change', () => { shareSendFiles(fi.files); fi.value = ''; });
+  document.getElementById('shr-paste').addEventListener('click', async () => {
+    try {
+      const t = await navigator.clipboard.readText();
+      if (t && t.trim()) { ta.value = t; shareDraft = t; grow(); ta.focus(); } else setShareStatus('The clipboard is empty.', 'info');
+    } catch (e) { setShareStatus('Clipboard access was blocked. Long-press the box and paste.', 'error'); }
+  });
+  document.getElementById('shr-device').addEventListener('change', (e) => {
+    const v = e.target.value.trim();
+    try { v ? localStorage.setItem('engorg_share_device', v) : localStorage.removeItem('engorg_share_device'); } catch (er) {}
+    e.target.value = shareMyName();
+  });
+  document.querySelector('#app-content .shr-filters').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-filter]'); if (!c) return;
+    shareFilter = c.dataset.filter; renderShareList();
+  });
+  document.getElementById('shr-clear').addEventListener('click', async () => {
+    if (!confirm('Clear all shared items? This removes them from every device.')) return;
+    for (const it of shareItems.slice()) await shareRemove(it.id).catch(() => {});
+  });
+  document.querySelector('#app-content .shr-list').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]'); if (!b) return;
+    const row = b.closest('.shr-item');
+    const it = row && shareItems.find(i => i.id === row.dataset.id);
+    if (!it) return;
+    let a = b.dataset.act;
+    if (a === 'primary') a = it.kind === 'link' ? 'open' : it.kind === 'text' ? 'copy' : 'save';
+    try {
+      if (a === 'open') window.open(it.text, '_blank', 'noopener');
+      else if (a === 'copy') { await navigator.clipboard.writeText(it.text || ''); setShareStatus('Copied to the clipboard.', 'success'); }
+      else if (a === 'save') await shareSave(it);
+      else if (a === 'delete') await shareRemove(it.id);
+    } catch (er) { setShareStatus(er.message || String(er), 'error'); }
+  });
+}
+
+// Android share sheet → sw.js stashed the shared title/text/url + files in SHARE_INBOX and
+// redirected to /?share-target=1. Send them once signed in, then clear the stash.
+async function consumeShareTarget() {
+  if (!/[?&]share-target=1/.test(location.search) || !('caches' in window)) return;
+  history.replaceState(null, '', location.pathname);
+  try {
+    const cache = await caches.open(SHARE_INBOX);
+    const metaRes = await cache.match('/__share/meta');
+    if (!metaRes) return;
+    const meta = await metaRes.json();
+    const files = [];
+    for (let i = 0; i < (meta.files || 0); i++) {
+      const r = await cache.match('/__share/file-' + i);
+      if (r) files.push(new File([await r.blob()], decodeURIComponent(r.headers.get('X-Name') || 'file'), { type: r.headers.get('Content-Type') || '' }));
+    }
+    await caches.delete(SHARE_INBOX);
+    document.querySelector('.nav-item[data-navid="share"]')?.click();
+    // Apps often put the link inside `text` ("Look at this https://…"); send a bare url on its own.
+    const url = (meta.url || '').trim(), text = (meta.text || '').trim(), title = (meta.title || '').trim();
+    if (url) await shareSendText(url);
+    const rest = url ? text.replace(url, '').trim() : text;
+    if (rest) await shareSendText(rest);
+    else if (!url && !files.length && title) await shareSendText(title);
+    if (files.length) await shareSendFiles(files);
+  } catch (e) { console.warn('Share target:', e); }
 }

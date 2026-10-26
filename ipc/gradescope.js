@@ -381,6 +381,16 @@ async function downloadAttachment(url, destDir, idx) {
   return { name, path: dest };
 }
 
+// The student's latest submission id for an assignment (opening a submitted assignment lands on
+// it), or null. Compared before/after an upload to tell whether it went through.
+async function currentSubmissionId(courseId, assignmentId) {
+  try {
+    const r = await gsFetch(`${BASE}/courses/${courseId}/assignments/${assignmentId}`);
+    try { await r.text(); } catch {}
+    return ((r.url || '').match(/\/submissions\/(\d+)/) || [])[1] || null;
+  } catch { return null; }
+}
+
 // ── handlers ────────────────────────────────────────────────────────────────
 module.exports = function register() {
   ipcMain.handle('gradescope:status', async () => {
@@ -488,17 +498,20 @@ module.exports = function register() {
       const token = extractAuthToken(html);
       if (!token) return { error: 'Couldn’t open the assignment on Gradescope (it may be closed).' };
 
-      // The upload form's file field and hidden inputs (fallback: what PDF homework uses).
+      // The upload form's file field and hidden inputs (fallback: what PDF homework uses). Hidden
+      // inputs come from that form only: page-wide ones belong to other forms (a Rails `_method`
+      // override among them would turn the upload into a PATCH/DELETE).
       const formM = html.match(/<form[^>]*action="[^"]*\/assignments\/\d+\/submissions"[^>]*>([\s\S]*?)<\/form>/i);
       const scope = formM ? formM[1] : html;
       const fileM = scope.match(/<input[^>]*type="file"[^>]*name="([^"]+)"/i) || scope.match(/<input[^>]*name="([^"]+)"[^>]*type="file"/i);
       const fileField = fileM ? htmlDecode(fileM[1]) : (/submission\[files\]\[\]/.test(html) ? 'submission[files][]' : 'submission[pdf_attachment]');
       const fields = [['utf8', '✓'], ['authenticity_token', token]];
-      for (const tag of scope.match(/<input[^>]*type="hidden"[^>]*>/gi) || []) {
+      for (const tag of (formM && formM[1].match(/<input[^>]*type="hidden"[^>]*>/gi)) || []) {
         const n = (tag.match(/name="([^"]+)"/) || [])[1]; const v = (tag.match(/value="([^"]*)"/) || [])[1] || '';
-        if (n && n !== 'authenticity_token' && n !== 'utf8') fields.push([htmlDecode(n), htmlDecode(v)]);
+        if (n && !['authenticity_token', 'utf8', '_method'].includes(n)) fields.push([htmlDecode(n), htmlDecode(v)]);
       }
       if (!fields.some(([n]) => n === 'submission[method]')) fields.push(['submission[method]', 'upload']);
+      const before = await currentSubmissionId(courseId, assignmentId);
 
       // multipart/form-data, built by hand (net.fetch takes a Buffer body).
       const boundary = '----EngOrg' + Date.now().toString(16) + Math.random().toString(16).slice(2);
@@ -507,16 +520,40 @@ module.exports = function register() {
       parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${fileField}"; filename="${name}"\r\nContent-Type: application/pdf\r\n\r\n`, 'utf8'));
       parts.push(bytes, Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8'));
 
+      // Posted the way Gradescope's own (AJAX) upload form does: the PDF form answers JSON
+      // ({ url: …/select_pages }), the file-upload form redirects. Either shape counts.
       const res = await net.fetch(`${BASE}/courses/${courseId}/assignments/${assignmentId}/submissions`, {
         session: gsSession(), method: 'POST',
-        headers: { 'User-Agent': 'Mozilla/5.0 (EngOrg-TaskBoard)', 'Accept': 'text/html,application/xhtml+xml', 'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Referer': newUrl },
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (EngOrg-TaskBoard)', 'Accept': 'application/json, text/javascript, text/html;q=0.9, */*;q=0.5',
+          'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': token,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`, 'Referer': newUrl, 'Origin': BASE,
+        },
         body: Buffer.concat(parts),
       });
       const finalUrl = res.url || '';
-      try { await res.text(); } catch {}
-      const sub = finalUrl.match(/\/submissions\/(\d+)/);
-      if (!sub) return { error: 'Gradescope didn’t accept the upload (the assignment may be closed or not take PDFs).' };
-      return { ok: true, submissionId: sub[1], url: finalUrl, needsMatching: /select_pages/.test(finalUrl) };
+      let body = '';
+      try { body = await res.text(); } catch {}
+      let landed = /\/submissions\/\d+/.test(finalUrl) ? finalUrl : '';
+      if (!landed) {
+        let j = null; try { j = JSON.parse(body); } catch {}
+        const u = j && [j.url, j.redirect_url, j.location, j.redirect].find(x => typeof x === 'string' && /\/submissions\/\d+/.test(x));
+        const m = u ? null : body.match(/["'(]((?:https:\/\/www\.gradescope\.com)?\/courses\/\d+\/assignments\/\d+\/submissions\/\d+[^"')\s]*)/);
+        const hit = u || (m && m[1]);
+        if (hit) landed = new URL(htmlDecode(hit), BASE).toString();
+      }
+      // Last check: the assignment now opens on a newer submission than before the upload.
+      if (!landed) {
+        const after = await currentSubmissionId(courseId, assignmentId);
+        if (after && after !== before) landed = `${BASE}/courses/${courseId}/assignments/${assignmentId}/submissions/${after}`;
+      }
+      if (!landed) {
+        const why = j => (j && (j.error || j.message || (Array.isArray(j.errors) ? j.errors.join(', ') : ''))) || '';
+        let detail = ''; try { detail = why(JSON.parse(body)); } catch {}
+        console.warn('[gradescope] upload rejected', res.status, finalUrl, String(body).slice(0, 300));
+        return { error: detail ? `Gradescope: ${stripTags(String(detail))}` : `Gradescope didn’t accept the upload (HTTP ${res.status}; the assignment may be closed or not take PDFs).` };
+      }
+      return { ok: true, submissionId: landed.match(/\/submissions\/(\d+)/)[1], url: landed, needsMatching: /select_pages/.test(landed) };
     } catch (e) {
       return { error: e.message || String(e) };
     }

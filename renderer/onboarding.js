@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.22': {
+      title: "What's new",
+      intro: 'Send things between your devices.',
+      slides: [
+        { emoji: '📤', title: 'Share', body: 'Open Engineering Utilities → Share. Paste a link, write a note, or drop files on it, and it shows up on your phone (the new Share tab in the web app) and your other PCs. Files up to 25 MB; everything is removed after 7 days.' },
+        { emoji: '📥', title: 'Receiving', body: 'Anything sent from another device pops up in the corner and adds a badge to Engineering Utilities. Links open in your browser; files save to Downloads and open with one click. On Android, pick EngOrg in any app’s share menu.' },
+      ],
+    },
     '1.5.16': {
       title: "What's new",
       intro: 'Hand in homework straight from EngInk.',

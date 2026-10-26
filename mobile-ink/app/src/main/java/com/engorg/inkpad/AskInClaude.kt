@@ -62,8 +62,8 @@ object AskInClaude {
      */
     private fun renderPages(act: Activity, pane: PageCanvas, all: Boolean): List<File>? {
         val pages = pane.finishedView.pages
-        val idx = if (all) pages.indices.filter { pages[it].recs.isNotEmpty() }.take(MAX_PAGES)
-                  else listOf(pane.currentPage()).filter { it in pages.indices && pages[it].recs.isNotEmpty() }
+        val idx = if (all) pages.indices.filter { !pages[it].isBlank() }.take(MAX_PAGES)
+                  else listOf(pane.currentPage()).filter { it in pages.indices && !pages[it].isBlank() }
         if (idx.isEmpty()) {
             Toast.makeText(act, if (all) "This notebook is empty." else "Nothing on this page yet.", Toast.LENGTH_SHORT).show()
             return null

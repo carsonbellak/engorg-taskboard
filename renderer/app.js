@@ -1838,6 +1838,8 @@
     if (typeof enginkMirror !== 'undefined' && !EMB) enginkMirror.listen();
     // EngInk "Attach & submit": this PC uploads the tablet's PDFs to Gradescope.
     if (typeof assignmentSubmit !== 'undefined' && !EMB) assignmentSubmit.start();
+    // Share utility: keep the inbox live (unread badge); only the main window pops incoming cards.
+    if (typeof shareView !== 'undefined') shareView.start({ notify: !EMB });
 
     // Restore last view (handle legacy 'schedule' -> 'calendar', and remove 'tasks')
     let savedView = dataManager.settings.activeView;

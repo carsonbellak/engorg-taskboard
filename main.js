@@ -35,6 +35,7 @@ const registerRelease       = require('./ipc/release');
 const registerOsTheme       = require('./ipc/os-theme');
 const registerDesktopMode   = require('./ipc/desktop-mode');
 const registerPiLink        = require('./ipc/pi-link');
+const registerShare         = require('./ipc/share');
 
 let mainWindow;
 const getMainWindow = () => mainWindow;
@@ -308,6 +309,7 @@ app.whenReady().then(async () => {
   registerOsTheme();
   registerDesktopMode(getMainWindow, { createDesktopWindow });
   registerPiLink(getMainWindow);
+  registerShare();
 
   // Start the 3D-printer subsystems only when the user has enabled printer support.
   // On a Compact install (no 3D Printer Tools component) the printer stays disabled,
