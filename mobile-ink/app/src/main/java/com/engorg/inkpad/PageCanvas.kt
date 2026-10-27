@@ -65,6 +65,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val pendingTableCols: Int
         val pendingTableBorder: Boolean
         val pendingSolid: SolidParams?   // what an armed SOLID will be
+        val pendingSymbol: Sym?   // what an armed SYMBOL will be (stays armed: each tap drops another)
         fun onPaneFocused(pane: PageCanvas)
         fun onPageChanged(pane: PageCanvas)
         fun onShapeCommitted()
@@ -405,11 +406,66 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         mirror?.pageEdited(this, page)
     }
 
+    /** Snap a page point to the nearest paper dot/grid crossing (none on plain paper). */
+    private fun gridSnap(p: PointF): PointF =
+        if (finishedView.paperStyle == FinishedStrokesView.PaperStyle.PLAIN) p else PointF(Symbols.snap(p.x), Symbols.snap(p.y))
+
+    /**
+     * Drop the armed symbol at its standard size, so every resistor/source on the page matches. A tap
+     * places it there (an inline one horizontal); a drag lays an inline one along the stroke — ends on
+     * the grid, near-square angles squared up — or fits a box one inside what you drew. The symbol stays
+     * armed for the next tap; nothing is selected (switch to the lasso to move or turn one).
+     */
+    private fun commitSymbol(page: Int, pts: List<PointF>) {
+        val sym = host.pendingSymbol ?: return
+        var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+        for (p in pts) { minX = min(minX, p.x); minY = min(minY, p.y); maxX = max(maxX, p.x); maxY = max(maxY, p.y) }
+        val tap = hypot(maxX - minX, maxY - minY) < 14f
+        val a = pts.first(); val b = pts.last()
+        val spec = if (sym.kind == SymKind.INLINE) {
+            val std = ShapeSpec.symbolAt(sym, a.x, a.y)
+            val span = std.verts[1].x - std.verts[0].x
+            if (tap) {
+                val s = gridSnap(std.verts[0])
+                std.verts[0].set(s.x, s.y); std.verts[1].set(s.x + span, s.y); std
+            } else {
+                val p0 = gridSnap(a); val p1 = gridSnap(b)
+                var dx = p1.x - p0.x; var dy = p1.y - p0.y
+                val ang = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble()))
+                val off = abs(ang - Math.round(ang / 90.0) * 90.0)
+                if (off < 15.0) { if (abs(dx) > abs(dy)) dy = 0f else dx = 0f }
+                var len = hypot(dx, dy)
+                if (len < 1f) { dx = 1f; dy = 0f; len = 1f }
+                // Too short a drag still gets room for the whole body, rounded up to whole grid squares.
+                val need = (sym.w + 16f)
+                val l = if (len >= need) len else Math.ceil((need / Symbols.GRID).toDouble()).toFloat() * Symbols.GRID
+                std.verts[0].set(p0.x, p0.y); std.verts[1].set(p0.x + dx / len * l, p0.y + dy / len * l); std
+            }
+        } else {
+            val k = if (tap) 1f else min((maxX - minX) / sym.w, (maxY - minY) / sym.h).coerceIn(0.25f, 12f)
+            if (tap) {
+                // The anchor (a terminal or a support's pin) lands on the dot nearest the tap.
+                val s = gridSnap(PointF(a.x, a.y))
+                ShapeSpec.symbolAt(sym, s.x - sym.ax, s.y - sym.ay)
+            } else ShapeSpec.symbolAt(sym, (minX + maxX) / 2f, (minY + maxY) / 2f, k)
+        }
+        // Keep it on the page.
+        var l = Float.MAX_VALUE; var t = Float.MAX_VALUE; var r = -Float.MAX_VALUE; var bt = -Float.MAX_VALUE
+        for (v in spec.verts) { l = min(l, v.x); t = min(t, v.y); r = max(r, v.x); bt = max(bt, v.y) }
+        val ox = if (l < 0f) -l else if (r > FinishedStrokesView.PAGE_W) FinishedStrokesView.PAGE_W - r else 0f
+        val oy = if (t < 0f) -t else if (bt > FinishedStrokesView.PAGE_H) FinishedStrokesView.PAGE_H - bt else 0f
+        if (ox != 0f || oy != 0f) for (v in spec.verts) v.offset(ox, oy)
+        finishedView.pages[page].recs.add(buildShapeRec(spec, host.brushColor, host.brushSize, false))
+        finishedView.invalidate(); savePage(page)
+        mirror?.pageEdited(this, page)
+    }
+
     /** Turn the just-drawn stroke into the armed shape, fitted to what you drew, then select it. */
     private fun commitPendingShape() {
         val type = host.pendingShape ?: return
         val (page, pts) = samplesToPage() ?: return
         if (pts.isEmpty()) return
+        if (type == ShapeType.SYMBOL) { commitSymbol(page, pts); return }
         var minX = Float.MAX_VALUE; var minY = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
         for (p in pts) { minX = min(minX, p.x); minY = min(minY, p.y); maxX = max(maxX, p.x); maxY = max(maxY, p.y) }
         if (hypot(maxX - minX, maxY - minY) < 14f) {
@@ -431,7 +487,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             ShapeType.AXES2D_1Q -> arrayListOf(PointF(minX, maxY), PointF(maxX, minY))
             ShapeType.AXES2D_2Q -> arrayListOf(PointF(minX, (minY + maxY) / 2f), PointF(maxX, minY))
             ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID,
-            ShapeType.GRAPH -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
+            ShapeType.GRAPH, ShapeType.SYMBOL -> arrayListOf(PointF(minX, minY), PointF(maxX, maxY))
         }
         // A solid fills the box you drew, in its default three-quarter view.
         val spec = (if (type == ShapeType.SOLID) ShapeSpec.solidIn(host.pendingSolid ?: SolidParams.box(), minX, minY, maxX, maxY)
@@ -863,7 +919,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             }
             Grab.VERTEX -> {
                 val h = toLocalOn(sx, sy, selPage); val base = dragStartRecs[0]; val spec = base.shape!!.clone()
-                spec.setHandle(grabVertex, h.x.coerceIn(0f, FinishedStrokesView.PAGE_W), h.y.coerceIn(0f, FinishedStrokesView.PAGE_H))
+                var hp = PointF(h.x.coerceIn(0f, FinishedStrokesView.PAGE_W), h.y.coerceIn(0f, FinishedStrokesView.PAGE_H))
+                // A symbol's terminal clicks onto a nearby dot, so wires meet it cleanly.
+                if (spec.type == ShapeType.SYMBOL) gridSnap(hp).let { if (hypot(it.x - hp.x, it.y - hp.y) < 8f) hp = it }
+                spec.setHandle(grabVertex, hp.x, hp.y)
                 val newRec = buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
                 replaceRec(base, newRec); selRecs[0] = newRec; dragStartRecs[0] = newRec
                 selBox = recBounds(selRecs); refreshSelectionOverlay()
@@ -1050,6 +1109,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (spec.solid != null) {
                     val mv = FloatArray(9); m.getValues(mv)
                     spec.scaleSolid(sqrt(abs(mv[Matrix.MSCALE_X] * mv[Matrix.MSCALE_Y] - mv[Matrix.MSKEW_X] * mv[Matrix.MSKEW_Y])))
+                }
+                if (spec.symbol?.kind == SymKind.INLINE) {
+                    val mv = FloatArray(9); m.getValues(mv)
+                    spec.scaleSymbol(sqrt(abs(mv[Matrix.MSCALE_X] * mv[Matrix.MSCALE_Y] - mv[Matrix.MSKEW_X] * mv[Matrix.MSKEW_Y])))
                 }
                 buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
             } else {
@@ -1478,6 +1541,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 rec.shape.solid?.let { o.put("sd", it.params.toJson()).put("sr", Solid.rToJson(it.r)).put("sz", it.size.toDouble()) }
                 rec.shape.graph?.let { o.put("g", it.toJson()) }
                 if (rec.shape.fillColor != 0) o.put("fc", rec.shape.fillColor)
+                rec.shape.symbol?.let { o.put("sy", it.name); if (rec.shape.symScale != 1f) o.put("ss", rec.shape.symScale.toDouble()) }
                 rec.shape.solid?.fill?.takeIf { !it.isEmpty }?.let { o.put("sf", it.toJson()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
@@ -1563,9 +1627,14 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                         o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
                         if (type == ShapeType.GRAPH) graph = GraphCard.fromJson(o.optJSONObject("g"))
                         fillColor = o.optInt("fc", 0)
+                        if (type == ShapeType.SYMBOL) {
+                            symbol = runCatching { Sym.valueOf(o.optString("sy")) }.getOrNull()
+                            symScale = o.optDouble("ss", 1.0).toFloat().coerceIn(0.2f, 20f)
+                        }
                     }
                     if (spec.type == ShapeType.SOLID && spec.solid == null) continue
                     if (spec.type == ShapeType.GRAPH && spec.graph == null) continue
+                    if (spec.type == ShapeType.SYMBOL && spec.symbol == null) continue
                     page.recs.add(buildShapeRec(spec, color, width, hl))
                 } else {
                     val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]

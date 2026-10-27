@@ -11950,7 +11950,7 @@ body.theme-light .syn-builtin { color: #059669; }
 }
 .kicad-btn {
   padding: 10px 14px; border-radius: 8px; border: var(--border-width, 1px) solid var(--border-color);
-  background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 14px; font-weight: 500;
+  background: var(--bg-secondary); color: var(--text-primary); cursor: pointer; font-size: 13px; font-weight: 600;
 }
 .kicad-btn:hover { background: var(--bg-hover); }
 .kicad-btn:disabled { opacity: 0.5; cursor: default; }
@@ -12024,7 +12024,8 @@ body.theme-light .syn-builtin { color: #059669; }
 /* ============================================================
    UTILITY STORE
    ============================================================ */
-#view-utility-store { padding: 20px; }
+#view-utility-store { padding: 0; }
+.store-body { padding: 4px 20px 24px; }
 .store-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .store-header h2 { margin: 0; color: var(--text-primary); }
 .store-status { color: var(--text-muted); font-size: 13px; margin-bottom: 16px; }
@@ -13465,3 +13466,346 @@ embed.eco-media-content { object-fit: fill; }
 }
 .eng-nav-item .shr-badge { margin-left: auto; }
 .shr-nav-drop { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-bg) !important; }
+
+/* ---- Handwriter utility (renderer/handwriter.js) — LaTeX → handwriting on EngInk paper ---- */
+#view-handwriter { display: flex; flex-direction: column; min-height: 0; }
+.hw { display: flex; flex-direction: column; gap: 12px; padding: 16px; flex: 1; min-height: 0; box-sizing: border-box; }
+.hw.hw-drop { outline: 2px dashed var(--accent); outline-offset: -6px; border-radius: 12px; }
+.hw-font-status { font-size: 13px; line-height: 1; cursor: help; }
+.hw-font-sample { font-size: 18px; color: var(--text-primary); }
+/* one row, always: on a narrow window it scrolls sideways rather than wrapping */
+.hw-toolbar { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; flex-shrink: 0; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.hw-toolbar > * { flex-shrink: 0; }
+.hw-opt { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; }
+.hw-opt input[type="range"] { width: 56px; accent-color: var(--accent); }
+.hw-font-input { width: 104px; padding: 5px 7px; font-size: 12.5px; }
+.hw-select { width: auto; padding: 5px 6px; font-size: 12.5px; }
+.hw-shuffle { padding: 4px 8px; font-size: 14px; line-height: 1.2; }
+.hw-inks { display: flex; gap: 4px; }
+.hw-ink {
+  width: 18px; height: 18px; border-radius: 50%; cursor: pointer; padding: 0;
+  border: 2px solid var(--bg-secondary); box-shadow: 0 0 0 1px var(--border-color);
+}
+.hw-ink.active { box-shadow: 0 0 0 2px var(--accent); }
+.hw-body { flex: 1; min-height: 0; display: flex; gap: 12px; }
+.hw-editor {
+  flex: 0 0 38%; min-width: 260px; display: flex; flex-direction: column; min-height: 0;
+  border: var(--border-width, 1px) solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); overflow: hidden;
+}
+.hw-editor-bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: var(--border-width, 1px) solid var(--border-color); }
+.hw-editor-label { flex: 1; font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.hw-mini { width: auto; padding: 0 8px; }
+.hw-src {
+  flex: 1; min-height: 0; resize: none; border: none; outline: none; padding: 10px 12px; box-sizing: border-box;
+  background: transparent; color: var(--text-primary); font: 12.5px/1.55 Consolas, 'Cascadia Mono', monospace; tab-size: 2;
+}
+.hw-preview {
+  flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 14px; box-sizing: border-box;
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  border: var(--border-width, 1px) solid var(--border-color); border-radius: 10px; background: var(--bg-tertiary, var(--bg-secondary));
+}
+.hw-page { position: relative; width: 100%; max-width: 816px; flex-shrink: 0; }
+.hw-page canvas { display: block; width: 100%; height: auto; border-radius: 3px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22); }
+.hw-page-tools {
+  position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 8px;
+  background: var(--bg-elevated, var(--bg-secondary)); border: var(--border-width, 1px) solid var(--border-color);
+  opacity: 0; transition: opacity 0.15s;
+}
+.hw-page:hover .hw-page-tools { opacity: 1; }
+.hw-page-no { font-size: 11px; color: var(--text-muted); margin-right: 4px; }
+.hw-footer { display: flex; align-items: center; gap: 14px; flex-shrink: 0; }
+.hw-pen-val {
+  min-width: 38px; padding: 2px 4px; border-radius: 5px; border: var(--border-width, 1px) solid var(--border-color);
+  background: transparent; cursor: pointer; font-size: 11.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums;
+}
+.hw-pen-val.is-auto { border-color: transparent; color: var(--accent); cursor: default; }
+.hw-group-val { min-width: 10px; font-size: 11.5px; color: var(--text-muted); }
+.hw-commit { padding: 4px 10px; font-size: 12px; }
+.hw-sections {
+  display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; max-height: 32%; overflow-y: auto;
+  border-bottom: var(--border-width, 1px) solid var(--border-color);
+}
+.hw-sections.empty { display: none; }
+.hw-sec {
+  display: flex; align-items: center; gap: 6px; padding: 3px 4px 3px 6px; border-radius: 6px; font-size: 12px;
+  background: var(--bg-primary, var(--bg-input, var(--bg-secondary))); color: var(--text-secondary);
+}
+.hw-sec-ink { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.hw-sec-no { font-weight: 700; color: var(--text-primary); }
+.hw-sec-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hw-sec-clear {
+  align-self: flex-end; border: none; background: none; cursor: pointer; padding: 2px 4px;
+  font-size: 11.5px; color: var(--danger, #ef4444);
+}
+
+/* =====================================================================================
+   ENGINEERING UTILITIES — shared design layer
+   Brings every built-in utility up to the Notes view's look: a big title row, tinted
+   cards in the utility's own colour (as note cards are tinted by project), Notes-style
+   chips/buttons, uppercase dotted section labels and soft lift on hover.
+   --util-color is set per pane / sub-nav item by engineering.js (BUILTIN[].color).
+   Visual properties only (bg/border/radius/shadow/colour) — each utility keeps its own
+   sizes and layout. Appended last so it wins over the per-utility rules above.
+   ===================================================================================== */
+#view-engineering, .kicad-modal, .wifi-modal, .gm-modal, .gm-ctxmenu { --util-color: var(--accent, #3B82F6); }
+#view-engineering .eng-util-pane {
+  --util-tint: color-mix(in srgb, var(--util-color) 9%, var(--bg-card, #1E293B));
+  --util-edge: color-mix(in srgb, var(--util-color) 32%, var(--border-color, #334155));
+  background: radial-gradient(1100px 260px at 0 0, color-mix(in srgb, var(--util-color) 7%, transparent), transparent 70%);
+}
+
+/* ── Sub-nav: the project sidebar's look, with each utility's colour on its icon ── */
+.eng-subnav { padding: 14px 10px; gap: 2px; background: var(--bg-sidebar, transparent); }
+.eng-nav-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--text-muted);
+  padding: 0 12px; margin-bottom: 8px;
+}
+.eng-nav-item {
+  position: relative; padding: 8px 10px; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  transition: background .15s cubic-bezier(.4,0,.2,1), color .15s;
+}
+.eng-nav-item .eng-nav-icon {
+  width: 28px; height: 28px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px; border-radius: var(--radius-sm, 8px);
+  background: color-mix(in srgb, var(--util-color, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--util-color, var(--accent)) 28%, transparent);
+  transition: box-shadow .2s, transform .2s;
+}
+.eng-nav-item:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.eng-nav-item:hover .eng-nav-icon { transform: scale(1.06); }
+.eng-nav-item.active {
+  color: var(--text-primary); font-weight: 700;
+  background: color-mix(in srgb, var(--util-color, var(--accent)) 16%, transparent);
+}
+.eng-nav-item.active::before {
+  content: ''; position: absolute; left: -10px; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0;
+  background: var(--util-color, var(--accent));
+}
+.eng-nav-item.active .eng-nav-icon { box-shadow: 0 0 10px color-mix(in srgb, var(--util-color, var(--accent)) 40%, transparent); }
+.eng-nav-store { --util-color: var(--accent); }
+
+/* ── Page header: the Notes "All Notes" title row ── */
+.eng-util-pane > .eng-page-head, .eng-page-head { flex: 0 0 auto; }
+.eng-page-head { display: flex; align-items: center; gap: 14px; padding: 18px 20px 14px; }
+.eng-page-icon {
+  width: 44px; height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 22px; border-radius: var(--radius-lg, 12px);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--util-color) 26%, transparent), color-mix(in srgb, var(--util-color) 10%, transparent));
+  border: 1.5px solid color-mix(in srgb, var(--util-color) 45%, transparent);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--util-color) 22%, transparent);
+}
+.eng-page-titles { flex: 1; min-width: 0; }
+.eng-page-title { margin: 0; font-size: 22px; font-weight: 800; line-height: 1.2; color: var(--text-primary); letter-spacing: -.01em; }
+.eng-page-sub { margin-top: 2px; font-size: 13px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eng-page-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.eng-page-actions:empty { display: none; }
+/* The shared header replaces these utilities' own titles. */
+#view-engineering .fmerge-head, #view-engineering .engink-title { display: none; }
+
+/* Body padding lines up with the header (20px gutter); the header supplies the top spacing. */
+#view-engineering :is(.printer-dashboard, .slicer-dashboard, .kicad-importer, .fmerge, .hw) { padding: 2px 20px 20px; }
+
+/* ── Cards: tinted by the utility colour, like note cards by project ── */
+#view-engineering :is(.printer-card, .printer-settings-bar, .slicer-arrange-row, .wifi-card, .kicad-options, .kicad-target,
+  .kicad-zip-list, .fmerge-list, .hw-editor, .uart-node) {
+  background: linear-gradient(180deg, var(--util-tint), var(--bg-card, #1E293B) 140px);
+  border: var(--card-border-width, 1.5px) solid var(--util-edge);
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: var(--card-shadow, 0 2px 12px rgba(0,0,0,.25), 0 1px 3px rgba(0,0,0,.15));
+}
+#view-engineering .hw-preview {
+  border: var(--card-border-width, 1.5px) solid var(--util-edge); border-radius: var(--radius-lg, 12px);
+  box-shadow: inset 0 1px 4px rgba(0,0,0,.12);
+}
+#view-engineering .printer-card-header { border-bottom-color: color-mix(in srgb, var(--util-color) 18%, var(--border-color)); }
+#view-engineering .uart-node.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent), var(--card-hover-shadow, 0 12px 28px rgba(0,0,0,.35)); }
+#view-engineering .uart-node-head {
+  background: color-mix(in srgb, var(--util-color) 16%, var(--bg-card, #1E293B));
+  border-bottom-color: var(--util-edge); border-radius: calc(var(--radius-lg, 12px) - 2px) calc(var(--radius-lg, 12px) - 2px) 0 0;
+}
+#view-engineering .uart-term { border-color: var(--bg-card, #1E293B); }
+
+/* Wells: logs, terminals, lists inside a card */
+#view-engineering :is(.kicad-log, .wifi-status, .wifi-meter-list, .gm-list) {
+  background: var(--bg-input, var(--bg-secondary)); border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md, 10px); box-shadow: inset 0 1px 3px rgba(0,0,0,.12);
+}
+
+/* ── Section labels: the Notes section header (dot + uppercase muted label) ── */
+#view-engineering :is(.printer-card-title, .wifi-card-title, .kicad-options-title, .kicad-log-title, .store-section-title, .hw-editor-label) {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--text-muted);
+}
+#view-engineering :is(.printer-card-title, .wifi-card-title, .kicad-options-title, .kicad-log-title, .store-section-title, .hw-editor-label)::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--util-color); box-shadow: 0 0 6px color-mix(in srgb, var(--util-color) 60%, transparent);
+}
+:is(#view-engineering, .gm-modal) :is(.kicad-label, .gm-field-label) { text-transform: uppercase; letter-spacing: .5px; font-size: 11px; font-weight: 700; color: var(--text-muted); }
+
+/* ── Buttons: Notes filter-chip (secondary) and "+ Add Note" (primary) ── */
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-btn, .gm-btn, .gm-dd-btn, .gm-mini, .engink-btn, .fmerge-mini, .printer-btn.printer-btn-outline) {
+  background: var(--bg-card, #1E293B); color: var(--text-secondary);
+  border: 1.5px solid var(--border-color); border-radius: var(--radius-md, 10px);
+  font-family: inherit; font-weight: 700; box-shadow: none;
+  transition: transform .18s cubic-bezier(.4,0,.2,1), box-shadow .18s, border-color .18s, background .18s, color .18s;
+}
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-btn, .gm-btn, .gm-dd-btn, .gm-mini, .engink-btn, .fmerge-mini, .printer-btn.printer-btn-outline):hover:not(:disabled) {
+  border-color: var(--accent); color: var(--accent-text, var(--text-primary));
+  background: var(--accent-bg, var(--bg-hover)); transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,.14); filter: none;
+}
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) .gm-btn-ghost { background: transparent; }
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-btn.kicad-btn-start, .gm-btn.gm-btn-primary, .engink-btn.active, .printer-btn:not(.printer-btn-outline, .printer-btn-fullscreen, .printer-btn-success, .printer-btn-print, .printer-btn-danger, .printer-btn-estop, .printer-btn-cooldown)) {
+  background: linear-gradient(135deg, var(--accent, #3B82F6), var(--accent-hover, #2563EB));
+  color: #fff; border: 1.5px solid transparent; border-radius: var(--radius-md, 10px); font-weight: 700;
+  box-shadow: var(--btn-shadow, 0 2px 8px rgba(0,0,0,.15));
+  transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, filter .2s;
+}
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-btn.kicad-btn-start, .gm-btn.gm-btn-primary, .engink-btn.active, .printer-btn:not(.printer-btn-outline, .printer-btn-fullscreen, .printer-btn-success, .printer-btn-print, .printer-btn-danger, .printer-btn-estop, .printer-btn-cooldown)):hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--accent-hover, #2563EB), var(--accent, #3B82F6));
+  color: #fff; border-color: transparent; transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.22); filter: none;
+}
+/* Coloured printer actions keep their own gradients (go / stop / cool down); just the shape + lift */
+#view-engineering .printer-btn:is(.printer-btn-success, .printer-btn-print, .printer-btn-danger, .printer-btn-estop, .printer-btn-cooldown) {
+  border: none; border-radius: var(--radius-md, 10px); font-weight: 700; color: #fff;
+  box-shadow: var(--btn-shadow, 0 2px 8px rgba(0,0,0,.15));
+  transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, filter .2s;
+}
+#view-engineering .printer-btn:is(.printer-btn-success, .printer-btn-print, .printer-btn-danger, .printer-btn-estop, .printer-btn-cooldown):hover:not(:disabled) {
+  filter: brightness(1.08); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.22);
+}
+#view-engineering .kicad-btn.kicad-btn-append { background: linear-gradient(135deg, #FB923C, #EA580C); color: #fff; border-color: transparent; box-shadow: var(--btn-shadow, 0 2px 8px rgba(0,0,0,.15)); }
+#view-engineering .kicad-btn.kicad-btn-append:hover:not(:disabled) { background: linear-gradient(135deg, #EA580C, #FB923C); color: #fff; border-color: transparent; transform: translateY(-2px); }
+:is(#view-engineering, .gm-modal) :is(.gm-mini.gm-danger, .fmerge-remove):hover:not(:disabled) { color: var(--danger, #EF4444); border-color: var(--danger, #EF4444); background: color-mix(in srgb, var(--danger, #EF4444) 12%, transparent); }
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-btn, .gm-btn, .engink-btn, .printer-btn):disabled { opacity: .45; transform: none; box-shadow: none; }
+
+/* ── Inputs ── */
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-input, .gm-input, .printer-input-sm, .slicer-input, .slicer-select, .gm-commit-summary, .gm-commit-desc) {
+  background: var(--bg-input, var(--bg-secondary)); color: var(--text-primary);
+  border: 1.5px solid var(--border-color); border-radius: var(--radius-sm, 8px);
+  transition: border-color .15s, box-shadow .15s;
+}
+:is(#view-engineering, .kicad-modal, .wifi-modal, .gm-modal) :is(.kicad-input, .gm-input, .printer-input-sm, .slicer-input, .slicer-select, .gm-commit-summary, .gm-commit-desc):focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg, rgba(59,130,246,.15));
+}
+
+/* ── Tabs → Notes filter chips ── */
+#view-engineering :is(.wifi-tabbar, .gm-tabs) { gap: 6px; padding: 10px 20px; align-items: center; }
+#view-engineering :is(.wifi-tab, .gm-tab) {
+  padding: 5px 13px; border-radius: 99px; border: 1.5px solid var(--border-color);
+  background: var(--bg-card, var(--bg-secondary)); color: var(--text-muted);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+  transition: all .2s cubic-bezier(.4,0,.2,1);
+}
+#view-engineering :is(.wifi-tab, .gm-tab):hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-bg); transform: translateY(-1px); }
+#view-engineering :is(.wifi-tab, .gm-tab).active {
+  background: linear-gradient(135deg, var(--accent, #3B82F6), var(--accent-hover, #2563EB));
+  color: #fff; border-color: transparent; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+#view-engineering .wifi-tab.active .wifi-tab-close, #view-engineering .gm-tab.active .gm-badge { color: rgba(255,255,255,.85); }
+#view-engineering .gm-tab.active .gm-badge { background: rgba(255,255,255,.22); }
+#view-engineering .gm-badge { font-weight: 700; }
+#view-engineering .wifi-tab-add { border-radius: 99px; border-width: 1.5px; }
+#view-engineering .wifi-tab { text-transform: none; letter-spacing: 0; font-size: 12px; } /* user-named tabs keep their case */
+
+/* ── Toolbars: quiet bands that line up with the header gutter ── */
+#view-engineering :is(.uart-toolbar, .gm-topbar, .engink-bar) {
+  padding: 8px 20px; gap: 8px; background: transparent;
+  border-bottom: 1px solid var(--border-color);
+}
+#view-engineering .gm-topbar { border-top: 1px solid var(--border-color); }
+#view-engineering .gm-statusline { padding: 6px 20px; background: transparent; }
+#view-engineering .engink-pair { padding: 10px 20px; background: color-mix(in srgb, var(--util-color) 6%, transparent); }
+#view-engineering .engink-stage { background: var(--bg-secondary); }
+#view-engineering .uart-monitor-head { padding: 8px 20px; text-transform: uppercase; letter-spacing: .5px; font-size: 11.5px; color: var(--text-muted); }
+#view-engineering .uart-monitor { padding: 8px 20px; }
+
+/* Dropdowns / context menus */
+.gm-dd-menu, .gm-ctxmenu, .uart-more-menu {
+  border: 1.5px solid var(--border-color); border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 16px 40px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.15);
+}
+
+/* ── Lists: rows that respond like note cards ── */
+#view-engineering .fmerge-row {
+  background: var(--bg-card, #1E293B); border: 1.5px solid var(--border-color); border-radius: var(--radius-md, 10px);
+  transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .2s, border-color .2s;
+}
+#view-engineering .fmerge-row:hover { border-color: var(--util-edge); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.18); }
+#view-engineering .fmerge-idx {
+  min-width: 24px; height: 24px; line-height: 24px; border-radius: 99px; font-size: 11px; font-weight: 800;
+  background: color-mix(in srgb, var(--util-color) 18%, transparent); color: color-mix(in srgb, var(--util-color) 70%, var(--text-primary));
+}
+#view-engineering :is(.kicad-zip-row, .wifi-meter-row) { border-radius: var(--radius-sm, 8px); transition: background .15s; }
+#view-engineering :is(.kicad-zip-row, .wifi-meter-row):hover { background: color-mix(in srgb, var(--util-color) 10%, transparent); }
+#view-engineering :is(.printer-file-row, .printer-history-row):hover { background: color-mix(in srgb, var(--util-color) 8%, transparent); }
+#view-engineering :is(.gm-file-row, .gm-commit-row).selected { background: color-mix(in srgb, var(--util-color) 14%, transparent); border-left-color: var(--util-color); }
+#view-engineering .gm-commit-row { border-left: 2px solid transparent; }
+#view-engineering .gm-commit-refs { color: color-mix(in srgb, var(--util-color) 75%, var(--text-primary)); }
+#view-engineering .uart-step { background: var(--bg-card, #1E293B); border: 1.5px solid var(--border-color); border-radius: var(--radius-md, 10px); box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+#view-engineering .uart-step-type { color: color-mix(in srgb, var(--util-color) 70%, var(--text-primary)); }
+#view-engineering .hw-sec { border-radius: var(--radius-sm, 8px); }
+.wifi-modal .uart-port-row { border-radius: var(--radius-md, 10px); border-width: 1.5px; }
+
+/* Empty states */
+#view-engineering .gm-empty-ico {
+  width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; font-size: 34px;
+  border-radius: 20px; background: color-mix(in srgb, var(--util-color) 14%, transparent); border: 1.5px solid var(--util-edge);
+}
+#view-engineering .gm-empty-title { font-size: 17px; font-weight: 800; }
+
+/* Progress bars use the theme accent like the sidebar progress bar */
+#view-engineering :is(.printer-progress-fill, .kicad-prog-fill) { background: linear-gradient(90deg, var(--accent, #3B82F6), var(--accent-hover, #2563EB)); }
+#view-engineering :is(.printer-progress-bar-bg, .printer-temp-bar-bg, .kicad-prog) { background: color-mix(in srgb, var(--text-muted) 16%, transparent); }
+
+/* ── Dark-theme fixes: light-mode pastels / hard-coded white that glared on dark themes ── */
+#view-engineering .printer-state-badge:is(.standby, .ready) { background: color-mix(in srgb, var(--accent, #3B82F6) 16%, transparent); color: var(--accent-text, #2563EB); }
+#view-engineering :is(.printer-state-badge.printing, .printer-state-badge.complete, .printer-video-status.live) { background: color-mix(in srgb, var(--success, #22C55E) 16%, transparent); color: var(--success, #16A34A); }
+#view-engineering :is(.printer-state-badge.paused, .printer-video-status.connecting) { background: color-mix(in srgb, var(--warning, #F59E0B) 18%, transparent); color: var(--warning, #D97706); }
+#view-engineering .printer-state-badge:is(.cancelled, .error) { background: color-mix(in srgb, var(--danger, #EF4444) 16%, transparent); color: var(--danger, #DC2626); }
+#view-engineering :is(.printer-state-badge.offline, .printer-video-status.disconnected) { background: color-mix(in srgb, var(--text-muted) 14%, transparent); color: var(--text-muted); }
+#view-engineering :is(.printer-video-container, .printer-video-overlay) { background: color-mix(in srgb, var(--bg-secondary) 70%, #000); }
+#view-engineering .slicer-viewport { background: var(--bg-secondary); }
+#view-engineering .slicer-tool-btn {
+  background: color-mix(in srgb, var(--bg-card, #1E293B) 88%, transparent); color: var(--text-secondary);
+  border: 1.5px solid var(--border-color); border-radius: var(--radius-md, 10px);
+}
+#view-engineering .slicer-tool-btn:hover { background: var(--bg-card, #1E293B); color: var(--text-primary); border-color: var(--accent); }
+#view-engineering .slicer-tool-btn.active { background: linear-gradient(135deg, var(--accent, #3B82F6), var(--accent-hover, #2563EB)); color: #fff; border-color: transparent; }
+#view-engineering .slicer-float-panel {
+  background: color-mix(in srgb, var(--bg-card, #1E293B) 94%, transparent); color: var(--text-primary);
+  border: 1.5px solid var(--util-edge); border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 16px 40px rgba(0,0,0,.3);
+}
+#view-engineering .slicer-result-item {
+  background: color-mix(in srgb, var(--util-color) 8%, var(--bg-secondary)); border: 1px solid var(--util-edge);
+  border-radius: var(--radius-md, 10px);
+}
+
+/* ── Utility Store: cards that lift like notes (each in its utility's colour) ── */
+#view-engineering .store-status { margin: 0 0 6px; }
+#view-engineering .store-section-title { margin: 18px 0 10px; }
+#view-engineering .store-grid { gap: 14px; }
+#view-engineering .store-card {
+  padding: 14px; gap: 10px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--util-color) 12%, var(--bg-card, #1E293B)), var(--bg-card, #1E293B));
+  border: var(--card-border-width, 1.5px) solid color-mix(in srgb, var(--util-color) 35%, var(--border-color));
+  border-radius: var(--radius-lg, 12px);
+  box-shadow: 0 2px 12px rgba(0,0,0,.2), 0 1px 3px rgba(0,0,0,.12);
+  transition: transform .22s cubic-bezier(.4,0,.2,1), box-shadow .22s;
+}
+#view-engineering .store-card:hover { transform: translateY(-3px); box-shadow: 0 16px 40px rgba(0,0,0,.22), 0 0 20px rgba(0,0,0,.06); }
+#view-engineering .store-card-icon {
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; font-size: 19px; flex-shrink: 0;
+  border-radius: var(--radius-md, 10px); background: color-mix(in srgb, var(--util-color) 20%, transparent);
+}
+#view-engineering .store-card-name { font-size: 14px; font-weight: 700; }
+#view-engineering .store-card-desc { font-size: 12px; color: var(--text-secondary); }
+#view-engineering .store-installed {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; padding: 2px 6px; border-radius: 4px;
+  background: color-mix(in srgb, var(--success, #22C55E) 16%, transparent); color: var(--success, #16A34A);
+}
+
+/* Modals opened by the utilities */
+.kicad-modal, .wifi-modal, .gm-modal { border: 1.5px solid var(--border-color); border-radius: var(--radius-lg, 14px); box-shadow: 0 24px 60px rgba(0,0,0,.4); }
+.kicad-modal-title, .wifi-modal-title, .uart-modal-title { font-weight: 800; }

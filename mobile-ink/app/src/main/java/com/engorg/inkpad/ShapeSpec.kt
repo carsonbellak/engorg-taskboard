@@ -17,10 +17,11 @@ import kotlin.math.sin
  * BOX / CYLINDER / CONE / SPHERE / PYRAMID are v1.5.5's fixed-angle solids: only read from old
  * notebooks, where the loader turns them into SOLIDs ([ShapeSpec.legacySolid]).
  * GRAPH = a live graph card from the grapher ([ShapeSpec.graph]) filling the box between its two verts.
+ * SYMBOL = a class symbol ([ShapeSpec.symbol]: resistor, compressor, pin support…), drawn by [Symbols].
  */
 enum class ShapeType {
     LINE, ARROW, RECT, ELLIPSE, TRIANGLE, AXES2D_1Q, AXES2D_2Q, AXES2D, AXES3D, AXES3D_8, TABLE,
-    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID, GRAPH, TRAPEZOID;
+    SOLID, BOX, CYLINDER, CONE, SPHERE, PYRAMID, GRAPH, TRAPEZOID, SYMBOL;
 
     /** Verts a saved shape must have (a SOLID's one is its center; a legacy box had a depth handle). */
     val vertCount: Int get() = when (this) { SOLID -> 1; TRIANGLE, BOX -> 3; TRAPEZOID -> 4; else -> 2 }
@@ -58,6 +59,9 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     var graph: GraphCard? = null
     /** A closed 2D shape's fill (ARGB, 0 = none). A solid's paint lives in its [Solid.fill]. */
     var fillColor = 0
+    /** A SYMBOL's symbol, and (INLINE ones) its body size relative to standard — resizing scales it. */
+    var symbol: Sym? = null
+    var symScale = 1f
 
     fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }), dashed).also {
         it.hashed = hashed; it.rows = rows; it.cols = cols; it.border = border
@@ -65,6 +69,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
         it.solid = solid?.copy()
         it.graph = graph
         it.fillColor = fillColor
+        it.symbol = symbol; it.symScale = symScale
     }
 
     /** An area painted under the outline: [polys] filled together in [color], outlined in [edge] (0 = no edge). */
@@ -87,6 +92,8 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** The draggable handle points, on the page (rotated with the shape). */
     val handles: List<PointF> get() = when {
         solid != null || type == ShapeType.GRAPH -> emptyList()
+        // A box symbol keeps its proportions: resize it with the selection box. An inline one's handles are its terminals.
+        type == ShapeType.SYMBOL && symbol?.kind != SymKind.INLINE -> emptyList()
         rot == 0f -> verts
         else -> verts.map { rotated(it) }
     }
@@ -122,8 +129,12 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** Scale a solid's size by [k] (a 2D resize maps onto a uniform 3D one, so it keeps its proportions). */
     fun scaleSolid(k: Float) { solid?.let { it.size = (it.size * k).coerceIn(2f, 4000f) } }
 
+    /** Scale an inline symbol's body by [k] along with its terminals (a box symbol scales with its box). */
+    fun scaleSymbol(k: Float) { symScale = (symScale * k).coerceIn(0.2f, 20f) }
+
     /** Line, arrow and triangle are pure point shapes — rotating them just rotates their verts. */
-    val rotatesByVerts: Boolean get() = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.TRIANGLE || type == ShapeType.TRAPEZOID
+    val rotatesByVerts: Boolean get() = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.TRIANGLE || type == ShapeType.TRAPEZOID ||
+        (type == ShapeType.SYMBOL && symbol?.kind == SymKind.INLINE)
 
     /** Rotate the whole shape by [deg] about page point ([cx],[cy]). */
     fun rotateBy(deg: Float, cx: Float, cy: Float) {
@@ -187,6 +198,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
             listOf(Part(seg(PointF(l, t), PointF(r, t)).dropLast(1) + seg(PointF(r, t), PointF(r, bt)).dropLast(1) +
                 seg(PointF(r, bt), PointF(l, bt)).dropLast(1) + seg(PointF(l, bt), PointF(l, t))))
         }
+        ShapeType.SYMBOL -> symbol?.let { Symbols.parts(it, verts, symScale, rot) } ?: emptyList()
         // A solid always carries [solid]; legacy types are converted as they load.
         ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> emptyList()
     }
@@ -204,11 +216,24 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
                 ShapeType.AXES2D_1Q -> arrayListOf(PointF(cx - s, cy + s), PointF(cx + s, cy - s))
                 ShapeType.AXES3D -> arrayListOf(PointF(cx, cy + s * 0.55f), PointF(cx + s * 0.75f, cy - s * 0.75f))
                 ShapeType.AXES3D_8 -> arrayListOf(PointF(cx, cy), PointF(cx + s * 0.6f, cy - s * 0.6f))
+                ShapeType.SYMBOL -> return symbolAt(Sym.RESISTOR, cx, cy, s / Symbols.SPAN * 2f)
                 ShapeType.TABLE, ShapeType.GRAPH -> arrayListOf(PointF(cx - s, cy - s * 0.75f), PointF(cx + s, cy + s * 0.75f))
                 ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID ->
                     return solidIn(legacyParams(type) ?: SolidParams.box(), cx - s, cy - s, cx + s, cy + s)
             }
             return ShapeSpec(type, v)
+        }
+
+        /**
+         * [sym] at [k]× its standard size, centered at (cx,cy): an inline one horizontal across
+         * [Symbols.SPAN] (first terminal on the left), a box one in its standard box.
+         */
+        fun symbolAt(sym: Sym, cx: Float, cy: Float, k: Float = 1f): ShapeSpec {
+            val v = if (sym.kind == SymKind.INLINE) {
+                val half = max(Symbols.SPAN, sym.w + 16f) * k / 2f
+                arrayListOf(PointF(cx - half, cy), PointF(cx + half, cy))
+            } else arrayListOf(PointF(cx - sym.w * k / 2f, cy - sym.h * k / 2f), PointF(cx + sym.w * k / 2f, cy + sym.h * k / 2f))
+            return ShapeSpec(ShapeType.SYMBOL, v).also { it.symbol = sym; it.symScale = k }
         }
 
         /** A solid in its default 3D view, sized and centered to fill the page box (l,t)–(r,b). */

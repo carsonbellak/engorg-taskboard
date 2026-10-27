@@ -60,6 +60,8 @@ class InkActivity : ComponentActivity() {
     private var eraserSize = 13f    // eraser radius in page units; tap the eraser again to change it
     private var pendingShape: ShapeType? = null
     private var pendingSolid: SolidParams? = null   // the solid an armed SOLID becomes
+    private var pendingSymbol: Sym? = null   // the class symbol an armed SYMBOL drops
+    private var symbolGroup = SymGroup.ECE   // the symbols menu reopens on the last tab used
     private var pendingShapeDashed = false   // arm shapes with a dashed outline (e.g. system boundaries)
     private var pendingShapeHashed = true    // tick marks on the axes shapes
     private var tableRows = 3
@@ -68,6 +70,7 @@ class InkActivity : ComponentActivity() {
 
     private lateinit var colorButton: Button
     private var shapeButton: ImageButton? = null
+    private var symbolButton: ImageButton? = null
     private var tableButton: ImageButton? = null
     private var brushButton: ImageButton? = null
     private var pageLabel: TextView? = null
@@ -126,6 +129,7 @@ class InkActivity : ComponentActivity() {
         override val pendingTableCols get() = tableCols
         override val pendingTableBorder get() = tableBorder
         override val pendingSolid get() = this@InkActivity.pendingSolid
+        override val pendingSymbol get() = this@InkActivity.pendingSymbol
         override fun editSolid(params: SolidParams, fill: SolidFill, view: FloatArray, onApply: (SolidParams, SolidFill) -> Unit) =
             showSolidBuilder(params, "Apply", fill, view) { p, f -> onApply(p, f ?: fill) }
         override fun editFill(color: Int, onApply: (Int) -> Unit) = showFillDialog(color, onApply)
@@ -160,6 +164,7 @@ class InkActivity : ComponentActivity() {
         pendingShapeDashed = ip.getBoolean("shapeDashed", false)
         pendingShapeHashed = ip.getBoolean("shapeHashed", true)
         tableRows = ip.getInt("tableRows", 3).coerceIn(1, 20)
+        symbolGroup = runCatching { SymGroup.valueOf(ip.getString("symbolGroup", null) ?: "ECE") }.getOrDefault(SymGroup.ECE)
         tableCols = ip.getInt("tableCols", 3).coerceIn(1, 20)
         tableBorder = ip.getBoolean("tableBorder", true)
 
@@ -634,6 +639,8 @@ class InkActivity : ComponentActivity() {
             addView(iconTool(Icons.MARKER, Tool.HIGHLIGHTER))
             addView(iconTool(Icons.ERASER, Tool.ERASER)); addView(iconTool(Icons.LASSO, Tool.SELECT))
             addView(iconBtn(Icons.SHAPES) { showShapeMenu(it) }.also { shapeButton = it })
+            // Tapping it again while a symbol is armed puts it away.
+            addView(iconBtn(Icons.SYMBOLS) { if (pendingShape == ShapeType.SYMBOL) clearPendingShape() else showSymbolMenu(it) }.also { symbolButton = it })
             addView(iconBtn(Icons.TABLE) { showTableMenu(it) }.also { tableButton = it })
             addView(iconBtn(Icons.GRAPH) { spawnGraph() }.also { graphButton = it })
             addView(iconBtn(Icons.CALC) { toggleCalculator() }.also { calcButton = it })
@@ -821,12 +828,74 @@ class InkActivity : ComponentActivity() {
         clearPendingShape()
         pendingShape = type
         tool = Tool.PEN; panes.forEach { it.onToolChanged() }; updateTools()
-        val btn = if (type == ShapeType.TABLE) tableButton else shapeButton
+        val btn = when (type) { ShapeType.TABLE -> tableButton; ShapeType.SYMBOL -> symbolButton; else -> shapeButton }
         btn?.background = pill(accent); btn?.setColorFilter(AppTheme.onAccent())
         val prefix = if (pendingShapeDashed && type != ShapeType.TABLE) "dashed " else ""
-        val msg = if (type == ShapeType.TABLE) "Drag out the table (or tap to drop one)" else "Draw a $prefix${shapeLabel(type)}"
+        val sym = pendingSymbol
+        val msg = when {
+            type == ShapeType.TABLE -> "Drag out the table (or tap to drop one)"
+            type == ShapeType.SYMBOL && sym != null -> if (sym.kind == SymKind.INLINE) "${sym.label}: tap to drop one, or draw a line to lay it along" else "${sym.label}: tap to drop one"
+            else -> "Draw a $prefix${shapeLabel(type)}"
+        }
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
+    /** Arm a class symbol: each tap drops one at its standard size until you pick another tool. */
+    private fun armSymbol(sym: Sym) { pendingSymbol = sym; armShape(ShapeType.SYMBOL) }
+
+    /**
+     * Class symbols by course (circuits, thermo, mechanics, systems), each tile labeled since a
+     * compressor and a turbine only differ by which way they taper.
+     */
+    private fun showSymbolMenu(anchor: View) {
+        val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
+        val col = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.surface)
+                setStroke(dp(1), Color.argb(0x30, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
+            }
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        val popup = PopupWindow(col, WRAP_CONTENT, WRAP_CONTENT, true).apply { elevation = dp(10).toFloat() }
+        val tabs = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dp(2), dp(2), dp(2), dp(4)) }
+        val courses = TextView(this).apply { textSize = 11f; setTextColor(muted); setPadding(dp(8), 0, 0, dp(4)) }
+        val grid = GridLayout(this).apply { columnCount = 5 }
+        val tabViews = HashMap<SymGroup, TextView>()
+
+        fun preview(sym: Sym, px: Int): Bitmap {
+            // Fit the standard-size symbol (leads and all) into the tile, as it will look on the page.
+            val ext = if (sym.kind == SymKind.INLINE) maxOf(Symbols.SPAN, sym.w + 16f) else maxOf(sym.w, sym.h)
+            val k = px * 0.84f / ext
+            return specPreview(ShapeSpec.symbolAt(sym, px / 2f, px / 2f, k), px, false)
+        }
+        fun fill(g: SymGroup) {
+            symbolGroup = g; saveBrushPref()
+            for ((tg, tv) in tabViews) { tv.background = pill(if (tg == g) accent else light); tv.setTextColor(if (tg == g) AppTheme.onAccent() else onSurface) }
+            courses.text = g.courses
+            grid.removeAllViews()
+            for (sym in Sym.inGroup(g)) grid.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                background = pill(if (pendingShape == ShapeType.SYMBOL && pendingSymbol == sym) accent else light); stateListAnimator = null
+                setPadding(dp(4), dp(6), dp(4), dp(4))
+                layoutParams = GridLayout.LayoutParams().apply { width = dp(76); height = WRAP_CONTENT; setMargins(dp(3), dp(3), dp(3), dp(3)) }
+                addView(ImageView(this@InkActivity).apply { setImageBitmap(preview(sym, dp(44))); setColorFilter(onSurface) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                addView(TextView(this@InkActivity).apply {
+                    text = sym.label; textSize = 10f; setTextColor(onSurface); gravity = Gravity.CENTER; maxLines = 2
+                }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+                setOnClickListener { popup.dismiss(); armSymbol(sym) }
+            })
+        }
+        for (g in SymGroup.values()) tabs.addView(TextView(this).apply {
+            text = g.label; textSize = 13f; gravity = Gravity.CENTER; stateListAnimator = null
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(6) }
+            setOnClickListener { fill(g) }
+        }.also { tabViews[g] = it })
+        col.addView(tabs); col.addView(courses); col.addView(grid)
+        fill(symbolGroup)
+        popup.showAsDropDown(anchor, 0, dp(6))
+    }
+
     /** Arm a 3D solid: the next stroke you draw sets where it goes and how big it is. */
     private fun armSolid(params: SolidParams) { pendingSolid = params.copy(); armShape(ShapeType.SOLID) }
 
@@ -1136,7 +1205,7 @@ class InkActivity : ComponentActivity() {
     private fun clearPendingShape() {
         if (pendingShape == null) return
         pendingShape = null
-        for (b in listOf(shapeButton, tableButton)) { b?.background = pill(light); b?.setColorFilter(onSurface) }
+        for (b in listOf(shapeButton, tableButton, symbolButton)) { b?.background = pill(light); b?.setColorFilter(onSurface) }
     }
 
     private fun shapeLabel(t: ShapeType) = when (t) {
@@ -1147,6 +1216,7 @@ class InkActivity : ComponentActivity() {
         ShapeType.SOLID -> pendingSolid?.label ?: "solid"
         ShapeType.BOX -> "box"; ShapeType.CYLINDER -> "cylinder"; ShapeType.CONE -> "cone"
         ShapeType.SPHERE -> "sphere"; ShapeType.PYRAMID -> "pyramid"; ShapeType.GRAPH -> "graph"
+        ShapeType.SYMBOL -> pendingSymbol?.label?.lowercase() ?: "symbol"
     }
 
     /**
@@ -1490,7 +1560,7 @@ class InkActivity : ComponentActivity() {
         getSharedPreferences(INK_PREFS, MODE_PRIVATE).edit()
             .putFloat("brushSize", brushSize).putInt("brushColor", brushColor)
             .putFloat("smoothing", smoothing).putFloat("eraserSize", eraserSize).putString("brush", brush.name)
-            .putBoolean("shapeDashed", pendingShapeDashed).putBoolean("shapeHashed", pendingShapeHashed)
+            .putString("symbolGroup", symbolGroup.name).putBoolean("shapeDashed", pendingShapeDashed).putBoolean("shapeHashed", pendingShapeHashed)
             .putInt("tableRows", tableRows).putInt("tableCols", tableCols).putBoolean("tableBorder", tableBorder).apply()
         InkSettings.markChanged(this)
     }

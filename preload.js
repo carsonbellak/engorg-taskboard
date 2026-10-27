@@ -325,6 +325,10 @@ const __api = {
     selectFiles: () => ipcRenderer.invoke('fileMerger:selectFiles'),
     save: (bytes, defaultName) => ipcRenderer.invoke('fileMerger:save', bytes, defaultName),
   },
+  // Handwriter — LaTeX → handwriting pages are drawn in the renderer; main only saves the PDF/PNG.
+  handwriter: {
+    save: (bytes, defaultName) => ipcRenderer.invoke('handwriter:save', bytes, defaultName),
+  },
   // Share tab — the transfer runs over Firestore in the renderer (renderer/share.js); main
   // only names this PC and writes received files into Downloads (never overwriting).
   share: {

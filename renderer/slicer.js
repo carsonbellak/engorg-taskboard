@@ -841,7 +841,7 @@ const slicerController = (() => {
     const height = viewport.clientHeight || 500;
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf0f2f5);
+    scene.background = new THREE.Color(modelBackground());
 
     camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
     camera.position.set(200, 200, 200);
@@ -880,6 +880,7 @@ const slicerController = (() => {
     plateMesh.rotation.x = -Math.PI / 2;
     plateMesh.position.y = -0.1;
     scene.add(plateMesh);
+    setGridDark(themeIsDark());
 
     animate();
 
@@ -1253,7 +1254,7 @@ const slicerController = (() => {
     gcodeMode = false;
     clearGcodeScene();
     for (const m of loadedModels) if (m.mesh) m.mesh.visible = true;
-    if (scene) scene.background = new THREE.Color(0xf0f2f5);
+    if (scene) scene.background = new THREE.Color(modelBackground());
 
     document.getElementById('slicer-layer-controls')?.classList.add('hidden');
     const title = document.getElementById('slicer-viewer-title');
@@ -1261,8 +1262,12 @@ const slicerController = (() => {
     document.getElementById('slicer-btn-back-model')?.classList.add('hidden');
     document.getElementById('slicer-btn-load')?.classList.remove('hidden');
 
-    setGridDark(false);
+    setGridDark(themeIsDark());
   }
+
+  // The model view follows the app theme (a light-grey stage on a dark theme glares).
+  function themeIsDark() { return document.body.classList.contains('theme-dark'); }
+  function modelBackground() { return themeIsDark() ? 0x161b26 : 0xf0f2f5; }
 
   function setGridDark(dark) {
     if (gridHelper) {

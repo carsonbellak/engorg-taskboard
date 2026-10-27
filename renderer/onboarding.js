@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.5.23': {
+      title: "What's new",
+      intro: 'Class symbols in EngInk.',
+      slides: [
+        { emoji: '🔌', title: 'Symbols', body: 'The new resistor button on the EngInk toolbar has symbols for your classes: circuits (resistors, capacitors, inductors, sources, op-amps, ground), thermo (compressor, turbine, pump, heat exchanger, valve, nozzle, heat engine), mechanics (supports, springs, dampers, pulleys, moments) and block diagrams.' },
+        { emoji: '👆', title: 'Tap to place', body: 'Pick a symbol, then tap the page. Each tap adds one at the standard size, lined up with the dots. To place one vertically or at an angle, draw a line instead. Drag a terminal to stretch the wire, or use the lasso to move or rotate a symbol.' },
+      ],
+    },
     '1.5.22': {
       title: "What's new",
       intro: 'Send things between your devices.',

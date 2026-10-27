@@ -31,6 +31,7 @@ const registerUpdates       = require('./ipc/updates');
 const registerWindow        = require('./ipc/window');
 const registerEnginkMirror  = require('./ipc/engink-mirror');
 const registerFileMerger    = require('./ipc/file-merger');
+const registerHandwriter    = require('./ipc/handwriter');
 const registerRelease       = require('./ipc/release');
 const registerOsTheme       = require('./ipc/os-theme');
 const registerDesktopMode   = require('./ipc/desktop-mode');
@@ -305,6 +306,7 @@ app.whenReady().then(async () => {
   registerWindow(getMainWindow);
   registerEnginkMirror(getMainWindow);
   registerFileMerger(getMainWindow);
+  registerHandwriter(getMainWindow);
   registerRelease();
   registerOsTheme();
   registerDesktopMode(getMainWindow, { createDesktopWindow });
