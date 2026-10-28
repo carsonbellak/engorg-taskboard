@@ -81,9 +81,17 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** An area painted under the outline: [polys] filled together in [color], outlined in [edge] (0 = no edge). */
     class Fill(val polys: List<List<PointF>>, val color: Int, val edge: Int = 0)
 
-    /** What to paint under the outline, back to front (a solid's faces and water, or a 2D fill). */
+    /**
+     * What to paint under the outline, back to front (a solid's faces and water, a 2D fill, or a
+     * symbol's tints — reservoirs, a tank's water — derived from the verts each time and turned with [rot]).
+     */
     fun fills(): List<Fill> {
         solid?.let { return it.fills(verts[0].x, verts[0].y) }
+        if (type == ShapeType.SYMBOL) {
+            val raw = symbol?.let { Symbols.fills(it, verts) } ?: return emptyList()
+            if (rot == 0f) return raw
+            return raw.map { f -> Fill(f.polys.map { poly -> poly.map { rotated(it) } }, f.color, f.edge) }
+        }
         if (!type.fillable || (fillColor ushr 24) == 0) return emptyList()
         val outline = parts().firstOrNull()?.pts ?: return emptyList()
         return listOf(Fill(listOf(outline), fillColor))

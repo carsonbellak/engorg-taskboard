@@ -145,7 +145,7 @@ class NotesBoard {
     const effectiveIdx = resolveAutoColor(note, this.colorMode || 'category', this.data.projects);
     const c = getStickyColors()[effectiveIdx];
     const card = document.createElement('div');
-    card.className = 'board-note-card' + (note.completed ? ' board-card-done' : '');
+    card.className = 'board-note-card' + (note.completed ? ' board-card-done' : '') + (isExamNote(note) ? ' board-card-exam' : '');
     card.draggable = true;
     card.dataset.noteId = note.id;
     card.style.borderLeftColor = c.border;

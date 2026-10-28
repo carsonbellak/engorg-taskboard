@@ -208,6 +208,29 @@ body[data-style="glass"] .board-column {
   overflow: hidden;
 }
 .note-card:active { transform: scale(0.98); }
+/* Exam notes — gold frame (category 'exam'); mirrors desktop .note-exam. Outline so it
+   survives the inline sticky-color border; static soft gold (no glare on OLED). */
+:root { --exam-gold: #D4A017; --exam-gold-hi: #F5D06F; --exam-gold-ink: #3B2A00; }
+.note-card.note-exam, .board-card.board-card-exam, .cal-scard.cal-snote.cal-exam {
+  border-color: var(--exam-gold) !important;
+  outline: 2px solid color-mix(in srgb, var(--exam-gold) 55%, transparent);
+  outline-offset: 2px;
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--exam-gold-hi) 22%, transparent), transparent 60%) !important;
+}
+.note-card.note-exam { border-width: 2px; }
+.note-card.note-exam .note-badge.cat, .board-card.board-card-exam .note-badge.cat {
+  background: linear-gradient(135deg, var(--exam-gold-hi), var(--exam-gold)) !important;
+  color: var(--exam-gold-ink) !important;
+  font-weight: 800;
+}
+.note-card.note-exam .note-badge.cat::before, .board-card.board-card-exam .note-badge.cat::before { content: '\2605  '; }
+.cal-pill.cal-pill-note.cal-exam {
+  border-left-color: var(--exam-gold) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exam-gold) 60%, transparent);
+  font-weight: 700;
+}
+.cal-pill.cal-pill-note.cal-exam span::before, .cal-agenda-note.cal-exam .cal-agenda-title::before { content: '\2605  '; color: var(--exam-gold); }
+.cal-agenda-note.cal-exam .cal-agenda-bar { background: linear-gradient(var(--exam-gold-hi), var(--exam-gold)) !important; }
 .note-card.completed { opacity: 0.5; }
 .note-card.completed .note-title { text-decoration: line-through; }
 

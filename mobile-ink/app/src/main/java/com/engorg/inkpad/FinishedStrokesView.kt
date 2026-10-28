@@ -559,13 +559,25 @@ class FinishedStrokesView(context: Context) : View(context) {
      * A symbol's value label ("10 kΩ", "8 MPa") in its own ink color: above a horizontal inline part,
      * right of a vertical one (ink-analysis.js puts its result chips on the opposite side), and under
      * a box symbol. Part of the page, so it prints and exports.
+     *
+     * Once the analysis has placed it clear of wires and other parts, props `_lx`/`_ly` hold the
+     * label's offset from the symbol centre and `_la` its alignment, so it follows the symbol around.
      */
     private fun drawSymbolLabel(canvas: Canvas, rec: Rec) {
         val sp = rec.shape ?: return
         val sym = sp.symbol ?: return
-        val label = sp.props?.optString("_label").orEmpty()
+        val props = sp.props ?: return
+        val label = props.optString("_label")
         if (label.isEmpty()) return
         labelPaint.color = Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+        if (props.has("_lx") && props.has("_ly")) {
+            val c = symbolCentre(sp, sym)
+            if (c != null) {
+                labelPaint.textAlign = when (props.optString("_la")) { "left" -> Paint.Align.LEFT; "right" -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
+                canvas.drawText(label, c.x + props.optDouble("_lx", 0.0).toFloat(), c.y + props.optDouble("_ly", 0.0).toFloat(), labelPaint)
+                return
+            }
+        }
         if (sym.kind == SymKind.INLINE) {
             val h = sp.handles; if (h.size < 2) return
             val a = h[0]; val b = h[1]
@@ -585,6 +597,23 @@ class FinishedStrokesView(context: Context) : View(context) {
             labelPaint.textAlign = Paint.Align.CENTER
             canvas.drawText(label, (minX + maxX) / 2f, maxY + 13f, labelPaint)
         }
+    }
+
+    /**
+     * The reference point label offsets are measured from (matches ink-analysis.js `anchor`): an
+     * inline part's terminal midpoint, or a box symbol's box centre turned with the shape about its pivot.
+     */
+    private fun symbolCentre(sp: ShapeSpec, sym: Sym): PointF? {
+        if (sym.kind == SymKind.INLINE) {
+            val h = sp.handles; if (h.size < 2) return null
+            return PointF((h[0].x + h[1].x) / 2f, (h[0].y + h[1].y) / 2f)
+        }
+        if (sp.verts.size < 2) return null
+        val cx = (sp.verts[0].x + sp.verts[1].x) / 2f; val cy = (sp.verts[0].y + sp.verts[1].y) / 2f
+        if (sp.rot == 0f) return PointF(cx, cy)
+        val a = Math.toRadians(sp.rot.toDouble()); val c = cos(a).toFloat(); val s = sin(a).toFloat()
+        val dx = cx - sp.pivot.x; val dy = cy - sp.pivot.y
+        return PointF(sp.pivot.x + dx * c - dy * s, sp.pivot.y + dx * s + dy * c)
     }
 
     private fun toneColor(tone: String): Int = when (tone) {

@@ -83,6 +83,7 @@ class InkActivity : ComponentActivity() {
     private var calc: CalculatorWindow? = null
     private var analysisButton: ImageButton? = null
     private var analysis: AnalysisPanel? = null
+    private var valueEditor: AnalysisEditor? = null
     private lateinit var rootFrame: FrameLayout
 
     // Brush width in page units. The size slider maps GEOMETRICALLY across [minBrush, maxBrush] so
@@ -216,6 +217,7 @@ class InkActivity : ComponentActivity() {
     override fun onDestroy() {
         claude?.dispose()
         analysis?.dispose()
+        valueEditor?.dispose()   // after the panel: it owns the analysis engine they share
         MirrorManager.onState = null
         MirrorManager.bind(null)   // keep the socket alive but stop feeding a destroyed pane
         panes.forEach { it.dispose() }   // flush + stop each pane's background writer
@@ -241,6 +243,8 @@ class InkActivity : ComponentActivity() {
     // ---------- dynamic split panes (add/close/swap from within a notebook) ----------
     private fun makePane(id: String?): PageCanvas {
         val pane = PageCanvas(this, store, hostImpl)
+        // A select-tool tap on a class symbol opens its values (panel open or not).
+        pane.symbolTap = { pg, rec -> analysisEditor().onSymbolTap(pane, pg, rec) }
         // Open (which sets pane.notebook) BEFORE building the chip — the chip reads
         // pane.notebook.title, and notebook is a lateinit, so building it first crashes
         // the whole notebook open with UninitializedPropertyAccessException.
@@ -280,6 +284,7 @@ class InkActivity : ComponentActivity() {
     private fun removePane(pane: PageCanvas) {
         if (panes.size <= 1) return
         panes.remove(pane); paneChips.remove(pane); paneTitles.remove(pane)
+        valueEditor?.forget(pane)
         pane.dispose()   // flush + stop the closed pane's background writer
         rebuildPanesRow()
         setFocused(if (focused === pane) panes.first() else (focused ?: panes.first()))
@@ -708,7 +713,7 @@ class InkActivity : ComponentActivity() {
      * tool so a tap on a symbol opens its values.
      */
     private fun toggleAnalysis() {
-        val a = analysis ?: AnalysisPanel(this, rootFrame, { focused }) {
+        val a = analysis ?: AnalysisPanel(this, rootFrame, analysisEditor(), { focused }) {
             if (claude?.isOpen == true) { claude?.close(); updateClaudeButton() }
             clearPendingShape(); tool = Tool.SELECT
             panes.forEach { it.onToolChanged() }
@@ -717,6 +722,16 @@ class InkActivity : ComponentActivity() {
         a.toggle()
         updateAnalysisButton()
     }
+
+    /**
+     * The symbol-value editor shared by every pane's tap-to-edit and the Analyze panel (one analysis
+     * engine for both). Made on first use — panes exist before [rootFrame] does.
+     */
+    private fun analysisEditor(): AnalysisEditor =
+        valueEditor ?: AnalysisEditor(this, rootFrame).also { ed ->
+            valueEditor = ed
+            ed.panelShows = { p, pg -> analysis?.shows(p, pg) == true }
+        }
 
     private fun updateAnalysisButton() {
         val b = analysisButton ?: return

@@ -3547,6 +3547,38 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   text-decoration: line-through;
 }
 
+/* === EXAM NOTES — gold frame (category 'exam') ===
+   An outline (not box-shadow) so it coexists with the overdue pulse and hover lift;
+   !important beats the inline sticky-color border. Static, soft gold — no glare on OLED. */
+:root { --exam-gold: #D4A017; --exam-gold-hi: #F5D06F; --exam-gold-ink: #3B2A00; }
+.sticky-note.note-exam,
+.board-note-card.board-card-exam,
+.cal-side-note.cal-exam {
+  border-color: var(--exam-gold) !important;
+  outline: 2px solid color-mix(in srgb, var(--exam-gold) 55%, transparent);
+  outline-offset: 2px;
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--exam-gold-hi) 22%, transparent), transparent 60%) !important;
+}
+.sticky-note.note-exam { border-width: 2px; }
+.board-note-card.board-card-exam { border-left-color: var(--exam-gold) !important; }
+.sticky-note.note-exam .note-category-tag,
+.board-note-card.board-card-exam .board-card-category {
+  background: linear-gradient(135deg, var(--exam-gold-hi), var(--exam-gold)) !important;
+  color: var(--exam-gold-ink) !important;
+}
+.sticky-note.note-exam .note-category-tag::before,
+.board-note-card.board-card-exam .board-card-category::before { content: '\2605  '; }
+.cal-note-dot.cal-exam {
+  box-shadow: inset 0 0 0 1.5px var(--exam-gold);
+  font-weight: 700;
+}
+.cal-week-note-chip.cal-exam {
+  border-left-color: var(--exam-gold) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exam-gold) 60%, transparent);
+}
+.cal-note-dot.cal-exam .cal-event-text::before,
+.cal-week-note-chip.cal-exam::before { content: '\2605  '; color: var(--exam-gold); }
+
 /* Overdue alerts */
 .note-overdue {
   animation: overdue-pulse 2s ease-in-out infinite;

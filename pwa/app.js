@@ -1073,6 +1073,9 @@ function stickyDueIdx(note) {
 }
 
 // Resolve a note to its sticky color {bg, border} for the board, honoring noteColorMode.
+// Exam notes get a gold frame everywhere they render (mirrors desktop isExamNote / .note-exam).
+function isExamNote(note) { return !!note && note.category === 'exam'; }
+
 function resolveBoardStickyColor(note) {
   const palette = getStickyColors();
   let idx;
@@ -1300,7 +1303,7 @@ function renderNoteCard(t) {
     checklistHtml = `<div class="note-checklist-progress"><div class="note-checklist-bar"><div class="note-checklist-fill" style="width:${pct}%"></div></div>${done}/${total}</div>`;
   }
 
-  return `<div class="note-card ${t.completed ? 'completed' : ''}" data-id="${t.id}" style="background:${sc.bg};border-color:${sc.border}">
+  return `<div class="note-card ${t.completed ? 'completed' : ''}${isExamNote(t) ? ' note-exam' : ''}" data-id="${t.id}" style="background:${sc.bg};border-color:${sc.border}">
     <div class="note-priority-bar ${pClass}"></div>
     <div class="note-header">
       <button class="note-checkbox ${t.completed ? 'checked' : ''}" data-toggle="${t.id}">${t.completed ? '&#10003;' : ''}</button>
@@ -1387,10 +1390,11 @@ function renderBoard() {
     for (const t of colTasks) {
       const projName = getProjectName(t.projectId);
       const sc = resolveBoardStickyColor(t);
-      html += `<div class="board-card ${t.completed ? 'completed' : ''}" data-id="${t.id}" style="background:${sc.bg}">
+      html += `<div class="board-card ${t.completed ? 'completed' : ''}${isExamNote(t) ? ' board-card-exam' : ''}" data-id="${t.id}" style="background:${sc.bg}">
         <div class="note-priority-bar" style="background:${sc.border}"></div>
         <div class="board-card-body">
           <div class="board-card-title">${escapeHtml(t.title)}</div>
+          ${isExamNote(t) ? '<span class="note-badge cat">EXAM</span>' : ''}
           ${projName ? `<span class="note-badge project">${escapeHtml(projName)}</span>` : ''}
         </div>
         <div class="board-card-actions">
@@ -1865,7 +1869,7 @@ function renderCalMonth() {
         pills += `<div class="cal-pill${done}" style="background:${col}"><span>${escapeHtml(item.title)}</span></div>`;
       } else {
         const sc = resolveBoardStickyColor(item);
-        pills += `<div class="cal-pill cal-pill-note${done}" style="background:${sc.border}22;color:${sc.border};border-left:3px solid ${sc.border}"><span>&#128204; ${escapeHtml(item.title)}</span></div>`;
+        pills += `<div class="cal-pill cal-pill-note${done}${isExamNote(item) ? ' cal-exam' : ''}" style="background:${sc.border}22;color:${sc.border};border-left:3px solid ${sc.border}"><span>&#128204; ${escapeHtml(item.title)}</span></div>`;
       }
     });
     const more = items.length - CAP;
@@ -2048,7 +2052,7 @@ function renderCalAgenda() {
         const col = getProjectColor(note.projectId);
         const proj = getProjectName(note.projectId);
         const t = note.dueTime ? formatTime12(note.dueTime) : '';
-        html += `<div class="cal-agenda-item cal-agenda-note ${note.completed ? 'done' : ''}">
+        html += `<div class="cal-agenda-item cal-agenda-note ${note.completed ? 'done' : ''}${isExamNote(note) ? ' cal-exam' : ''}">
           <div class="cal-agenda-bar" style="background:${col}"></div>
           <div class="cal-agenda-content"><div class="cal-agenda-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
             <div class="cal-agenda-meta">${t}${t && proj ? ' · ' : ''}${proj ? escapeHtml(proj) : ''}</div></div>
@@ -2224,7 +2228,7 @@ function renderCalDaySide() {
     const proj = getProjectName(note.projectId);
     const link = launchLink(note); const launches = !!link;
     const pcol = PRIORITY_COLOR[note.priority] || '#F59E0B';
-    return `<div class="cal-scard cal-snote sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-color:${sc.border};border-left-color:${sc.border}">
+    return `<div class="cal-scard cal-snote sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-color:${sc.border};border-left-color:${sc.border}">
       <button class="cal-check ${note.completed ? 'checked' : ''}" data-type="note" data-id="${note.id}">${note.completed ? '&#10003;' : ''}</button>
       ${note.dueTime ? `<div class="cal-stime"><div>${formatTime12(note.dueTime)}</div></div>` : ''}
       <div class="cal-sinfo"><div class="cal-stitle">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>

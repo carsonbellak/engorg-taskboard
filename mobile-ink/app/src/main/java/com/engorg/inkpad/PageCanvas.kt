@@ -93,7 +93,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Called (UI thread) whenever a page's content is about to be saved — i.e. after any edit. */
     var onEdited: ((page: Int) -> Unit)? = null
-    /** While drawing analysis is open: a tap on a class symbol goes here; return true to consume it. */
+    /**
+     * A select-tool tap on a class symbol goes here first (InkActivity routes it to the value sheet);
+     * return true to consume it, false to select the symbol as usual.
+     */
     var symbolTap: ((page: Int, rec: FinishedStrokesView.Rec) -> Boolean)? = null
 
     val finishedView = FinishedStrokesView(context).apply {
@@ -1108,6 +1111,30 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         savePage(page)
         mirror?.pageEdited(this, page)
         return fresh
+    }
+
+    /**
+     * Select [rec] on [page] exactly as a plain tap would, without asking [symbolTap] (the value
+     * sheet's "Select" button). Returns false when the record is no longer on that page.
+     */
+    fun selectRec(page: Int, rec: FinishedStrokesView.Rec): Boolean {
+        val recs = finishedView.pages.getOrNull(page)?.recs ?: return false
+        if (!recs.contains(rec)) return false
+        selRecs.clear(); selRecs.add(rec); selPage = page; selBox = recBounds(selRecs); refreshSelectionOverlay()
+        return true
+    }
+
+    /** Remove [rec] from [page] as its own undo step (the value sheet's "Delete"). False if it's gone already. */
+    fun removeRec(page: Int, rec: FinishedStrokesView.Rec): Boolean {
+        val recs = finishedView.pages.getOrNull(page)?.recs ?: return false
+        if (!recs.contains(rec)) return false
+        if (graphRec === rec) closeGraph()
+        undoPushedThisGesture = false; pushUndo(); undoPushedThisGesture = false   // a sheet tap is its own gesture
+        recs.remove(rec)
+        if (selRecs.contains(rec)) clearSelection()
+        finishedView.invalidate(); savePage(page)
+        mirror?.pageEdited(this, page)
+        return true
     }
 
     private fun toLocalOn(sx: Float, sy: Float, page: Int): PointF {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v35';
+const CACHE_NAME = 'engorg-v36';
 // Holds what the Android share sheet sent (see the share-target handler below) until app.js
 // picks it up, so it must survive the activate-time cache cleanup.
 const SHARE_INBOX = 'engorg-share-inbox';

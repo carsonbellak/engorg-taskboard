@@ -13,15 +13,19 @@
 // plain crossings don't connect unless a Node dot sits on them. Freehand ink only counts as a wire
 // when it's long and nearly straight, so handwriting next to a part is ignored.
 //
-// Circuits → CircuitEngine (DC operating point + phasors at the AC source frequency).
+// WIRE symbols are turned into plain wires before anything runs.
+// Circuits → CircuitEngine (DC operating point + phasors at the AC source frequency; AC voltage and
+// current sources). Vn+ / Vn− probe symbols read Vn = V(+) − V(−) wherever their tips touch.
 // Thermo flow devices are walked inlet → outlet (flow runs left → right through each symbol, as
 // drawn in Symbols.kt) to find the cycle, which is classified (Rankine ± reheat, Brayton, vapor-
-// compression) and solved with ThermoEngine, states numbered as in Moran & Shapiro. Heat engine /
+// compression) and solved with ThermoEngine, states numbered as in Moran & Shapiro. Hot / cold
+// reservoir symbols linked by lines supply T_H / T_C to cycles and heat-engine diagrams. Heat engine /
 // refrigerator symbols get the reservoir (second-law) analysis.
+// A last pass (placeAll) picks value-label spots and nudges result chips off wires, symbols and each other.
 //
-// Output: { analyses: [{ title, blocks }], annots: [...], comps: { [i]: { name, title, label, fields } } }
+// Output: { analyses: [{ title, blocks }], annots: [...], comps: { [i]: { name, title, label, fields, anchor?, labelAt? } } }
 // — blocks are rendered generically by AnalysisPanel; annots are drawn over the page by
-// FinishedStrokesView; comps drive the tap-to-edit value sheet.
+// FinishedStrokesView; comps drive the tap-to-edit value sheet (fields carry keypad + unit buttons).
 
 const InkAnalysis = (() => {
   const CE = CircuitEngine, TE = ThermoEngine;
@@ -110,6 +114,44 @@ const InkAnalysis = (() => {
     const p = m.toPage([0, s.h / 2]);
     return [p[0], p[1] + 14];
   }
+  // Oriented rectangle { c, u, v, hu, hv } around a symbol's body (inline: the terminal span, ±half;
+  // box: the rotated box), grown by pad. Used for reservoir links and label placement.
+  function obbOf(s, pad = 0) {
+    if (s.inline) {
+      const [a, b] = s.terms, L = dist(a, b) || 1, u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
+      return { c: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], u, v: [-u[1], u[0]], hu: L / 2 + pad, hv: Math.max(s.half || 8, 4) + pad };
+    }
+    const ang = (s.rot || 0) * Math.PI / 180, u = [Math.cos(ang), Math.sin(ang)];
+    return { c: boxMap(s).toPage([0, 0]), u, v: [-u[1], u[0]], hu: Math.abs(s.box[2] - s.box[0]) / 2 + pad, hv: Math.abs(s.box[3] - s.box[1]) / 2 + pad };
+  }
+  const toObb = (o, p) => { const dx = p[0] - o.c[0], dy = p[1] - o.c[1]; return [dx * o.u[0] + dy * o.u[1], dx * o.v[0] + dy * o.v[1]]; };
+  function inObb(p, o) { const [x, y] = toObb(o, p); return Math.abs(x) <= o.hu && Math.abs(y) <= o.hv; }
+  // Length of segment a–b inside the oriented rect (Liang–Barsky), or −1 if it misses.
+  function segClipLen(a, b, o) {
+    const [ax, ay] = toObb(o, a), [bx, by] = toObb(o, b), dx = bx - ax, dy = by - ay;
+    let t0 = 0, t1 = 1;
+    const clip = (p, q) => {
+      if (p === 0) return q >= 0;
+      const r = q / p;
+      if (p < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+      return true;
+    };
+    if (clip(-dx, ax + o.hu) && clip(dx, o.hu - ax) && clip(-dy, ay + o.hv) && clip(dy, o.hv - ay)) return (t1 - t0) * Math.hypot(dx, dy);
+    return -1;
+  }
+  // Separating-axis test between two oriented rects.
+  function obbOverlap(A, B) {
+    const d = [B.c[0] - A.c[0], B.c[1] - A.c[1]];
+    const rad = (O, ax) => O.hu * Math.abs(O.u[0] * ax[0] + O.u[1] * ax[1]) + O.hv * Math.abs(O.v[0] * ax[0] + O.v[1] * ax[1]);
+    for (const ax of [A.u, A.v, B.u, B.v]) if (Math.abs(d[0] * ax[0] + d[1] * ax[1]) > rad(A, ax) + rad(B, ax)) return false;
+    return true;
+  }
+  function touchesSym(pts, s, pad) {
+    const o = obbOf(s, pad);
+    if (pts.length === 1) return inObb(pts[0], o);
+    for (let k = 1; k < pts.length; k++) if (segClipLen(pts[k - 1], pts[k], o) >= 0) return true;
+    return false;
+  }
 
   // ---- union-find --------------------------------------------------------------------------------
   function UF() {
@@ -144,13 +186,40 @@ const InkAnalysis = (() => {
   const fpct = (v) => (v == null || !isFinite(v) ? '—' : (v * 100).toFixed(1) + '%');
   const fpow = (kW) => (kW == null || !isFinite(kW) ? '—' : Math.abs(kW) >= 1000 ? (kW / 1000).toFixed(2) + ' MW' : Math.abs(kW) >= 10 ? kW.toFixed(1) + ' kW' : kW.toFixed(3) + ' kW');
   const si = (v, u) => CE.fmtSI(v, u);
+  // SI value with an optional typed unit suffix. The keypad appends the unit ("1F", "10mA"), and
+  // parseSI would read a bare "F" as femto, so the unit is stripped first.
+  function siVal(v, u) {
+    if (typeof v === 'number') return v;
+    let s = String(v == null ? '' : v).trim();
+    if (u) s = s.replace(new RegExp('\\s*' + u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), '');
+    s = s.replace(/\s*(ohms?|Ω)$/i, '');
+    return CE.parseSI(s);
+  }
+
+  // ---- value fields (contract §3: keypad + unit buttons for every field) ------------------------------
+  const UNIT_SPEC = {
+    'Ω': ['si', ['Ω']], F: ['si', ['F']], H: ['si', ['H']], V: ['si', ['V']], A: ['si', ['A']], Hz: ['si', ['Hz']],
+    '°': ['num', ['°']], kPa: ['num', ['kPa', 'MPa', 'bar']], '°C': ['num', ['°C', 'K']], '%': ['num', ['%']],
+    MW: ['num', ['MW', 'kW']], kW: ['num', ['kW', 'MW']], kJ: ['num', ['kJ', 'MJ']], 'kg/s': ['num', ['kg/s']], 'm/s': ['num', ['m/s']],
+    kg: ['num', ['kg']], N: ['num', ['N', 'kN']], m: ['num', ['m']],
+  };
+  function fieldSpec(unit, extra) {
+    if (extra && extra.options) return {};          // chip picker, no keypad
+    const sp = UNIT_SPEC[unit];
+    return sp ? { keypad: sp[0], units: sp[1].slice() } : unit ? { keypad: 'num', units: [] } : { keypad: 'text', units: [] };
+  }
+  // Field factory bound to a symbol's props: f(key, label, unit, ph, extra) — extra overrides keypad/units.
+  const fld = (p) => (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] == null ? '' : String(p[key]), ...fieldSpec(unit, extra), ...extra });
 
   // ---- symbol catalogue ----------------------------------------------------------------------------
-  const ECE = new Set(['RESISTOR', 'RESISTOR_BOX', 'CAPACITOR', 'CAP_POLAR', 'INDUCTOR', 'VSOURCE', 'ISOURCE', 'VSOURCE_AC', 'VSOURCE_DEP', 'ISOURCE_DEP', 'BATTERY', 'DIODE', 'LED', 'SWITCH', 'AMMETER', 'VOLTMETER', 'GROUND', 'OPAMP', 'NODE']);
+  const ECE = new Set(['RESISTOR', 'RESISTOR_BOX', 'CAPACITOR', 'CAP_POLAR', 'INDUCTOR', 'VSOURCE', 'ISOURCE', 'VSOURCE_AC', 'ISOURCE_AC', 'VSOURCE_DEP', 'ISOURCE_DEP', 'BATTERY', 'DIODE', 'LED', 'SWITCH', 'AMMETER', 'VOLTMETER', 'GROUND', 'OPAMP', 'NODE', 'PROBE_POS', 'PROBE_NEG']);
+  const PROBES = new Set(['PROBE_POS', 'PROBE_NEG']);
   const FLOW = new Set(['COMPRESSOR', 'TURBINE', 'PUMP', 'HEAT_EXCHANGER', 'VALVE', 'NOZZLE', 'DIFFUSER']);
   const RES = new Set(['HEAT_ENGINE', 'REFRIGERATOR']);
+  const HEATRES = new Set(['HOT_RESERVOIR', 'COLD_RESERVOIR']);
   const DIRECTIONAL = new Set(['COMPRESSOR', 'TURBINE', 'PUMP', 'NOZZLE', 'DIFFUSER']);
-  const BOX_PINS = { GROUND: [[0, -12]], OPAMP: [[-48, -32], [-48, 32], [48, 0]], NODE: [[0, 0]] };
+  // Probe contact point = the tip of the stem, local (0, 14).
+  const BOX_PINS = { GROUND: [[0, -12]], OPAMP: [[-48, -32], [-48, 32], [48, 0]], NODE: [[0, 0]], PROBE_POS: [[0, 14]], PROBE_NEG: [[0, 14]] };
   const DIODE_MODELS = { '1N4148': { is: '2.52n', n: '1.752', rs: '0.568' }, '1N4007': { is: '14.11n', n: '1.984', rs: '33.89m' }, '1N5819': { is: '31.7u', n: '1.373', rs: '51m' } };
 
   // =========================================================================================
@@ -159,13 +228,15 @@ const InkAnalysis = (() => {
   const CIRCUIT_INFO = {
     RESISTOR: ['R', 'Resistor'], RESISTOR_BOX: ['R', 'Resistor'], CAPACITOR: ['C', 'Capacitor'], CAP_POLAR: ['C', 'Capacitor'],
     INDUCTOR: ['L', 'Inductor'], VSOURCE: ['V', 'Voltage source'], BATTERY: ['V', 'Battery'], VSOURCE_AC: ['V', 'AC source'],
-    ISOURCE: ['I', 'Current source'], DIODE: ['D', 'Diode'], LED: ['LED', 'LED'], SWITCH: ['S', 'Switch'],
+    ISOURCE: ['I', 'Current source'], ISOURCE_AC: ['I', 'AC current source'], DIODE: ['D', 'Diode'], LED: ['LED', 'LED'], SWITCH: ['S', 'Switch'],
     AMMETER: ['AM', 'Ammeter'], VOLTMETER: ['VM', 'Voltmeter'], OPAMP: ['U', 'Op-amp'],
     VSOURCE_DEP: ['E', 'Dependent voltage source'], ISOURCE_DEP: ['G', 'Dependent current source'],
   };
+  const probeNum = (s) => { const n = Math.round(num((s.props || {}).n)); return n > 0 ? n : 1; };
+  const probeName = (s) => 'V' + probeNum(s) + (s.sym === 'PROBE_POS' ? '+' : '−');
   function circuitFields(s) {
     const p = s.props || {};
-    const f = (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] || '', ...extra });
+    const f = fld(p);
     const nm = f('name', 'Name', '', '');
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg' }), nm];
@@ -174,25 +245,30 @@ const InkAnalysis = (() => {
       case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', { hint: '+ is at the end you dragged to' }), nm];
       case 'BATTERY': return [f('value', 'Voltage', 'V', '9'), nm];
       case 'VSOURCE_AC': return [f('amp', 'Amplitude (peak)', 'V', '10'), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), nm];
+      case 'ISOURCE_AC': return [f('amp', 'Amplitude (peak)', 'A', '1m', { hint: 'flows the way the arrow points' }), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), nm];
       case 'ISOURCE': return [f('value', 'Current', 'A', '1m', { hint: 'flows the way the arrow points' }), nm];
       case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), nm];
       case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), nm];
       case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open'] }), nm];
-      case 'OPAMP': return [f('vsat', 'Output limit ±', 'V', '15'), f('gain', 'Open-loop gain', '', '100k'), nm];
+      case 'OPAMP': return [f('vsat', 'Output limit ±', 'V', '15'), f('gain', 'Open-loop gain', '', '100k', { keypad: 'si' }), nm];
+      case 'PROBE_POS': case 'PROBE_NEG': return [f('n', 'Probe number', '', '1', { keypad: 'num', hint: `V${probeNum(s)}+ pairs with V${probeNum(s)}− — reads V(+) − V(−)` })];
       case 'AMMETER': case 'VOLTMETER': return [nm];
       default: return [nm];
     }
   }
   function circuitLabel(s) {
     const p = s.props || {}, v = (k, d) => (blank(p[k]) ? d : p[k]);
-    const val = (k, u) => { const n = CE.parseSI(p[k]); return blank(p[k]) ? '' : isFinite(n) ? si(n, u) : p[k] + ' ' + u; };
+    const val = (k, u) => { const n = siVal(p[k], u); return blank(p[k]) ? '' : isFinite(n) ? si(n, u) : p[k] + ' ' + u; };
+    const acLabel = (u, defAmp) => (blank(p.amp) && blank(p.freq) ? '' : `${si(siVal(v('amp', defAmp), u), u)} ${si(siVal(v('freq', 60), 'Hz'), 'Hz')}` + (siVal(p.phase, '°') ? ` ∠${siVal(p.phase, '°')}°` : ''));
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return val('value', 'Ω');
       case 'CAPACITOR': case 'CAP_POLAR': return val('value', 'F');
       case 'INDUCTOR': return val('value', 'H');
       case 'VSOURCE': case 'BATTERY': return val('value', 'V');
       case 'ISOURCE': return val('value', 'A');
-      case 'VSOURCE_AC': return blank(p.amp) && blank(p.freq) ? '' : `${si(CE.parseSI(v('amp', 10)), 'V')} ${si(CE.parseSI(v('freq', 60)), 'Hz')}` + (num(p.phase) ? ` ∠${p.phase}°` : '');
+      case 'VSOURCE_AC': return acLabel('V', 10);
+      case 'ISOURCE_AC': return acLabel('A', '1m');
+      case 'PROBE_POS': case 'PROBE_NEG': return probeName(s);
       case 'DIODE': return p.model || '';
       case 'LED': return p.color ? p.color + ' LED' : '';
       case 'SWITCH': return p.state === 'open' ? 'open' : '';
@@ -203,12 +279,13 @@ const InkAnalysis = (() => {
   function circuit(syms, wires, out) {
     const parts = syms.filter(s => ECE.has(s.sym));
     if (!parts.length) return;
-    const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE');
-    // Terminals
+    const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE' && !PROBES.has(s.sym));
+    const probes = parts.filter(s => PROBES.has(s.sym));
+    // Terminals (a probe's contact point joins nets like a terminal but carries no current)
     const terms = [];
     for (const s of parts) {
       const pts = s.inline ? s.terms : BOX_PINS[s.sym] ? BOX_PINS[s.sym].map(boxMap(s).toPage) : [];
-      pts.forEach((pt, k) => terms.push({ s, k, pt, node: s.sym === 'NODE' }));
+      pts.forEach((pt, k) => terms.push({ s, k, pt, node: s.sym === 'NODE', probe: PROBES.has(s.sym) }));
     }
     const uf = UF();
     const tk = (n) => 't' + n, wk = (n) => 'w' + n;
@@ -219,7 +296,9 @@ const InkAnalysis = (() => {
       wires.forEach((w, n) => {
         const ends = [w.pts[0], w.pts[w.pts.length - 1]];
         const tol = terms[a].node ? TOL + 4 : TOL;
-        if (ends.some(e => dist(e, terms[a].pt) <= tol) || polyDist(terms[a].pt, w.pts) <= (terms[a].node ? tol : TOL * 0.6)) uf.union(tk(a), wk(n));
+        // A probe tip touches anywhere along a wire (that's how you'd clip a meter lead on).
+        const onTol = terms[a].node ? tol : terms[a].probe ? TOL : TOL * 0.6;
+        if (ends.some(e => dist(e, terms[a].pt) <= tol) || polyDist(terms[a].pt, w.pts) <= onTol) uf.union(tk(a), wk(n));
       });
     }
     for (let a = 0; a < wires.length; a++) for (let b = 0; b < wires.length; b++) {
@@ -244,7 +323,7 @@ const InkAnalysis = (() => {
     let refRoot = ground.size ? [...ground][0] : null;
     if (!refRoot) {
       const src = order.find(s => s.sym === 'VSOURCE' || s.sym === 'BATTERY' || s.sym === 'VSOURCE_AC');
-      const pick = src ? termIdx(src, 0) : terms.findIndex(t => t.s.sym !== 'NODE');
+      const pick = src ? termIdx(src, 0) : terms.findIndex(t => t.s.sym !== 'NODE' && !t.probe);
       if (pick >= 0) { refRoot = rootOf(pick); warns.push(`No ground symbol — voltages are measured from ${src ? names.get(src) + '’s − terminal' : 'an arbitrary node'}.`); }
     }
     const nodes = ['0'], idx = new Map();
@@ -252,32 +331,45 @@ const InkAnalysis = (() => {
     if (refRoot) idx.set(refRoot, 0);
     const nodeOf = (r) => { if (!idx.has(r)) { idx.set(r, nodes.length); nodes.push('N' + nodes.length); } return idx.get(r); };
     // Engine parts
-    const eparts = [], missing = [], comp = new Map();
+    const eparts = [], missing = [], unreadable = [], comp = new Map();
     let acFreq = null;
     for (const s of order) {
       const name = names.get(s), p = s.props || {};
       const pins = (s.inline ? [0, 1] : s.sym === 'OPAMP' ? [0, 1, 2] : []).map(k => nodeOf(rootOf(termIdx(s, k))));
-      const need = (k, def, unitHint) => { if (blank(p[k])) { missing.push(`${name} (${unitHint || k})`); return def; } return p[k]; };
+      // Values go to the engine as numbers (unit suffix stripped); unreadable ones fall back to the placeholder.
+      const need = (k, def, unitHint, u) => {
+        if (blank(p[k])) { missing.push(`${name} (${unitHint || k})`); return siVal(def, u); }
+        const v = siVal(p[k], u);
+        if (!isFinite(v)) { unreadable.push(`${name} (“${p[k]}”)`); return siVal(def, u); }
+        return v;
+      };
       const id = 'p' + s.i;
       let ep = null;
       switch (s.sym) {
-        case 'RESISTOR': case 'RESISTOR_BOX': ep = { type: 'R', n: pins, p: { value: need('value', '1k', 'resistance') } }; break;
-        case 'CAPACITOR': case 'CAP_POLAR': ep = { type: 'C', n: pins, p: { value: need('value', '1u', 'capacitance') } }; break;
-        case 'INDUCTOR': ep = { type: 'L', n: pins, p: { value: need('value', '1m', 'inductance') } }; break;
-        case 'VSOURCE': case 'BATTERY': ep = { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', s.sym === 'BATTERY' ? '9' : '5', 'voltage') } }; break;
-        case 'VSOURCE_AC': {
-          const amp = need('amp', '10', 'amplitude'), f = CE.parseSI(blank(p.freq) ? '60' : p.freq);
+        case 'RESISTOR': case 'RESISTOR_BOX': ep = { type: 'R', n: pins, p: { value: need('value', '1k', 'resistance', 'Ω') } }; break;
+        case 'CAPACITOR': case 'CAP_POLAR': ep = { type: 'C', n: pins, p: { value: need('value', '1u', 'capacitance', 'F') } }; break;
+        case 'INDUCTOR': ep = { type: 'L', n: pins, p: { value: need('value', '1m', 'inductance', 'H') } }; break;
+        case 'VSOURCE': case 'BATTERY': ep = { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', s.sym === 'BATTERY' ? '9' : '5', 'voltage', 'V') } }; break;
+        case 'VSOURCE_AC': case 'ISOURCE_AC': {
+          // AC sources: DC part 0, phasor amplitude/phase at the page's AC frequency.
+          const isV = s.sym === 'VSOURCE_AC';
+          const amp = need('amp', isV ? '10' : '1m', 'amplitude', isV ? 'V' : 'A');
+          let f = blank(p.freq) ? 60 : siVal(p.freq, 'Hz');
+          if (!(f > 0)) { warns.push(`${name}: frequency “${p.freq}” isn't a positive number — using 60 Hz.`); f = 60; }
           if (acFreq == null) acFreq = f; else if (Math.abs(f - acFreq) > 1e-9 * acFreq) warns.push(`${name} runs at a different frequency — phasors are only computed at ${si(acFreq, 'Hz')}.`);
-          ep = { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: 0, ac: amp, acPhase: p.phase || 0, freq: f } };
+          const ph = siVal(p.phase, '°') || 0;
+          // V: pins swapped so + is t1 (as the DC source); I: current flows t0 → t1, toward the arrow tip.
+          ep = isV ? { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } }
+            : { type: 'I', n: pins, p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } };
           break;
         }
-        case 'ISOURCE': ep = { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '1m', 'current') } }; break;
+        case 'ISOURCE': ep = { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '1m', 'current', 'A') } }; break;
         case 'DIODE': ep = { type: 'D', n: pins, p: { ...(DIODE_MODELS[p.model] || DIODE_MODELS['1N4148']) } }; break;
         case 'LED': ep = { type: 'LED', n: pins, p: { color: p.color || 'red' } }; break;
         case 'SWITCH': if (p.state !== 'open') ep = { type: 'R', n: pins, p: { value: '1m' } }; break;
         case 'AMMETER': ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } }; break;
         case 'VOLTMETER': break;
-        case 'OPAMP': ep = { type: 'OA', n: pins, p: { gain: p.gain || '100k', vsat: p.vsat || '15', gbw: '1meg' } }; break;
+        case 'OPAMP': ep = { type: 'OA', n: pins, p: { gain: blank(p.gain) ? 1e5 : siVal(p.gain) || 1e5, vsat: blank(p.vsat) ? 15 : siVal(p.vsat, 'V') || 15, gbw: '1meg' } }; break;
         case 'VSOURCE_DEP': case 'ISOURCE_DEP': warns.push(`${name}: dependent sources aren't analysed yet — it's left out.`); break;
       }
       comp.set(s, { name, pins, id, ep });
@@ -285,14 +377,34 @@ const InkAnalysis = (() => {
     }
     // Floating terminals
     const counts = new Map();
-    terms.forEach((t, n) => { if (t.s.sym !== 'NODE') { const r = rootOf(n); counts.set(r, (counts.get(r) || 0) + 1); } });
+    terms.forEach((t, n) => { if (t.s.sym !== 'NODE' && !t.probe) { const r = rootOf(n); counts.set(r, (counts.get(r) || 0) + 1); } });
     const wired = new Set(wires.map((w, n) => uf.find(wk(n))));
     for (const s of order) {
       const ks = s.inline ? [0, 1] : s.sym === 'OPAMP' ? [0, 1, 2] : [];
       for (const k of ks) { const r = rootOf(termIdx(s, k)); if (counts.get(r) === 1 && !wired.has(r) && idx.get(r) !== 0) warns.push(`${names.get(s)} has an unconnected terminal.`); }
     }
-    for (const s of parts) out.comps[s.i] = { name: names.get(s) || (s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: circuitLabel(s), fields: circuitFields(s) };
+    for (const s of parts) {
+      if (PROBES.has(s.sym)) { out.comps[s.i] = { name: probeName(s), title: s.sym === 'PROBE_POS' ? 'V+ probe' : 'V− probe', label: probeName(s), fields: circuitFields(s) }; continue; }
+      out.comps[s.i] = { name: names.get(s) || (s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: circuitLabel(s), fields: circuitFields(s) };
+    }
     if (missing.length) warns.push('No value yet for ' + missing.join(', ') + ' — tap the part to set it. Using a placeholder for now.');
+    if (unreadable.length) warns.push('Couldn\'t read the value of ' + unreadable.join(', ') + ' — use a number with an optional SI prefix (e.g. 4.7k, 100n). Using a placeholder for now.');
+    // Probe pairing: Vn+ with Vn−. Each probe's net (null = its tip isn't on the circuit).
+    const probeNet = (s) => { const r = rootOf(termIdx(s, 0)); return idx.has(r) ? idx.get(r) : null; };
+    const probePairs = [];
+    if (probes.length) {
+      const byN = new Map();
+      for (const s of probes) { const n = probeNum(s); if (!byN.has(n)) byN.set(n, { pos: [], neg: [] }); byN.get(n)[s.sym === 'PROBE_POS' ? 'pos' : 'neg'].push(s); }
+      for (const [n, g] of [...byN.entries()].sort((a, b) => a[0] - b[0])) {
+        if (g.pos.length > 1) warns.push(`There are ${g.pos.length} V${n}+ probes — only one is used. Tap a probe to renumber it (V2+, V3+ …).`);
+        if (g.neg.length > 1) warns.push(`There are ${g.neg.length} V${n}− probes — only one is used. Tap a probe to renumber it.`);
+        const pos = g.pos[0], neg = g.neg[0];
+        if (!pos) { warns.push(`V${n}− has no V${n}+ partner — place a V+ probe numbered ${n} to measure V${n}.`); continue; }
+        let ok = true;
+        for (const s of [pos, neg]) if (s && probeNet(s) == null) { warns.push(`${probeName(s)} isn't touching the circuit — drop its tip onto a wire or terminal.`); ok = false; }
+        if (ok) probePairs.push({ n, pos, neg, a: probeNet(pos), b: neg ? probeNet(neg) : 0 });
+      }
+    }
 
     const blocks = warns.map(w => ({ t: 'warn', text: w }));
     const nl = { nodes, parts: eparts };
@@ -313,7 +425,7 @@ const InkAnalysis = (() => {
       const r = uf.find(wk(n)), L = polyLen(w.pts);
       if (!netSpot.has(r) || netSpot.get(r).L < L) netSpot.set(r, { L, pt: midpointOf(w.pts) });
     });
-    terms.forEach((t, n) => { const r = rootOf(n); if (!netSpot.has(r) && t.s.sym !== 'GROUND') netSpot.set(r, { L: 0, pt: t.pt }); });
+    terms.forEach((t, n) => { const r = rootOf(n); if (!netSpot.has(r) && t.s.sym !== 'GROUND' && !t.probe) netSpot.set(r, { L: 0, pt: t.pt }); });
     const nodeRows = [];
     const seenIdx = new Set();
     for (const [r, spot] of netSpot) {
@@ -358,14 +470,100 @@ const InkAnalysis = (() => {
       if (s.sym !== 'OPAMP') out.annots.push({ x: chipSpot(s, true)[0], y: chipSpot(s, true)[1], text: iTxt, kind: 'chip', tone: 'i' });
       compRows.push([c.name, circuitLabel(s) || '—', si(r.v, 'V'), si(r.i, 'A'), si(r.p, 'W'), ...(ac ? [acI || '—'] : [])]);
     }
+    // Probe voltages: Vn = V(+) − V(−), signed; a lone + probe reads against the reference node.
+    const probeRows = [];
+    const refName = ground.size ? 'ground' : 'the reference node';
+    const vAt = (k) => (k ? op.nodes[nodes[k]] || 0 : 0);
+    const zAt = (k) => { if (!ac || !k) return [0, 0]; const nm = nodes[k], m = ac.mag[nm][0], ph = ac.phase[nm][0] * Math.PI / 180; return [m * Math.cos(ph), m * Math.sin(ph)]; };
+    const nodeLabel = (k) => (k ? nodes[k] : ground.size ? 'ground' : 'ref (0)');
+    for (const pr of probePairs) {
+      const vd = vAt(pr.a) - vAt(pr.b);
+      let txt = si(vd, 'V'), acTxt = '';
+      if (ac) { const za = zAt(pr.a), zb = zAt(pr.b), d = cplx([za[0] - zb[0], za[1] - zb[1]]); acTxt = phasor(d[0], d[1], 'V'); txt = Math.abs(vd) > 1e-9 ? txt + ' + ' + acTxt : acTxt; }
+      const tip = boxMap(pr.pos).toPage([0, -14]);
+      out.annots.push({ x: tip[0], y: tip[1] - 12, text: `V${pr.n} = ${txt}`, kind: 'chip', tone: 'meter' });
+      probeRows.push([`V${pr.n}`, nodeLabel(pr.a), pr.neg ? nodeLabel(pr.b) : nodeLabel(0) + ' (no V' + pr.n + '−)', si(vd, 'V'), ...(ac ? [acTxt] : [])]);
+      if (!pr.neg) blocks.push({ t: 'note', text: `V${pr.n} has no V${pr.n}− probe, so it's measured from ${refName}. Add a V${pr.n}− probe to measure across a part.` });
+    }
     const cards = [['Nodes', String(nodes.length - 1)], ['Components', String(eparts.length)], ['Power supplied', si(pSup, 'W')], ['Power absorbed', si(pAbs, 'W')]];
     if (ac) cards.push(['AC frequency', si(acFreq, 'Hz')], ['ω', si(2 * Math.PI * acFreq, 'rad/s')]);
     blocks.push({ t: 'cards', items: cards });
+    if (probeRows.length) blocks.push({ t: 'table', title: 'Probe voltages', head: ['Probe', 'V+ at', 'V− at', 'DC', ...(ac ? ['AC phasor'] : [])], rows: probeRows });
     if (meterRows.length) blocks.push({ t: 'table', title: 'Meter readings', head: ['Meter', 'Reads', 'Value'], rows: meterRows });
     blocks.push({ t: 'table', title: 'Node voltages', head: ['Node', 'DC', ...(ac ? ['AC phasor'] : [])], rows: nodeRows });
     blocks.push({ t: 'table', title: 'Components', head: ['Part', 'Value', 'V', 'I', 'P', ...(ac ? ['AC current'] : [])], rows: compRows });
     blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + '; the DC part is shown separately. ' : '') + 'Current is positive from a part\'s first terminal to its second; P < 0 means the part delivers power. Ideal op-amps saturate at ±V_sat.' });
     out.analyses.push({ title: ac ? 'Circuit — DC + AC phasor analysis' : 'Circuit — DC analysis', blocks });
+  }
+
+  // =========================================================================================
+  // THERMAL RESERVOIR SYMBOLS (hot / cold) — linked to devices by lines
+  // =========================================================================================
+  // Links for the page being analysed (analyze() is synchronous, so one shared slot is fine).
+  let LINKS = emptyLinks();
+  function emptyLinks() {
+    const use = new Map();
+    return { list: [], heatWires: new Set(), byDev: new Map(), use, useOf: (r) => { if (!use.has(r)) use.set(r, []); return use.get(r); } };
+  }
+  // A reservoir links to every flow device / heat-engine diagram that a line touching its box also
+  // touches — directly or through a chain of lines joined end-to-line. A line that runs between two
+  // flow devices is a pipe, not a heat line, so chains never cross into the working-fluid loop.
+  function linkReservoirs(syms, wires) {
+    const L = emptyLinks();
+    const rs = syms.filter(s => HEATRES.has(s.sym) && s.box);
+    if (!rs.length) return L;
+    const targets = syms.filter(s => FLOW.has(s.sym) || RES.has(s.sym));
+    const info = wires.map(w => ({ devs: targets.filter(d => touchesSym(w.pts, d, TOL)), res: rs.filter(r => touchesSym(w.pts, r, TOL)) }));
+    const flowCount = (k) => info[k].devs.filter(d => FLOW.has(d.sym)).length;
+    const endsOn = (a, b) => [wires[a].pts[0], wires[a].pts[wires[a].pts.length - 1]].some(e => polyDist(e, wires[b].pts) <= TOL);
+    const counters = { hot: 0, cold: 0 };
+    for (const r of rs) {
+      const hot = r.sym === 'HOT_RESERVOIR', n = ++counters[hot ? 'hot' : 'cold'];
+      const T = qty(r.props.T, 'T');
+      const e = { s: r, hot, T: T > 0 ? T : null, bad: !blank(r.props.T) && !(T > 0), name: (hot ? 'Hot reservoir' : 'Cold reservoir') + (n > 1 ? ' ' + n : ''), devs: [], wires: new Set() };
+      const stack = [];
+      info.forEach((x, k) => { if (x.res.includes(r) && flowCount(k) < 2) stack.push(k); });
+      while (stack.length) {
+        const k = stack.pop();
+        if (e.wires.has(k)) continue;
+        e.wires.add(k);
+        for (let j = 0; j < wires.length; j++) if (!e.wires.has(j) && flowCount(j) < 2 && (endsOn(k, j) || endsOn(j, k))) stack.push(j);
+      }
+      const devs = new Set();
+      for (const k of e.wires) for (const d of info[k].devs) devs.add(d);
+      // Drawn right against a device (boxes within TOL) also counts.
+      const ro = obbOf(r, TOL);
+      for (const d of targets) if (obbOverlap(ro, obbOf(d, 0))) devs.add(d);
+      e.devs = [...devs];
+      for (const d of devs) { if (!L.byDev.has(d)) L.byDev.set(d, []); L.byDev.get(d).push(e); }
+      for (const k of e.wires) L.heatWires.add(wires[k]);
+      L.list.push(e);
+    }
+    return L;
+  }
+  // Chips, comps and a summary for every reservoir symbol (after the cycles recorded what used them).
+  function reservoirReport(out) {
+    if (!LINKS.list.length) return;
+    const blocks = [], rows = [];
+    for (const e of LINKS.list) {
+      const s = e.s, f = fld(s.props);
+      out.comps[s.i] = { name: e.name, title: e.hot ? 'Hot thermal reservoir' : 'Cold thermal reservoir', label: '', fields: [f('T', 'Temperature', '°C', e.hot ? '500' : '20', { hint: 'add K for kelvin, e.g. 300 K' })] };
+      const edge = boxMap(s).toPage([0, e.hot ? -20 : 20]), tag = e.hot ? 'T_H' : 'T_C';
+      out.annots.push({ x: edge[0], y: edge[1] + (e.hot ? -14 : 14), text: e.T ? `${tag} ${fT(e.T)}` : `${tag} not set`, kind: 'chip', tone: e.T ? (e.hot ? 'hot' : 'cold') : 'warn' });
+      if (e.bad) blocks.push({ t: 'warn', text: `${e.name}: “${s.props.T}” isn't a temperature above absolute zero — try 500 (°C) or 300 K.` });
+      else if (!e.T) blocks.push({ t: 'warn', text: `Tap the ${e.name.toLowerCase()} and set its temperature.` });
+      const linkedTo = e.devs.map(d => (out.comps[d.i] && out.comps[d.i].name) || DEV_TITLE[d.sym] || d.sym).join(', ');
+      const use = LINKS.use.get(e) || [];
+      if (!e.devs.length) blocks.push({ t: 'warn', text: `${e.name} isn't linked to anything — draw a line from it to a boiler, condenser, heat exchanger, heat engine or refrigerator.` });
+      else if (!use.length && e.T) blocks.push({ t: 'note', text: `${e.name} touches ${linkedTo}, but nothing there takes its temperature — link it to the heat-input or heat-rejection device of a recognised cycle, or to a heat engine / refrigerator diagram.` });
+      rows.push([e.name, e.T ? `${fT(e.T)} (${fx(e.T, 2)} K)` : '—', linkedTo || '—', use.join('; ') || '—']);
+    }
+    // Heat only flows hot → cold: every hot reservoir must be hotter than every cold one on the page.
+    const hots = LINKS.list.filter(e => e.hot && e.T), colds = LINKS.list.filter(e => !e.hot && e.T);
+    for (const h of hots) for (const c of colds) if (h.T <= c.T) blocks.push({ t: 'warn', text: `${h.name} (${fT(h.T)}) isn't hotter than ${c.name} (${fT(c.T)}) — heat flows from hot to cold, so check the temperatures.` });
+    blocks.push({ t: 'table', title: 'Reservoirs', head: ['Reservoir', 'T', 'Linked to', 'Used as'], rows });
+    blocks.push({ t: 'note', text: 'A reservoir links to whatever its line (or a chain of joined lines) touches. In a power cycle the hot reservoir sets T_H at the boiler / heater and the cold one T_C at the condenser / cooler; in a refrigerator or heat pump the hot reservoir is the warm region at the condenser and the cold one the cold region at the evaporator. A reservoir T typed on the device itself wins.' });
+    out.analyses.push({ title: 'Thermal reservoirs', blocks });
   }
 
   // =========================================================================================
@@ -377,30 +575,48 @@ const InkAnalysis = (() => {
       const mode = engine ? 'power' : p.mode === 'heatpump' ? 'heatpump' : 'refrigeration';
       const rate = p.basis === 'kJ' ? false : true;
       const dimE = rate ? 'P' : 'E', uE = rate ? 'kW' : 'kJ';
-      const f = (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] || '', ...extra });
+      const f = fld(p);
+      // Reservoir symbols linked by a line fill T_H / T_C when the diagram's own props are blank.
+      const blocks = [];
+      const linked = (LINKS.byDev.get(s) || []);
+      const hotL = linked.filter(r => r.hot), coldL = linked.filter(r => !r.hot);
+      const fromRes = (key, list, which) => {
+        const own = qty(p[key], 'T');
+        const r = list.find(x => x.T > 0);
+        if (list.length > 1) blocks.push({ t: 'warn', text: `${list.length} ${which} reservoirs are linked to this diagram — using ${r ? r.name : 'the first'}.` });
+        if (own != null && isFinite(own)) {
+          if (r && Math.abs(r.T - own) > 0.05) blocks.push({ t: 'note', text: `The diagram's own ${key === 'TH' ? 'T_H' : 'T_C'} (${fT(own)}) differs from the linked ${r.name.toLowerCase()} (${fT(r.T)}) — using the diagram's value. Clear it to use the reservoir.` });
+          return { T: own, src: null };
+        }
+        if (!r) return { T: own, src: null };
+        LINKS.useOf(r).push(`${key === 'TH' ? 'T_H' : 'T_C'} of the ${engine ? 'heat engine' : mode === 'heatpump' ? 'heat pump' : 'refrigerator'}`);
+        return { T: r.T, src: r };
+      };
+      const hot = fromRes('TH', hotL, 'hot'), cold = fromRes('TC', coldL, 'cold');
+      const TH = hot.T, TC = cold.T;
       out.comps[s.i] = {
         name: engine ? 'Heat engine' : mode === 'heatpump' ? 'Heat pump' : 'Refrigerator', title: engine ? 'Power cycle between reservoirs' : 'Refrigeration / heat pump cycle',
         label: '',
         fields: [
           ...(engine ? [] : [f('mode', 'Cycle', '', 'refrigerator', { options: ['refrigerator', 'heatpump'] })]),
-          f('TH', 'Hot reservoir T_H', '°C', '', { hint: 'add K for kelvin, e.g. 500 K' }), f('TC', 'Cold reservoir T_C', '°C', ''),
+          f('TH', 'Hot reservoir T_H', '°C', hot.src ? fT(hot.src.T) + ' (linked)' : '', { hint: hot.src ? 'from the linked hot reservoir — type a value to override' : 'add K for kelvin, e.g. 500 K' }),
+          f('TC', 'Cold reservoir T_C', '°C', cold.src ? fT(cold.src.T) + ' (linked)' : '', cold.src ? { hint: 'from the linked cold reservoir — type a value to override' } : {}),
           f('basis', 'Energy or rate', '', 'kW', { options: ['kW', 'kJ'] }),
           f('QH', 'Q_H', uE, 'unknown'), f('QC', 'Q_C', uE, 'unknown'), f('W', 'W_cycle', uE, 'unknown'),
-          f('perf', engine ? 'Efficiency η' : mode === 'heatpump' ? 'COP γ' : 'COP β', engine ? '%' : '', 'unknown'),
+          f('perf', engine ? 'Efficiency η' : mode === 'heatpump' ? 'COP γ' : 'COP β', engine ? '%' : '', 'unknown', engine ? {} : { keypad: 'num' }),
         ],
       };
       const m = boxMap(s);
       const at = (x, y) => m.toPage([x, y]);
-      const TH = qty(p.TH, 'T'), TC = qty(p.TC, 'T');
       const known = { QH: qty(p.QH, dimE), QL: qty(p.QC, dimE), W: qty(p.W, dimE), perf: engine ? qty(p.perf, 'pct') : qty(p.perf, 'n') };
-      const blocks = [];
-      if (!(TH > 0 && TC > 0)) blocks.push({ t: 'warn', text: 'Tap the diagram and set T_H and T_C.' });
+      if (!(TH > 0 && TC > 0)) blocks.push({ t: 'warn', text: hotL.length || coldL.length ? 'Set the temperature of each linked reservoir (or T_H and T_C on the diagram).' : 'Tap the diagram and set T_H and T_C — or draw a line from a hot and a cold reservoir to it.' });
       let R = null;
       if (TH > 0 && TC > 0) {
         try { R = TE.reservoirCycle(mode, TH, TC, known); } catch (e) { blocks.push({ t: 'warn', text: e.message }); }
       }
-      if (TH > 0) out.annots.push({ ...pt(at(0, -54)), text: 'T_H ' + fT(TH), kind: 'chip', tone: 'hot' });
-      if (TC > 0) out.annots.push({ ...pt(at(0, 54)), text: 'T_C ' + fT(TC), kind: 'chip', tone: 'cold' });
+      // A linked reservoir's own chip already shows its T, so only typed values get a chip here.
+      if (TH > 0 && !hot.src) out.annots.push({ ...pt(at(0, -54)), text: 'T_H ' + fT(TH), kind: 'chip', tone: 'hot' });
+      if (TC > 0 && !cold.src) out.annots.push({ ...pt(at(0, 54)), text: 'T_C ' + fT(TC), kind: 'chip', tone: 'cold' });
       if (R) {
         const e = (v) => (+v.toPrecision(4)) + ' ' + uE;
         out.annots.push({ ...pt(at(26, -32)), text: 'Q_H ' + e(R.QH), kind: 'chip', tone: 'hot' });
@@ -577,7 +793,7 @@ const InkAnalysis = (() => {
   };
   const ROLE_TITLE = { pump: 'Pump', boiler: 'Boiler', turbine: 'Turbine', condenser: 'Condenser', hpTurbine: 'HP turbine', lpTurbine: 'LP turbine', reheater: 'Reheater', compressor: 'Compressor', heater: 'Combustor / heater', cooler: 'Heat rejection', valve: 'Expansion valve', evaporator: 'Evaporator' };
   function roleFields(kind, role, p) {
-    const f = (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] || '', ...extra });
+    const f = fld(p);
     const eta = f('eta', 'Isentropic efficiency', '%', '100');
     if (kind.startsWith('rankine')) {
       if (role === 'boiler') return [f('p', 'Boiler pressure', 'kPa', '8000', { hint: 'or 8 MPa, 80 bar' }), f('T', 'Turbine inlet temperature', '°C', 'saturated vapor'), f('Tres', 'Heat source (hot reservoir) T', '°C', 'optional')];
@@ -588,13 +804,13 @@ const InkAnalysis = (() => {
       return [eta];
     }
     if (kind.startsWith('brayton')) {
-      if (role === 'compressor') return [f('T', 'Inlet temperature T₁', '°C', '27', { hint: 'add K for kelvin, e.g. 300 K' }), f('p', 'Inlet pressure p₁', 'kPa', '100'), f('rp', 'Pressure ratio p₂/p₁', '', '10'), eta, f('model', 'Air model', '', 'variable cp', { options: ['variable cp', 'cold air (k = 1.4)'] })];
+      if (role === 'compressor') return [f('T', 'Inlet temperature T₁', '°C', '27', { hint: 'add K for kelvin, e.g. 300 K' }), f('p', 'Inlet pressure p₁', 'kPa', '100'), f('rp', 'Pressure ratio p₂/p₁', '', '10', { keypad: 'num' }), eta, f('model', 'Air model', '', 'variable cp', { options: ['variable cp', 'cold air (k = 1.4)'] })];
       if (role === 'heater') return [f('T', 'Turbine inlet temperature T₃', '°C', '1126.85', { hint: 'e.g. 1400 K' }), f('Tres', 'Heat source T', '°C', 'optional')];
       if (role === 'turbine') return [eta, f('Wnet', 'Net power', 'MW', 'per kg only', { hint: 'kW or MW' })];
       if (role === 'cooler') return [f('Tres', 'Heat sink T', '°C', 'optional')];
     }
     if (kind === 'refrig') {
-      if (role === 'compressor') return [eta, f('mode', 'Use as', '', 'refrigerator', { options: ['refrigerator', 'heat pump'] }), f('capacity', 'Capacity (cooling, or heating for a heat pump)', 'kW', 'per kg only', { hint: 'kW or tons' })];
+      if (role === 'compressor') return [eta, f('mode', 'Use as', '', 'refrigerator', { options: ['refrigerator', 'heat pump'] }), f('capacity', 'Capacity (cooling, or heating for a heat pump)', 'kW', 'per kg only', { hint: 'kW or tons', units: ['kW', 'tons'] })];
       if (role === 'condenser') return [f('T', 'Condensing temperature', '°C', '36'), f('dT', 'Subcooling', '°C', '0'), f('Tres', 'Warm surroundings T', '°C', 'optional')];
       if (role === 'evaporator') return [f('T', 'Evaporating temperature', '°C', '-10'), f('dT', 'Superheat', '°C', '0'), f('Tres', 'Cold region T', '°C', 'optional')];
       return [];
@@ -610,12 +826,55 @@ const InkAnalysis = (() => {
     return parts.join(' · ');
   }
 
+  // Which roles exchange heat with the hot / cold side (refrigeration: the condenser rejects to the
+  // warm region T_H, the evaporator draws from the cold region T_C).
+  const HOT_ROLES = { rankine: ['boiler'], 'rankine-reheat': ['boiler', 'reheater'], brayton: ['heater'], 'brayton-open': ['heater'], refrig: ['condenser'] };
+  const COLD_ROLES = { rankine: ['condenser'], 'rankine-reheat': ['condenser'], brayton: ['cooler'], 'brayton-open': [], refrig: ['evaporator'] };
+  // T_H / T_L for the cycle: a device's own Tres prop if typed, else a linked reservoir symbol's T.
+  function cycleReservoirs(kind, by, title, blocks, out) {
+    let linked = false;
+    const side = (roles, hotSide) => {
+      const tag = hotSide ? 'T_H' : 'T_C';
+      for (const role of roles) {
+        const d = by[role];
+        if (!d) continue;
+        const own = qty((d.props || {}).Tres, 'T');
+        const list = LINKS.byDev.get(d) || [];
+        if (!list.length) { if (own > 0) return own; continue; }
+        linked = true;
+        const r = list.find(x => x.hot === hotSide && x.T) || list.find(x => x.T) || list[0];
+        if (list.length > 1) blocks.push({ t: 'note', text: `${list.length} reservoirs are linked to the ${ROLE_TITLE[role].toLowerCase()} — using ${r.name}.` });
+        if (r.hot !== hotSide) blocks.push({ t: 'warn', text: `${r.name} is linked to the ${ROLE_TITLE[role].toLowerCase()}, which ${hotSide ? 'takes heat from the hot side' : 'rejects heat to the cold side'} — it's drawn as a ${r.hot ? 'hot' : 'cold'} reservoir but is used as ${tag} here.` });
+        // Show the linked value in the device's own reservoir field.
+        const fl = out.comps[d.i] && out.comps[d.i].fields.find(x => x.key === 'Tres');
+        if (fl && r.T) { fl.ph = fT(r.T) + ' (linked)'; fl.hint = `from ${r.name.toLowerCase()} — type a value to override`; }
+        if (own > 0) {
+          if (r.T && Math.abs(r.T - own) > 0.05) blocks.push({ t: 'note', text: `The ${ROLE_TITLE[role].toLowerCase()}'s own reservoir T (${fT(own)}) differs from the linked ${r.name.toLowerCase()} (${fT(r.T)}) — using the ${ROLE_TITLE[role].toLowerCase()}'s value. Clear it to use the reservoir.` });
+          return own;
+        }
+        if (!r.T) continue;
+        LINKS.useOf(r).push(`${tag} of the ${title} (${ROLE_TITLE[role].toLowerCase()})`);
+        return r.T;
+      }
+      return null;
+    };
+    const TH = side(HOT_ROLES[kind], true), TL = side(COLD_ROLES[kind], false);
+    // Reservoirs on devices that don't exchange heat with one are ignored — say so.
+    const heatRoles = new Set([...HOT_ROLES[kind], ...COLD_ROLES[kind]]);
+    for (const [role, d] of Object.entries(by)) {
+      if (heatRoles.has(role)) continue;
+      for (const r of LINKS.byDev.get(d) || []) blocks.push({ t: 'warn', text: `${r.name} is linked to the ${ROLE_TITLE[role].toLowerCase()} — reservoirs exchange heat with the ${[...heatRoles].map(x => ROLE_TITLE[x].toLowerCase()).join(' / ')}, so it's ignored.` });
+    }
+    return { TH, TL, linked };
+  }
+
   function cycleTrain(kind, seq, closed, io, pipeSpot, blocks, title, out) {
     const roles = ROLES[kind];
     const by = {};
     seq.forEach((d, k) => { by[roles[k]] = d; });
     const P = (role) => (by[role] && by[role].props) || {};
     for (const [k, d] of seq.entries()) out.comps[d.i] = { name: ROLE_TITLE[roles[k]], title: `${ROLE_TITLE[roles[k]]} (${DEV_TITLE[d.sym].toLowerCase()})`, label: roleLabel(kind, roles[k], d.props || {}), fields: roleFields(kind, roles[k], d.props || {}) };
+    const RT = cycleReservoirs(kind, by, title, blocks, out);
     const assumed = [];
     const get = (role, key, dim, def, what) => {
       const v = qty(P(role)[key], dim);
@@ -636,7 +895,7 @@ const InkAnalysis = (() => {
           pBoiler: pB, pCond: pC, T1: T1 > 0 ? T1 : null, etaT, etaP, reheat,
           pReheat: reheat ? get('reheater', 'p', 'p', 700, 'reheat 0.7 MPa') : null,
           TReheat: reheat ? (qty(P('reheater').T, 'T') || (T1 > 0 ? T1 : null)) : null,
-          Wnet: wnetKW(P(tTurb).Wnet), TH: qty(P('boiler').Tres, 'T'), TL: qty(P('condenser').Tres, 'T'),
+          Wnet: wnetKW(P(tTurb).Wnet), TH: RT.TH, TL: RT.TL,
         });
       } else if (kind.startsWith('brayton')) {
         C = TE.brayton({
@@ -644,7 +903,7 @@ const InkAnalysis = (() => {
           rp: get('compressor', 'rp', 'n', 10, 'pressure ratio 10'), T3: get('heater', 'T', 'T', 1400, 'turbine inlet 1400 K'),
           etaC: get('compressor', 'eta', 'pct', 1, null), etaT: get('turbine', 'eta', 'pct', 1, null), regen: 0,
           cold: /cold/.test(P('compressor').model || ''), Wnet: wnetKW(P('turbine').Wnet),
-          TH: qty(P('heater').Tres, 'T'), TL: kind === 'brayton' ? qty(P('cooler').Tres, 'T') : null,
+          TH: RT.TH, TL: kind === 'brayton' ? RT.TL : null,
         });
       } else {
         const hp = /heat/.test(P('compressor').mode || '');
@@ -652,7 +911,7 @@ const InkAnalysis = (() => {
           Tevap: get('evaporator', 'T', 'T', 263.15, 'evaporator −10 °C'), Tcond: get('condenser', 'T', 'T', 309.15, 'condenser 36 °C'),
           superheat: get('evaporator', 'dT', 'dT', 0, null), subcool: get('condenser', 'dT', 'dT', 0, null),
           etaC: get('compressor', 'eta', 'pct', 1, null), capacity: qty(P('compressor').capacity, 'P') || null, mode: hp ? 'heatpump' : 'refrigeration',
-          TH: qty(P('condenser').Tres, 'T'), TL: qty(P('evaporator').Tres, 'T'),
+          TH: RT.TH, TL: RT.TL,
         });
       }
     } catch (e) {
@@ -706,8 +965,12 @@ const InkAnalysis = (() => {
       if (mdot) cards.push(['Mass flow', fx(mdot, 4) + ' kg/s'], ['Compressor power', fpow(mdot * C.extra.w)]);
     }
     if (C.res) {
-      cards.push([power ? 'η_max between reservoirs' : 'COP_max between regions', power ? fpct(C.res.perfMax) : fx(C.res.perfMax, 3)], ['σ_cycle', (+C.res.sigma.toPrecision(4)) + ' kJ/kg·K']);
+      cards.push([power ? 'η_max between reservoirs' : 'COP_max between regions', power ? fpct(C.res.perfMax) : fx(C.res.perfMax, 3)], ['σ_cycle', (+C.res.sigma.toPrecision(4)) + ' kJ/kg·K'], ['T_H', fT(C.res.TH)], ['T_C', fT(C.res.TL)]);
+      if (!(C.res.TH > C.res.TL)) blocks.push({ t: 'err', text: `The hot side (${fT(C.res.TH)}) isn't hotter than the cold side (${fT(C.res.TL)}) — check the reservoir temperatures.` });
+      else if (C.res.sigma < -1e-9) blocks.push({ t: 'err', text: 'σ_cycle < 0 — this cycle couldn\'t run between these reservoirs (it would beat the Carnot limit).' });
       C.res.warn.forEach(w => blocks.push({ t: 'warn', text: w }));
+    } else if (RT.linked && kind !== 'brayton-open') {
+      blocks.push({ t: 'note', text: RT.TH > 0 ? `Link a cold reservoir to the ${ROLE_TITLE[COLD_ROLES[kind][0]] ? ROLE_TITLE[COLD_ROLES[kind][0]].toLowerCase() : 'heat-rejection side'} (or set its T) to get σ_cycle and the Carnot limit between reservoirs.` : `Link a hot reservoir to the ${ROLE_TITLE[HOT_ROLES[kind][0]].toLowerCase()} (or set its T) to get σ_cycle and the Carnot limit between reservoirs.` });
     }
     if (C.extra.x2 != null && C.extra.x2 < 0.88) blocks.push({ t: 'warn', text: `Turbine exit quality ${fx(C.extra.x2, 3)} is below ~0.88 — that much moisture erodes the blades.` });
     blocks.push({ t: 'cards', items: cards });
@@ -743,14 +1006,14 @@ const InkAnalysis = (() => {
     const subName = { water: 'water', r134a: 'R-134a', air: 'air' };
     const subKey = (v) => (/134/.test(v || '') ? 'r134a' : /air/i.test(v || '') ? 'air' : /water|steam/i.test(v || '') ? 'water' : null);
     const sub = subKey(p.fluid) || defSub;
-    const f = (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] || '', ...extra });
+    const f = fld(p);
     const DEF = {
       turbine: { p1: '3000', T1: '400', p2: '10', eta: '85' }, compressor: { p1: '100', T1: '27', p2: '800', eta: '85' },
       pump: { p1: '10', T1: '40', p2: '3000', eta: '80' }, nozzle: { p1: '300', T1: '227', p2: '100', eta: '95', V1: '10' },
       diffuser: { p1: '50', T1: '-23', p2: '70', V1: '250', V2: '30' }, throttle: { p1: '900', x1: '0', p2: '200' }, heater: { p1: '8000', T1: '40', T2: '480' },
     }[kind];
     const fields = [f('fluid', 'Fluid', '', subName[defSub], { options: ['water', 'R-134a', 'air'] }), f('p1', 'Inlet pressure', 'kPa', DEF.p1), f('T1', 'Inlet temperature', '°C', DEF.T1 || 'use quality')];
-    if (sub !== 'air') fields.push(f('x1', 'Inlet quality (instead of T)', '0–1', DEF.x1 || ''));
+    if (sub !== 'air') fields.push(f('x1', 'Inlet quality (instead of T)', '0–1', DEF.x1 || '', { keypad: 'num', units: [] }));
     if (kind !== 'heater') fields.push(f('p2', 'Exit pressure', 'kPa', DEF.p2));
     if (['turbine', 'compressor', 'pump', 'nozzle'].includes(kind)) fields.push(f('eta', 'Isentropic efficiency', '%', DEF.eta));
     if (kind === 'heater') fields.push(f('T2', 'Exit temperature', '°C', DEF.T2));
@@ -796,23 +1059,169 @@ const InkAnalysis = (() => {
   // =========================================================================================
   function analyze(page) {
     const out = { analyses: [], annots: [], comps: {} };
-    const syms = (page.symbols || []).map(s => ({ ...s, props: s.props || {} }));
+    const all = (page.symbols || []).map(s => ({ ...s, props: s.props || {} }));
     const wires = [];
+    // WIRE symbols are just straight wires t0 → t1, so every analyser (circuit nets, thermo pipes,
+    // mechanics ropes) sees them as lines.
+    for (const s of all) if (s.sym === 'WIRE' && s.terms && dist(s.terms[0], s.terms[1]) >= 1) wires.push({ i: s.i, kind: 'line', pts: [s.terms[0].slice(), s.terms[1].slice()], fromSym: true });
+    const syms = all.filter(s => s.sym !== 'WIRE');
     for (const w of page.wires || []) {
       if (!w.pts || w.pts.length < 2) continue;
       if (w.kind === 'ink') { const s = wireLike(w.pts); if (s) wires.push({ ...w, pts: s }); }
       else wires.push(w);
     }
     try { circuit(syms, wires, out); } catch (e) { out.analyses.push({ title: 'Circuit', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
+    LINKS = emptyLinks();
+    try { LINKS = linkReservoirs(syms, wires); } catch (e) { out.analyses.push({ title: 'Thermal reservoirs', blocks: [{ t: 'err', text: 'Linking failed: ' + e.message }] }); }
     try { reservoirs(syms, out); } catch (e) { out.analyses.push({ title: 'Reservoirs', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
-    try { thermo(syms, wires, out); } catch (e) { out.analyses.push({ title: 'Thermo', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
+    // Heat lines from reservoir symbols aren't pipes — keep them out of the flow-path walk.
+    try { thermo(syms, wires.filter(w => !LINKS.heatWires.has(w)), out); } catch (e) { out.analyses.push({ title: 'Thermo', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
+    try { reservoirReport(out); } catch (e) { out.analyses.push({ title: 'Thermal reservoirs', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
+    // Statics / pulleys / buoyancy live in ink-mechanics.js (same out object, same helpers).
+    if (typeof InkMechanics !== 'undefined') {
+      try { InkMechanics.analyze(syms, wires, out, HELPERS); } catch (e) { out.analyses.push({ title: 'Mechanics', blocks: [{ t: 'err', text: 'Analysis failed: ' + e.message }] }); }
+    }
+    // Final pass: move value labels and result chips so they don't sit on wires, symbols or each other.
+    try { placeAll(out, syms, wires); } catch (_) { /* placement is cosmetic */ }
     if (!out.analyses.length) {
-      out.analyses.push({ title: 'Nothing to analyse yet', blocks: [{ t: 'note', text: 'Place circuit or thermo symbols from the symbols menu and connect them with lines (straight strokes or the line tool). Circuits get node voltages and currents; pumps, turbines, compressors, heat exchangers and valves joined in a loop are recognised as Rankine, Brayton or refrigeration cycles; a heat engine or refrigerator symbol gets the second-law check.' }] });
+      out.analyses.push({ title: 'Nothing to analyse yet', blocks: [{ t: 'note', text: 'Place circuit or thermo symbols from the symbols menu and connect them with lines (straight strokes or the line tool). Circuits get node voltages and currents (add V+ / V− probes to measure across a part); pumps, turbines, compressors, heat exchangers and valves joined in a loop are recognised as Rankine, Brayton or refrigeration cycles; a heat engine or refrigerator symbol gets the second-law check, with hot / cold reservoirs linked by lines.' }] });
     }
     return out;
   }
 
-  return { analyze, _test: { wireLike, qty, boxMap } };
+  // =========================================================================================
+  // SMART PLACEMENT (contract §4)
+  // =========================================================================================
+  // Every value label (comps[i].labelAt) and result chip is moved to the nearby spot that clashes
+  // least with wires, symbol bodies and the labels/chips already placed. Candidates are scored, and
+  // since every penalty is ≥ 0 the scan stops once a candidate's own distance cost can't win.
+  const PAGE_W = 816, PAGE_H = 1056;
+  const textLen = (t) => [...String(t).replace(/_/g, '').replace(/[̀-ͯ]/g, '')].length;
+  const labelW = (t) => 6.3 * textLen(t);
+  const chipW = (t) => 5.8 * textLen(t) + 10;
+  // Text box for a baseline anchor: 11 units tall, ~9 above the baseline and 2 below.
+  function labelRect(x, y, align, w) { const l = align === 'left' ? x : align === 'right' ? x - w : x - w / 2; return { l, r: l + w, t: y - 9, b: y + 2 }; }
+  const chipRect = (x, y, w) => ({ l: x - w / 2, r: x + w / 2, t: y - 7.5, b: y + 7.5 });
+  // Anchor so the text box touches point p on the side `dir` points to.
+  function anchorAt(p, dir) {
+    const [dx, dy] = dir;
+    if (Math.abs(dx) < 0.38) return { x: p[0], y: dy < 0 ? p[1] - 2 : p[1] + 9, align: 'center' };
+    const align = dx > 0 ? 'left' : 'right';
+    if (Math.abs(dy) < 0.38) return { x: p[0], y: p[1] + 3.5, align };
+    return { x: p[0], y: dy < 0 ? p[1] - 2 : p[1] + 9, align };
+  }
+  const DISTS = [3, 8, 14, 22, 32, 44];
+  function labelCands(s) {
+    const c = [];
+    if (s.inline) {
+      const [a, b] = s.terms, L = dist(a, b) || 1, u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], [nx, ny] = labelSide(s);
+      const h = Math.max(s.half || 8, 4), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+      for (const side of [1, -1]) for (const d of DISTS) for (const sh of [0, 0.25, -0.25, 0.45, -0.45]) {
+        c.push({ p: [m[0] + side * nx * (h + d) + u[0] * sh * L, m[1] + side * ny * (h + d) + u[1] * sh * L], dir: [side * nx, side * ny], cost: d * 0.5 + Math.abs(sh) * L * 0.2 + (side < 0 ? 3 : 0) });
+      }
+      for (const [e, sg] of [[b, 1], [a, -1]]) for (const d of [4, 12, 22]) c.push({ p: [e[0] + sg * u[0] * d, e[1] + sg * u[1] * d], dir: [sg * u[0], sg * u[1]], cost: 14 + d * 0.5 });
+    } else {
+      // Local half-size (boxMap falls back to page units when w/h are missing).
+      const m = boxMap(s), ctr = m.toPage([0, 0]), hw = (s.w || Math.abs(s.box[2] - s.box[0])) / 2, hh = (s.h || Math.abs(s.box[3] - s.box[1])) / 2;
+      // Above first (box chips usually sit below), then right, below, left, then the corners.
+      const spots = [[0, -hh], [hw, 0], [0, hh], [-hw, 0], [hw, -hh], [-hw, -hh], [hw, hh], [-hw, hh]];
+      spots.forEach(([lx, ly], rank) => {
+        const P = m.toPage([lx, ly]), vx = P[0] - ctr[0], vy = P[1] - ctr[1], n = Math.hypot(vx, vy);
+        if (!(n > 0.5)) return;
+        const dir = [vx / n, vy / n];
+        for (const d of DISTS) c.push({ p: [P[0] + dir[0] * d, P[1] + dir[1] * d], dir, cost: d * 0.5 + rank * 2 });
+      });
+    }
+    return c.sort((x, y) => x.cost - y.cost);
+  }
+  // Ring of offsets around a chip's own point (small moves first; vertical moves slightly cheaper,
+  // since chips are wide and short).
+  const RING = (() => {
+    const r = [[0, 0, 0]];
+    for (const rad of [7, 14, 22, 32, 44, 58, 74]) { const n = rad < 20 ? 8 : 16; for (let k = 0; k < n; k++) { const a = -Math.PI / 2 + k * 2 * Math.PI / n, dx = rad * Math.cos(a), dy = rad * Math.sin(a); r.push([dx, dy, 0.45 * Math.hypot(dx, dy * 0.8)]); } }
+    return r.sort((a, b) => a[2] - b[2]);
+  })();
+
+  function placeAll(out, syms, wires) {
+    const M = 2;   // clearance kept around every text box
+    const segs = [];
+    for (const w of wires) for (let k = 1; k < w.pts.length; k++) {
+      const a = w.pts[k - 1], b = w.pts[k];
+      segs.push({ a, b, l: Math.min(a[0], b[0]), r: Math.max(a[0], b[0]), t: Math.min(a[1], b[1]), bt: Math.max(a[1], b[1]) });
+    }
+    const bodies = syms.filter(s => (s.inline ? s.terms : s.box)).map(s => {
+      const o = obbOf(s, 0), ex = Math.abs(o.u[0]) * o.hu + Math.abs(o.v[0]) * o.hv, ey = Math.abs(o.u[1]) * o.hu + Math.abs(o.v[1]) * o.hv;
+      return { s, o, l: o.c[0] - ex, r: o.c[0] + ex, t: o.c[1] - ey, b: o.c[1] + ey };
+    });
+    const placed = [];
+    const clash = (R, skip, soft) => {
+      const E = { l: R.l - M, t: R.t - M, r: R.r + M, b: R.b + M };
+      const eo = { c: [(E.l + E.r) / 2, (E.t + E.b) / 2], u: [1, 0], v: [0, 1], hu: (E.r - E.l) / 2, hv: (E.b - E.t) / 2 };
+      let pen = 0;
+      if (R.l < 0 || R.t < 0 || R.r > PAGE_W || R.b > PAGE_H) pen += 40;
+      for (const g of segs) {
+        if (g.r < E.l || g.l > E.r || g.bt < E.t || g.t > E.b) continue;
+        const L = segClipLen(g.a, g.b, eo);
+        if (L >= 0) pen += 60 + 3 * L;
+      }
+      for (const B of bodies) {
+        if (B.r < E.l || B.l > E.r || B.b < E.t || B.t > E.b || (skip && skip.has(B.s))) continue;
+        if (obbOverlap(eo, B.o)) pen += 90;
+      }
+      for (const Q of placed) {
+        const ox = Math.min(E.r, Q.r) - Math.max(E.l, Q.l), oy = Math.min(E.b, Q.b) - Math.max(E.t, Q.t);
+        if (ox > 0 && oy > 0) pen += 150 + ox * oy;
+      }
+      if (soft) for (const Q of soft) {
+        const ox = Math.min(E.r, Q.r) - Math.max(E.l, Q.l), oy = Math.min(E.b, Q.b) - Math.max(E.t, Q.t);
+        if (ox > 0 && oy > 0) pen += 40 + 0.5 * ox * oy;
+      }
+      return pen;
+    };
+    // Badges (state numbers on pipes) and other fixed annotations stay put but are obstacles.
+    for (const a of out.annots) {
+      if (a.kind === 'chip' || !isFinite(a.x) || !isFinite(a.y)) continue;
+      if (a.kind === 'badge') placed.push({ l: a.x - 9, r: a.x + 9, t: a.y - 9, b: a.y + 9 });
+      else if (a.text) placed.push(chipRect(a.x, a.y, chipW(a.text)));
+    }
+    // 1. Value labels. Chips haven't moved yet, so their intended spots are soft obstacles — a label
+    // shouldn't grab the place a result was meant to go.
+    const chipSpots = out.annots.filter(a => a.kind === 'chip' && isFinite(a.x) && isFinite(a.y)).map(a => chipRect(a.x, a.y, chipW(a.text || '')));
+    for (const s of syms) {
+      const c = out.comps[s.i];
+      if (!c || blank(c.label) || !(s.inline ? s.terms : s.box)) continue;
+      const w = labelW(c.label);
+      let best = null;
+      for (const cand of labelCands(s)) {
+        if (best && cand.cost >= best.score) break;
+        const A = anchorAt(cand.p, cand.dir), R = labelRect(A.x, A.y, A.align, w), score = cand.cost + clash(R, null, chipSpots);
+        if (!best || score < best.score) best = { A, R, score };
+      }
+      if (!best) continue;
+      c.anchor = centerOf(s).map(v => +v.toFixed(1));
+      c.labelAt = { x: +best.A.x.toFixed(1), y: +best.A.y.toFixed(1), align: best.A.align };
+      placed.push(best.R);
+    }
+    // 2. Result chips: nudge each off wires / symbols / labels / earlier chips, staying close to its point.
+    for (const a of out.annots) {
+      if (a.kind !== 'chip' || !isFinite(a.x) || !isFinite(a.y)) continue;
+      const w = chipW(a.text || '');
+      // A chip whose own point is inside a symbol was put there on purpose (e.g. Q_H on the
+      // heat-engine diagram) — that body doesn't count against it.
+      const skip = new Set(bodies.filter(B => inObb([a.x, a.y], B.o)).map(B => B.s));
+      let best = null;
+      for (const [dx, dy, cost] of RING) {
+        if (best && cost >= best.score) break;
+        const R = chipRect(a.x + dx, a.y + dy, w), score = cost + clash(R, skip);
+        if (!best || score < best.score) best = { dx, dy, R, score };
+      }
+      a.x = +(a.x + best.dx).toFixed(1); a.y = +(a.y + best.dy).toFixed(1);
+      placed.push(best.R);
+    }
+  }
+
+  const HELPERS = { TOL, dist, segDist, polyDist, polyLen, rdp, midpointOf, boxMap, centerOf, labelSide, chipSpot, UF, qty, blank, num, fT, fp, fx, fpct, fpow, si, pt, siVal, fld, fieldSpec, obbOf, inObb, segClipLen, obbOverlap, touchesSym };
+  return { analyze, helpers: HELPERS, _test: { wireLike, qty, boxMap, siVal, labelRect, chipRect, chipW, labelW, obbOf, segClipLen, placeAll } };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = InkAnalysis;

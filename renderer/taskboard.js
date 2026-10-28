@@ -187,7 +187,7 @@ class ViewRenderer {
           staleClass = ' note-shake';
         }
       }
-      el.className = 'sticky-note' + (note.completed ? ' note-done' : '') + (isOverdue(note) ? ' note-overdue' : '') + staleClass;
+      el.className = 'sticky-note' + (note.completed ? ' note-done' : '') + (isOverdue(note) ? ' note-overdue' : '') + (isExamNote(note) ? ' note-exam' : '') + staleClass;
       el.style.background = c.bg;
       el.style.borderColor = c.border;
       el.style.setProperty('--rot', `${rotation}deg`);
@@ -1102,7 +1102,7 @@ class ViewRenderer {
           const timeStr = item.dueTime ? `${formatTime12(item.dueTime)} ` : '';
           // Note pills follow the calendar's color-mode selector, like the day panel.
           const nc = getStickyColors()[resolveAutoColor(item, this.colorMode || 'category', this.data.projects)].border;
-          html += `<div class="cal-event-dot cal-note-dot${done}" style="background:${nc}88">
+          html += `<div class="cal-event-dot cal-note-dot${done}${isExamNote(item) ? ' cal-exam' : ''}" style="background:${nc}88">
             <span class="cal-event-text">${sourceLogoSvg(item.source)}${timeStr}&#128204; ${escapeHtml(item.title)}</span>
           </div>`;
         }
@@ -1222,7 +1222,7 @@ class ViewRenderer {
           const t = note.dueTime ? formatTime12(note.dueTime) + ' ' : '';
           // Due chips follow the calendar's color-mode selector, like the day panel.
           const nc = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)].border;
-          html += `<div class="cal-week-allday-event cal-week-note-chip ${note.completed ? 'cal-week-note-done' : ''}" data-note-id="${note.id}"
+          html += `<div class="cal-week-allday-event cal-week-note-chip ${note.completed ? 'cal-week-note-done' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"
             style="background:${nc}1f;border-left:3px solid ${nc};color:${nc}"
             title="${escapeHtml(note.title)}">
             ${sourceLogoSvg(note.source)}&#128204; ${t}${escapeHtml(note.title)}
@@ -1559,7 +1559,7 @@ class ViewRenderer {
       // still opens the editor. Plain notes keep the old behavior (card → editor).
       const link = launchLink(note);
       const launches = !!link;
-      return `<div class="schedule-card cal-side-note sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${c.bg}; border-color:${c.border}; border-left-color:${c.border}" title="${launches ? escapeHtml(link.label || 'Open source') : 'Open note'}">
+      return `<div class="schedule-card cal-side-note sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${c.bg}; border-color:${c.border}; border-left-color:${c.border}" title="${launches ? escapeHtml(link.label || 'Open source') : 'Open note'}">
         <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
         ${note.dueTime ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(note.dueTime)}</div></div>` : ''}
         <div class="schedule-info">

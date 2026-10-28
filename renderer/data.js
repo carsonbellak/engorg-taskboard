@@ -81,6 +81,11 @@ class DataManager {
 
     // Load user categories into global APP_CATEGORIES
     if (this.settings.categories && this.settings.categories.length > 0) {
+      // Seed built-ins added after this install first saved its categories (e.g. Exam).
+      if (!this.settings.categories.some(c => c.id === 'exam')) {
+        this.settings.categories.push({ ...EXAM_CATEGORY });
+        settingsNeedsSave = true;
+      }
       APP_CATEGORIES = this.settings.categories;
     } else {
       // First run: save defaults

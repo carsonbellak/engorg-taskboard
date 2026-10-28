@@ -55,8 +55,13 @@ const DEFAULT_CATEGORIES = [
   { id: 'mechanical', label: 'MECH', name: 'Mechanical', color: '#3B82F6' },
   { id: 'electrical', label: 'ELEC', name: 'Electrical', color: '#EAB308' },
   { id: 'purchasing', label: 'PUR',  name: 'Purchasing', color: '#22C55E' },
-  { id: 'meeting',    label: 'MTG',  name: 'Meeting',    color: '#F97316' }
+  { id: 'meeting',    label: 'MTG',  name: 'Meeting',    color: '#F97316' },
+  { id: 'exam',       label: 'EXAM', name: 'Exam',       color: '#D4A017' }
 ];
+
+// Exam notes get a gold frame everywhere they render (board, calendar, notes) — see .note-exam etc.
+const EXAM_CATEGORY = DEFAULT_CATEGORIES.find(c => c.id === 'exam');
+function isExamNote(note) { return !!note && note.category === 'exam'; }
 
 // These get populated on init from settings
 let APP_CATEGORIES = [...DEFAULT_CATEGORIES];

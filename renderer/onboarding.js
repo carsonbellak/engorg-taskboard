@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.3': {
+      title: "What's new",
+      intro: 'EngInk analysis: keypad, trusses, pulleys and more.',
+      slides: [
+        { emoji: '🔢', title: 'Tap a part, type a value', body: 'In EngInk, tap any symbol with the select tool to set its value on a keypad with prefix keys (k, M, m, µ…) and unit buttons. Labels now find a spot clear of the wires and other parts.' },
+        { emoji: '⚡', title: 'Circuits & thermo', body: 'New wire symbol, AC current source, and V1+ / V1− probes that read the voltage across any part. Hot (red) and cold (blue) reservoir symbols link to a cycle with a line and feed the Carnot limit.' },
+        { emoji: '🏗️', title: 'Mechanics', body: 'Truss members and force arrows give member forces (T / C) and support reactions. Beams get shear and moment diagrams. Pulleys, inclines, masses and buoyancy in a water tank are analysed too, with rockers, collars, slots, hinges and movable pulleys added to the symbols.' },
+      ],
+    },
     '1.6.2': {
       title: "What's new",
       intro: 'EngInk can analyse your drawings.',

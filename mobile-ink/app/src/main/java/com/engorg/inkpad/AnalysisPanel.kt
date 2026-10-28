@@ -15,14 +15,10 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.os.Looper
-import android.text.Html
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.view.inputmethod.InputMethodManager
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
@@ -51,13 +47,15 @@ import kotlin.math.pow
  * The logic is ink-analysis.js, run by [AnalysisHost].
  *
  * Results draw straight onto the page ([FinishedStrokesView.annotations]) and re-run a moment after
- * every edit. While the panel is open, tapping a symbol (select tool) opens its values — they're
- * saved with the symbol ([ShapeSpec.props]) and labelled beside it on the page.
+ * every edit. Symbol values are edited through the shared [AnalysisEditor] (tap a symbol with the
+ * select tool — panel open or not — or pick it from the Values list here); they're saved with the
+ * symbol ([ShapeSpec.props]) and labelled beside it on the page, placed clear of the wiring.
  */
 @SuppressLint("SetTextI18n")
 class AnalysisPanel(
     private val act: Activity,
     private val host: FrameLayout,
+    private val editor: AnalysisEditor,
     private val focusedPane: () -> PageCanvas?,
     private val onOpened: () -> Unit,
 ) {
@@ -67,13 +65,11 @@ class AnalysisPanel(
     private val onSurface get() = AppTheme.text
     private val muted get() = Color.argb(0xA8, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
 
-    private var engine: AnalysisHost? = null
     private var pane: PageCanvas? = null
     private var page = 0
     private var runSeq = 0
     private var comps: Map<Int, JSONObject> = emptyMap()
     private var compRecs: List<FinishedStrokesView.Rec> = emptyList()   // the recs the comps' indices refer to
-    private var pendingEdit: Pair<Int, FinishedStrokesView.Rec>? = null
     private val rerun = Runnable { runNow() }
 
     private val frame = LinearLayout(act).apply {
@@ -88,7 +84,6 @@ class AnalysisPanel(
     }
     private val subtitle = TextView(act)
     private val content = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(4), dp(14), dp(16)) }
-    private var editor: View? = null
     private var built = false
 
     val isOpen: Boolean get() = frame.parent != null
@@ -98,7 +93,6 @@ class AnalysisPanel(
 
     fun open() {
         if (!built) build()
-        if (engine == null) engine = AnalysisHost(act)
         if (frame.parent == null) {
             val w = minOf(dp(400), (act.resources.displayMetrics.widthPixels * 0.46f).toInt())
             host.addView(frame, FrameLayout.LayoutParams(w, MATCH_PARENT).apply {
@@ -112,13 +106,16 @@ class AnalysisPanel(
     }
 
     fun close() {
-        closeEditor()
         detach()
         host.removeView(frame)
         onClosed?.invoke()
     }
 
-    fun dispose() { main.removeCallbacks(rerun); detach(); engine?.dispose(); engine = null }
+    /** The engine belongs to [editor] (shared with tap-to-edit), so only the panel's own state goes. */
+    fun dispose() { main.removeCallbacks(rerun); detach() }
+
+    /** Is the panel showing (and keeping up to date) [pg] of [p]? */
+    fun shows(p: PageCanvas, pg: Int): Boolean = isOpen && p === pane && pg == page
 
     /** The focused notebook changed: follow it. */
     fun onFocusChanged(p: PageCanvas) { if (isOpen && p !== pane) { attach(p); runNow() } }
@@ -131,11 +128,10 @@ class AnalysisPanel(
         detach()
         pane = p ?: return
         p.onEdited = { pg -> if (pg == page) { main.removeCallbacks(rerun); main.postDelayed(rerun, 350) } }
-        p.symbolTap = { pg, rec -> editSymbol(pg, rec); true }
     }
 
     private fun detach() {
-        pane?.let { it.onEdited = null; it.symbolTap = null; it.finishedView.annotations = emptyList() }
+        pane?.let { it.onEdited = null; it.finishedView.annotations = emptyList() }
         pane = null
     }
 
@@ -143,7 +139,7 @@ class AnalysisPanel(
     private fun runNow() {
         main.removeCallbacks(rerun)
         val p = pane ?: run { showMessage("Open a notebook page to analyse it."); return }
-        val eng = engine ?: return
+        val eng = editor.engine
         page = p.currentPage().coerceAtLeast(0)
         subtitle.text = "Page ${page + 1}"
         val recs = ArrayList(p.finishedView.pages.getOrNull(page)?.recs ?: return)
@@ -167,24 +163,14 @@ class AnalysisPanel(
         }
         p.finishedView.annotations = ann
         // Components (by record index).
-        val map = HashMap<Int, JSONObject>()
-        res.optJSONObject("comps")?.let { c -> c.keys().forEach { k -> k.toIntOrNull()?.let { map[it] = c.getJSONObject(k) } } }
-        comps = map; compRecs = recs
-        // Keep each symbol's drawn label in step with its values (not an undo step).
-        val live = p.finishedView.pages.getOrNull(pg)?.recs
-        for ((i, comp) in map) {
-            val rec = recs.getOrNull(i) ?: continue
-            if (live == null || !live.contains(rec)) continue
-            val want = comp.optString("label")
-            val props = rec.shape?.props
-            if (want != (props?.optString("_label") ?: "")) {
-                val np = JSONObject(props?.toString() ?: "{}")
-                if (want.isEmpty()) np.remove("_label") else np.put("_label", want)
-                p.updateShapeProps(pg, rec, np, undoable = false)
-            }
-        }
+        val map = AnalysisEditor.compsOf(res)
+        // Keep each symbol's drawn label (text + placement) in step with its values (not an undo
+        // step); swapped-in records replace their old ones in the list, so the indices stay valid.
+        val live = ArrayList(recs)
+        editor.reconcile(p, pg, live, map)
+        comps = map; compRecs = live
+        editor.remember(p, pg, live, map)   // so a tap on the page opens its sheet straight away
         render(res, pg)
-        pendingEdit?.let { (ePage, eRec) -> pendingEdit = null; if (ePage == pg) editSymbol(ePage, eRec) }
     }
 
     // ---------- chrome ----------
@@ -224,10 +210,7 @@ class AnalysisPanel(
     }
 
     /** "T_H" → T with a subscript H, as in the textbook. */
-    private fun rich(s: String): CharSequence {
-        val esc = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        return Html.fromHtml(esc.replace(Regex("_([A-Za-z0-9]+)"), "<sub><small>$1</small></sub>"), Html.FROM_HTML_MODE_LEGACY)
-    }
+    private fun rich(s: String): CharSequence = analysisRich(s)
 
     private fun showMessage(msg: String) {
         content.removeAllViews()
@@ -259,7 +242,7 @@ class AnalysisPanel(
                     textSize = 13.5f; setTextColor(onSurface); background = pill(AppTheme.elevated, 12)
                     setPadding(dp(12), dp(9), dp(12), dp(9))
                     layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { bottomMargin = dp(6) }
-                    setOnClickListener { editSymbol(pg, rec) }
+                    setOnClickListener { pane?.let { pp -> editor.edit(pp, pg, rec) } }
                 })
             }
         }
@@ -319,99 +302,6 @@ class AnalysisPanel(
                 content.addView(XYPlotView(act, b), LinearLayout.LayoutParams(MATCH_PARENT, dp(230)).apply { bottomMargin = dp(6) })
             }
         }
-    }
-
-    // ---------- value sheet ----------
-    private fun editSymbol(pg: Int, rec: FinishedStrokesView.Rec) {
-        val p = pane ?: return
-        val i = compRecs.indexOf(rec).takeIf { it >= 0 } ?: p.finishedView.pages.getOrNull(pg)?.recs?.indexOf(rec) ?: -1
-        val comp = comps[i]
-        if (comp == null || compRecs.getOrNull(i) !== rec) { pendingEdit = pg to rec; runNow(); return }
-        val fields = comp.optJSONArray("fields") ?: JSONArray()
-        if (fields.length() == 0) return
-        closeEditor()
-        val props = JSONObject(rec.shape?.props?.toString() ?: "{}")
-        val inputs = LinkedHashMap<String, () -> String>()
-        val card = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(AppTheme.surface) }
-            elevation = dp(20).toFloat()
-            setPadding(dp(18), dp(16), dp(18), dp(14))
-            isClickable = true
-        }
-        card.addView(TextView(act).apply { text = rich(comp.optString("title").ifEmpty { comp.optString("name") }); textSize = 16f; setTypeface(null, Typeface.BOLD); setTextColor(onSurface) })
-        if (comp.optString("name").isNotEmpty() && comp.optString("name") != comp.optString("title")) card.addView(TextView(act).apply { text = comp.optString("name"); textSize = 12f; setTextColor(muted) })
-        val form = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(8), 0, dp(8)) }
-        for (k in 0 until fields.length()) {
-            val f = fields.getJSONObject(k)
-            val key = f.optString("key")
-            val unit = f.optString("unit")
-            form.addView(TextView(act).apply { text = rich(f.optString("label") + if (unit.isNotEmpty() && f.optJSONArray("options") == null) "  ($unit)" else ""); textSize = 12.5f; setTextColor(muted); setPadding(0, dp(8), 0, dp(4)) })
-            val opts = f.optJSONArray("options")
-            if (opts != null) {
-                var chosen = props.optString(key).ifEmpty { f.optString("value") }.ifEmpty { f.optString("ph") }
-                val row = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
-                val chips = ArrayList<TextView>()
-                fun paint() { for (c in chips) { val on = c.tag == chosen; c.background = pill(if (on) AppTheme.accent else AppTheme.elevated); c.setTextColor(if (on) AppTheme.onAccent() else onSurface) } }
-                for (o in 0 until opts.length()) {
-                    val v = opts.optString(o)
-                    chips.add(TextView(act).apply {
-                        text = v; tag = v; textSize = 13f; gravity = Gravity.CENTER; setPadding(dp(12), dp(7), dp(12), dp(7))
-                        layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { rightMargin = dp(6) }
-                        setOnClickListener { chosen = v; paint() }
-                    })
-                }
-                chips.forEach { row.addView(it) }; paint()
-                form.addView(HorizontalScrollView(act).apply { isHorizontalScrollBarEnabled = false; addView(row) })
-                inputs[key] = { chosen }
-            } else {
-                val et = EditText(act).apply {
-                    setText(props.optString(key)); hint = f.optString("ph"); textSize = 15f
-                    setTextColor(onSurface); setHintTextColor(muted); isSingleLine = true
-                    inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(AppTheme.elevated) }
-                    setPadding(dp(12), dp(9), dp(12), dp(9))
-                }
-                form.addView(et)
-                f.optString("hint").takeIf { it.isNotEmpty() }?.let { h -> form.addView(TextView(act).apply { text = rich(h); textSize = 11f; setTextColor(muted); setPadding(dp(4), dp(2), 0, 0) }) }
-                inputs[key] = { et.text.toString().trim() }
-            }
-        }
-        card.addView(ScrollView(act).apply { addView(form) }, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-        card.addView(LinearLayout(act).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
-            addView(TextView(act).apply {
-                text = "Cancel"; textSize = 14f; setTextColor(onSurface); background = pill(AppTheme.elevated, 14); setPadding(dp(16), dp(10), dp(16), dp(10))
-                setOnClickListener { closeEditor() }
-            })
-            addView(TextView(act).apply {
-                text = "Save"; textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(AppTheme.onAccent()); background = pill(AppTheme.accent, 14)
-                setPadding(dp(18), dp(10), dp(18), dp(10))
-                layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply { leftMargin = dp(8) }
-                setOnClickListener {
-                    for ((key, read) in inputs) { val v = read(); if (v.isEmpty()) props.remove(key) else props.put(key, v) }
-                    closeEditor()
-                    p.updateShapeProps(pg, rec, props, undoable = true)
-                }
-            })
-        })
-        val scrim = FrameLayout(act).apply {
-            setBackgroundColor(Color.argb(0x55, 0, 0, 0))
-            isClickable = true
-            setOnClickListener { closeEditor() }
-            addView(card, FrameLayout.LayoutParams(minOf(dp(380), (act.resources.displayMetrics.widthPixels * 0.9f).toInt()), WRAP_CONTENT, Gravity.CENTER).apply {
-                topMargin = dp(40); bottomMargin = dp(40)
-            })
-        }
-        host.addView(scrim, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
-        editor = scrim
-    }
-
-    private fun closeEditor() {
-        val e = editor ?: return
-        (act.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.hideSoftInputFromWindow(e.windowToken, 0)
-        host.removeView(e)
-        editor = null
     }
 
     /**

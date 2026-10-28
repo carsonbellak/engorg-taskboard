@@ -20,8 +20,14 @@ Reads the class symbols on the focused page and the wires joining them — deter
 no AI — and draws the results onto the page. Circuits: node voltages, part currents, meter
 readings, AC phasors. Thermo: pump/turbine/compressor/heat-exchanger/valve loops are recognised as
 Rankine (± reheat), Brayton or vapor-compression cycles with Moran-numbered states; heat engine /
-refrigerator symbols get the second-law (Carnot / σ_cycle) check. Tap a symbol to enter its values
-(saved with the symbol as `pr` in the page JSON and labelled beside it).
+refrigerator symbols — or hot / cold reservoir symbols linked by a line — get the second-law
+(Carnot / σ_cycle) check. Mechanics: trusses (member forces T/C, reactions for pin / roller / rocker /
+fixed / collar / slot supports), beams and frames (V and M diagrams), ropes and pulleys (Atwood,
+incline, block and tackle), masses and buoyancy in a water tank. V1+/V1− probes read the voltage
+across any part. Tap a symbol (select tool) any time to enter its values on the keypad
+(`ValueSheet.kt`, driven by `AnalysisEditor.kt`); values are saved with the symbol as `pr` in the
+page JSON, and the label is placed by the analysis to avoid wires and other labels (`_lx/_ly/_la`).
+- Mechanics: `assets/analysis/ink-mechanics.js` (called from `ink-analysis.js`).
 - Logic: `app/src/main/assets/analysis/ink-analysis.js`, run in a headless WebView (`AnalysisHost.kt`).
 - Solvers: the desktop's `renderer/circuit-engine.js` + `renderer/thermo-engine.js`, copied into the
   APK at build time by the `copyAnalysisEngines` Gradle task (one tested source for both apps).
