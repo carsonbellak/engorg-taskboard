@@ -12097,6 +12097,96 @@ body.theme-light .syn-builtin { color: #059669; }
 .td-drc-current, .td-drc-width { color: var(--warning, #f59e0b); }
 
 /* ============================================================
+   THERMO LAB (.tl-*; reuses the .clab-* chrome from Circuit Lab)
+   ============================================================ */
+#view-thermo-lab { display: flex; flex-direction: column; min-height: 0; }
+.tl-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tl-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+  border: var(--border-width, 1px) solid transparent; background: transparent; color: var(--text-secondary); font-size: 13px; font-weight: 600;
+}
+.tl-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.tl-tab.active { border-color: var(--util-color, var(--accent)); background: color-mix(in srgb, var(--util-color, var(--accent)) 14%, transparent); color: var(--text-primary); }
+.tl-main { display: flex; gap: 10px; flex: 1; min-height: 0; }
+.tl-form {
+  width: 290px; flex-shrink: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
+  border-radius: 10px; border: var(--border-width, 1px) solid var(--border-color); background: var(--bg-secondary);
+}
+.tl-out { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+.tl-group { display: flex; flex-direction: column; gap: 7px; }
+.tl-group + .tl-group { padding-top: 9px; border-top: var(--border-width, 1px) solid var(--border-color); }
+.tl-group-title { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); display: flex; justify-content: space-between; gap: 6px; }
+.tl-group-title span { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.tl-inp { display: flex; align-items: center; gap: 6px; }
+.tl-inp .kicad-input { flex: 1; min-width: 0; }
+.tl-inp b { font-size: 11px; font-weight: 600; color: var(--text-muted); min-width: 34px; }
+.tl-bad { border-color: var(--danger, #ef4444) !important; }
+.tl-card { border-radius: 10px; border: var(--border-width, 1px) solid var(--border-color); background: var(--bg-secondary); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tl-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--text-primary); }
+.tl-card-head span { font-size: 11px; color: var(--text-muted); }
+.tl-split { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: center; }
+.tl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tl-cards > div { padding: 8px 10px; border-radius: 9px; background: var(--bg-secondary); border: var(--border-width, 1px) solid var(--border-color); display: flex; flex-direction: column; gap: 2px; }
+.tl-cards span { font-size: 11px; color: var(--text-muted); min-height: 1em; }
+.tl-cards b { font-size: 15px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.tl-verdict { padding: 9px 12px; border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--text-primary); border-left: 4px solid; }
+.tl-v-ok { background: color-mix(in srgb, var(--success, #22c55e) 14%, transparent); border-color: var(--success, #22c55e); }
+.tl-v-rev { background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent); border-color: var(--accent, #3b82f6); }
+.tl-v-bad { background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent); border-color: var(--danger, #ef4444); }
+.tl-formula { font-family: ui-monospace, monospace; font-size: 11.5px; line-height: 1.6; }
+.tl-seg { display: inline-flex; border: 1px solid var(--border-color); border-radius: 7px; overflow: hidden; }
+.tl-seg button { padding: 3px 10px; font-size: 12px; background: transparent; border: 0; color: var(--text-secondary); cursor: pointer; }
+.tl-seg button.active { background: color-mix(in srgb, var(--util-color, var(--accent)) 20%, transparent); color: var(--text-primary); }
+.tl-table td, .tl-table th { text-align: right; }
+.tl-table td:first-child, .tl-table th:first-child, .tl-table td:last-child, .tl-table th:last-child { text-align: left; }
+.tl-table em { color: var(--text-muted); font-style: normal; }
+.tl-ideal td { color: var(--text-muted) !important; font-style: italic; }
+.tl-table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; }
+.tl-table-wrap th { position: sticky; top: 0; background: var(--bg-secondary); }
+
+/* reservoir diagram + max-performance curve */
+.tl-res-svg { width: 420px; max-width: 100%; height: auto; }
+.tl-curve { width: 300px; max-width: 100%; height: auto; }
+.tl-res-hot { fill: color-mix(in srgb, #ef4444 26%, var(--bg-secondary)); stroke: #ef4444; stroke-width: 1.2; }
+.tl-res-cold { fill: color-mix(in srgb, #3b82f6 26%, var(--bg-secondary)); stroke: #3b82f6; stroke-width: 1.2; }
+.tl-res-title { font-size: 13px; font-weight: 700; fill: var(--text-primary); }
+.tl-res-sub { font-size: 12px; fill: var(--text-secondary); }
+.tl-res-dev { fill: var(--bg-primary, var(--bg-input)); stroke: var(--util-color, var(--accent)); stroke-width: 2; }
+.tl-res-dev-t { font-size: 12px; font-weight: 700; fill: var(--text-primary); }
+.tl-res-lbl { font-size: 12px; font-weight: 600; fill: var(--text-primary); }
+.tl-arrow { stroke-linecap: butt; opacity: .85; }
+.tl-arrow.hot { stroke: #ef4444; } .tl-arrowhead.hot { fill: #ef4444; }
+.tl-arrow.cold { stroke: #3b82f6; } .tl-arrowhead.cold { fill: #3b82f6; }
+.tl-arrow.work { stroke: var(--util-color, #f59e0b); } .tl-arrowhead.work { fill: var(--util-color, #f59e0b); }
+.tl-curve-line { fill: none; stroke: var(--text-primary); stroke-width: 1.8; }
+.tl-curve-max { fill: var(--text-primary); }
+.tl-curve-pt { stroke: var(--bg-secondary); stroke-width: 1.5; }
+.tl-curve-pt.ok { fill: var(--success, #22c55e); } .tl-curve-pt.rev { fill: var(--accent, #3b82f6); } .tl-curve-pt.bad { fill: var(--danger, #ef4444); }
+.tl-curve-guide { stroke: var(--text-muted); stroke-dasharray: 3 3; }
+
+/* T-s / p-v diagrams */
+.tl-diagram { width: 100%; height: auto; max-height: 420px; }
+.tl-grid { stroke: var(--border-color); stroke-width: .6; opacity: .7; }
+.tl-tick { font-size: 10.5px; fill: var(--text-muted); font-variant-numeric: tabular-nums; }
+.tl-axis { font-size: 12px; font-weight: 600; fill: var(--text-secondary); }
+.tl-dome { fill: color-mix(in srgb, var(--text-muted) 9%, transparent); stroke: var(--text-muted); stroke-width: 1.4; }
+.tl-crit { fill: var(--text-muted); }
+.tl-isobar { fill: none; stroke: var(--util-color, var(--accent)); stroke-width: 1.2; stroke-dasharray: 5 3; opacity: .8; }
+.tl-proc { fill: none; stroke: var(--text-primary); stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.tl-proc.heat { stroke: #ef4444; } .tl-proc.reject { stroke: #3b82f6; } .tl-proc.regen { stroke: #a855f7; }
+.tl-proc.throttle { stroke: #f59e0b; } .tl-proc.dashed { stroke-dasharray: 6 4; }
+.tl-isen { stroke: var(--text-muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.tl-pt { fill: var(--util-color, var(--accent)); stroke: var(--bg-secondary); stroke-width: 1.5; }
+.tl-pt.big { stroke-width: 2; }
+.tl-pt-ideal { fill: var(--bg-secondary); stroke: var(--text-muted); stroke-width: 1.2; }
+.tl-pt-lbl { font-size: 12px; font-weight: 700; fill: var(--text-primary); }
+.tl-pt-lbl.ideal { font-weight: 500; fill: var(--text-muted); font-size: 11px; }
+.tl-resline { stroke-width: 1.2; stroke-dasharray: 8 4; }
+.tl-resline.hot { stroke: #ef4444; } .tl-resline.cold { stroke: #3b82f6; }
+.tl-reslbl { font-size: 11px; font-weight: 600; }
+.tl-reslbl.hot { fill: #ef4444; } .tl-reslbl.cold { fill: #3b82f6; }
+
+/* ============================================================
    KICAD IMPORTER
    ============================================================ */
 .kicad-importer { display: flex; gap: 16px; padding: 16px; height: 100%; box-sizing: border-box; }

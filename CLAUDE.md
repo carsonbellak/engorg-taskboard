@@ -96,7 +96,7 @@ Desktop-only (no PWA mirror): Electron main, IPC, OS/file/printer/slicer/serial 
 **`renderer/`** — globals loaded by `<script>` tags in `index.html` (order matters, no imports). Details: `renderer/CLAUDE.md`.
 Core: `app.js` (root, tabs, sync loops) · `data.js` (`dataManager`) · `firebase-sync.js` · `taskboard.js` (`viewRenderer`) · `components/add-note-modal.js` (`ModalManager` — owns **all** modals) · `settings.js` (popup modal) · `titlebar.js` · `window-split.js`.
 Views/features: `ecosystem.js` · `noteboard.js` · `timers.js` · `email.js` · `purchasing.js` · `stats.js` · `file-viewer.js` · `briefings.js` · `syllabus-import.js` · `print-tracker.js` · `share.js` (Share utility, also runs the app-wide inbox listener) · `onboarding.js` + `tour.js` · `spellcheck.js` · `theme-fx.js` · `updates.js`.
-Engineering utilities (desktop-only): `engineering.js` (registry) · `circuit-engine.js` + `circuit-sim.js` (Circuit Lab) · `trace-designer.js` · `printer.js` · `slicer.js` · `cad-viewer.js` · `kicad-importer.js` · `git-manager.js` · `uart-bridge.js` · `wifi-checker.js` · `engink-mirror.js` · `file-merger.js`.
+Engineering utilities (desktop-only): `engineering.js` (registry) · `circuit-engine.js` + `circuit-sim.js` (Circuit Lab) · `trace-designer.js` · `thermo-engine.js` + `thermo-lab.js` (Thermo Lab) · `printer.js` · `slicer.js` · `cad-viewer.js` · `kicad-importer.js` · `git-manager.js` · `uart-bridge.js` · `wifi-checker.js` · `engink-mirror.js` · `file-merger.js`.
 
 **`pwa/`** — `app.js` (whole app), `styles.css`, `tour.js`, `sw.js`, `index.html`. Details: `pwa/CLAUDE.md`.
 

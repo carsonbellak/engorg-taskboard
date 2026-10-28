@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.1': {
+      title: "What's new",
+      intro: 'Thermo Lab for Thermodynamics I.',
+      slides: [
+        { emoji: '🔥', title: 'Reservoirs & limits', body: 'Engineering Utilities → Thermo Lab. Pick a power cycle, refrigerator or heat pump between T_H and T_C and enter any two of Q_H, Q_C, W and the efficiency or COP. It fills in the rest, compares you to the Carnot limit, computes σ_cycle and says whether the cycle is possible, reversible or impossible.' },
+        { emoji: '♻️', title: 'Cycles', body: 'Rankine (with reheat), Brayton (with regeneration), Otto, Diesel and vapor-compression refrigeration and heat pumps. Each gives the state table, q and w per process, efficiency or COP, mass flow and a T-s diagram with the reservoir temperatures drawn in. The Examples menu loads Moran & Shapiro problems.' },
+        { emoji: '📋', title: 'Devices & tables', body: 'Turbines, compressors, pumps, nozzles, diffusers, throttles and heat exchangers with isentropic efficiency and entropy generation. The Property tables tab gives any state of water, R-134a or air from two properties, and makes saturation and superheated tables.' },
+      ],
+    },
     '1.6.0': {
       title: "What's new",
       intro: 'Design, simulate and route circuits.',

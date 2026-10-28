@@ -101,6 +101,14 @@ const engineeringUtilities = (() => {
       activate() { traceDesigner.mount(document.getElementById('view-trace-designer')); traceDesigner.activate(); },
       deactivate() { traceDesigner.deactivate(); },
     },
+    'thermo-lab': {
+      id: 'thermo-lab', name: 'Thermo Lab', icon: '🔥',
+      color: '#EF4444', tagline: 'Reservoirs, power and refrigeration cycles, devices and property tables.',
+      description: 'Thermodynamics I companion (Moran & Shapiro style): heat engines, refrigerators and heat pumps between hot and cold reservoirs with Carnot limits and σ_cycle; Rankine, Brayton, Otto, Diesel and vapor-compression cycles with T-s diagrams; turbines, compressors, nozzles and throttles; steam, R-134a and air tables.',
+      paneId: 'eng-util-thermo-lab',
+      activate() { thermoLab.mount(document.getElementById('view-thermo-lab')); thermoLab.activate(); },
+      deactivate() { thermoLab.deactivate(); },
+    },
     share: {
       id: 'share', name: 'Share', icon: '📤',
       color: '#3B82F6', tagline: 'Links, notes and files between your devices.',
@@ -111,7 +119,7 @@ const engineeringUtilities = (() => {
       deactivate() { shareView.deactivate(); },
     },
   };
-  const BUILTIN_ORDER = ['share', 'printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger', 'handwriter', 'circuit-lab', 'trace-designer'];
+  const BUILTIN_ORDER = ['share', 'printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger', 'handwriter', 'circuit-lab', 'trace-designer', 'thermo-lab'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {
@@ -131,6 +139,10 @@ const engineeringUtilities = (() => {
     if (!dataManager.settings.circuitUtilsSeeded) {
       list = [...list, ...['circuit-lab', 'trace-designer'].filter(id => !list.includes(id))];
       dataManager.updateSettings({ installedUtilities: list, circuitUtilsSeeded: true });
+    }
+    if (!dataManager.settings.thermoUtilSeeded) {
+      if (!list.includes('thermo-lab')) list = [...list, 'thermo-lab'];
+      dataManager.updateSettings({ installedUtilities: list, thermoUtilSeeded: true });
     }
     return list;
   }
