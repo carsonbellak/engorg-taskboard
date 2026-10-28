@@ -62,6 +62,11 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** A SYMBOL's symbol, and (INLINE ones) its body size relative to standard — resizing scales it. */
     var symbol: Sym? = null
     var symScale = 1f
+    /**
+     * A SYMBOL's values for drawing analysis (AnalysisPanel): string fields such as "value" = "10k"
+     * or "p" = "8 MPa", plus "_label", the short text drawn beside the symbol. Null = none set.
+     */
+    var props: org.json.JSONObject? = null
 
     fun clone() = ShapeSpec(type, ArrayList(verts.map { PointF(it.x, it.y) }), dashed).also {
         it.hashed = hashed; it.rows = rows; it.cols = cols; it.border = border
@@ -70,6 +75,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
         it.graph = graph
         it.fillColor = fillColor
         it.symbol = symbol; it.symScale = symScale
+        it.props = props?.let { p -> org.json.JSONObject(p.toString()) }
     }
 
     /** An area painted under the outline: [polys] filled together in [color], outlined in [edge] (0 = no edge). */

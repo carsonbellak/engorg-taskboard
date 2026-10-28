@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.2': {
+      title: "What's new",
+      intro: 'EngInk can analyse your drawings.',
+      slides: [
+        { emoji: '📊', title: 'Analyze in EngInk', body: 'Draw a circuit or a thermo cycle with the class symbols, join them with lines, and tap the new bar-chart button. EngInk works out the connections from the drawing itself and writes the results on the page: node voltages, currents and meter readings, or the cycle\'s states, efficiency or COP.' },
+        { emoji: '🔥', title: 'Cycles & reservoirs', body: 'Pumps, turbines, compressors, heat exchangers and valves in a loop are recognised as Rankine, Brayton or refrigeration cycles, with Moran-numbered states and a T-s diagram. A heat engine or refrigerator symbol gets the Carnot / second-law check. Tap any symbol to enter its values.' },
+      ],
+    },
     '1.6.1': {
       title: "What's new",
       intro: 'Thermo Lab for Thermodynamics I.',

@@ -15,6 +15,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Typeface
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
@@ -52,6 +53,16 @@ class FinishedStrokesView(context: Context) : View(context) {
 
     /** A painted area of a shape (page-local path) and its outline color (0 = none). */
     class FillPath(val path: Path, val color: Int, val edge: Int = 0)
+
+    /**
+     * A drawing-analysis result pinned to a page point (page-local): a [CHIP] of text, or a round
+     * [BADGE] with a state number. Transient — never saved or exported (see AnalysisPanel).
+     */
+    class Annot(val page: Int, val x: Float, val y: Float, val text: String, val badge: Boolean, val tone: String)
+
+    /** Analysis results drawn over the pages; set by AnalysisPanel, cleared when it closes. */
+    var annotations: List<Annot> = emptyList()
+        set(v) { field = v; invalidate() }
 
     /** [bgFile] is an optional baked background image under the ink (an imported PDF page). */
     class Page(val recs: ArrayList<Rec> = ArrayList(), val bgFile: File? = null) {
@@ -503,6 +514,7 @@ class FinishedStrokesView(context: Context) : View(context) {
                     strokePaint.strokeCap = Paint.Cap.ROUND
                     for (p in rec.fine) canvas.drawPath(p, strokePaint)
                 }
+                if (rec.shape.type == ShapeType.SYMBOL) drawSymbolLabel(canvas, rec)
             } else {
                 strokePaint.pathEffect = null
                 drawInk(canvas, rec.points, rec.paths.firstOrNull(), rec.color, rec.widthPx, rec.brush, rec.highlighter, strokePaint)
@@ -529,11 +541,80 @@ class FinishedStrokesView(context: Context) : View(context) {
             drawPaper(canvas, l, t, scale)
             canvas.concat(pageMatrix(i))
             drawRecs(canvas, pages[i])
+            if (annotations.isNotEmpty()) drawAnnots(canvas, i)
             canvas.restoreToCount(save)
             canvas.drawRect(l, t, r, b, borderPaint)
         }
         drawAddTile(canvas, vh)
         drawOverlay(canvas)
+    }
+
+    // ---------- drawing analysis: value labels + result overlay ----------
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+    private val annotText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+    private val annotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val annotRect = RectF()
+
+    /**
+     * A symbol's value label ("10 kΩ", "8 MPa") in its own ink color: above a horizontal inline part,
+     * right of a vertical one (ink-analysis.js puts its result chips on the opposite side), and under
+     * a box symbol. Part of the page, so it prints and exports.
+     */
+    private fun drawSymbolLabel(canvas: Canvas, rec: Rec) {
+        val sp = rec.shape ?: return
+        val sym = sp.symbol ?: return
+        val label = sp.props?.optString("_label").orEmpty()
+        if (label.isEmpty()) return
+        labelPaint.color = Color.argb(0xFF, Color.red(rec.color), Color.green(rec.color), Color.blue(rec.color))
+        if (sym.kind == SymKind.INLINE) {
+            val h = sp.handles; if (h.size < 2) return
+            val a = h[0]; val b = h[1]
+            val len = kotlin.math.hypot(b.x - a.x, b.y - a.y).coerceAtLeast(1e-3f)
+            val ux = (b.x - a.x) / len; val uy = (b.y - a.y) / len
+            var nx = -uy; var ny = ux
+            if (!(ny < -0.3f || (kotlin.math.abs(ny) <= 0.3f && nx > 0f))) { nx = -nx; ny = -ny }
+            val kk = kotlin.math.min(sp.symScale, len / sym.w).coerceAtLeast(0.05f)
+            val off = sym.h * kk / 2f + 8f
+            val cx = (a.x + b.x) / 2f + nx * off; val cy = (a.y + b.y) / 2f + ny * off
+            if (kotlin.math.abs(nx) > 0.7f) { labelPaint.textAlign = Paint.Align.LEFT; canvas.drawText(label, cx, cy + 4f, labelPaint) }
+            else { labelPaint.textAlign = Paint.Align.CENTER; canvas.drawText(label, cx, cy + (if (ny < 0f) 0f else 9f), labelPaint) }
+        } else {
+            var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
+            for (p in rec.points) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y }
+            if (minX > maxX) return
+            labelPaint.textAlign = Paint.Align.CENTER
+            canvas.drawText(label, (minX + maxX) / 2f, maxY + 13f, labelPaint)
+        }
+    }
+
+    private fun toneColor(tone: String): Int = when (tone) {
+        "v" -> Color.rgb(0x25, 0x63, 0xEB)
+        "i" -> Color.rgb(0xD9, 0x77, 0x06)
+        "meter", "ok" -> Color.rgb(0x05, 0x96, 0x69)
+        "hot", "warn" -> Color.rgb(0xDC, 0x26, 0x26)
+        "cold" -> Color.rgb(0x02, 0x84, 0xC7)
+        else -> Color.rgb(0x7C, 0x3A, 0xED)   // "state"
+    }
+
+    private fun drawAnnots(canvas: Canvas, page: Int) {
+        for (a in annotations) {
+            if (a.page != page) continue
+            val c = toneColor(a.tone)
+            if (a.badge) {
+                annotFill.color = c
+                canvas.drawCircle(a.x, a.y, 9f, annotFill)
+                annotText.color = Color.WHITE; annotText.textAlign = Paint.Align.CENTER; annotText.textSize = 11f
+                canvas.drawText(a.text, a.x, a.y + 4f, annotText)
+            } else {
+                annotText.textSize = 10f; annotText.textAlign = Paint.Align.CENTER
+                val w = annotText.measureText(a.text) + 10f
+                annotRect.set(a.x - w / 2f, a.y - 8f, a.x + w / 2f, a.y + 7f)
+                annotFill.color = Color.argb(0xEE, Color.red(c), Color.green(c), Color.blue(c))
+                canvas.drawRoundRect(annotRect, 5f, 5f, annotFill)
+                annotText.color = Color.WHITE
+                canvas.drawText(a.text, a.x, a.y + 3.5f, annotText)
+            }
+        }
     }
 
     /** Renders one page (page color + background image + paper + strokes) at [s] scale, origin (0,0) — used for PDF export. */

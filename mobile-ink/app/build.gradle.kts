@@ -63,7 +63,20 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // Drawing analysis runs the desktop's own verified solvers (renderer/circuit-engine.js and
+    // renderer/thermo-engine.js) in a headless WebView, so both apps compute identical numbers.
+    // They're copied in at build time (task below) instead of duplicated into the source tree.
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/engineAssets"))
 }
+
+val copyAnalysisEngines by tasks.registering(Copy::class) {
+    from(rootProject.file("../renderer")) {
+        include("circuit-engine.js", "thermo-engine.js")
+    }
+    into(layout.buildDirectory.dir("generated/engineAssets/analysis"))
+}
+tasks.named("preBuild") { dependsOn(copyAnalysisEngines) }
 
 dependencies {
     // Jetpack Ink — Google's low-latency stylus library (front-buffered rendering).

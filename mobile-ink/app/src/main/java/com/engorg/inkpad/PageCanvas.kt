@@ -91,6 +91,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
     var mirror: MirrorSink? = null
 
+    /** Called (UI thread) whenever a page's content is about to be saved — i.e. after any edit. */
+    var onEdited: ((page: Int) -> Unit)? = null
+    /** While drawing analysis is open: a tap on a class symbol goes here; return true to consume it. */
+    var symbolTap: ((page: Int, rec: FinishedStrokesView.Rec) -> Boolean)? = null
+
     val finishedView = FinishedStrokesView(context).apply {
         backdrop = AppTheme.bg; accent = AppTheme.accent; textColor = AppTheme.text; menuBg = AppTheme.elevated
     }
@@ -1081,7 +1086,28 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             if (!preLassoHadUi && clipboard.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y)
             return
         }
+        if (picked.shape?.type == ShapeType.SYMBOL && symbolTap?.invoke(h.page, picked) == true) { clearSelection(); return }
         selRecs.clear(); selRecs.add(picked); selPage = h.page; selBox = recBounds(selRecs); refreshSelectionOverlay()
+    }
+
+    /**
+     * Replace a symbol's analysis values ([ShapeSpec.props]) with [props]. [undoable] edits (the user
+     * changing a value) go on the undo stack; derived ones (refreshing the drawn label) don't.
+     * Returns the new record (records are immutable, so the old one is swapped out).
+     */
+    fun updateShapeProps(page: Int, rec: FinishedStrokesView.Rec, props: org.json.JSONObject?, undoable: Boolean): FinishedStrokesView.Rec? {
+        val recs = finishedView.pages.getOrNull(page)?.recs ?: return null
+        val i = recs.indexOf(rec)
+        val shape = rec.shape
+        if (i < 0 || shape == null) return null
+        if (undoable) { undoPushedThisGesture = false; pushUndo(); undoPushedThisGesture = false }
+        val spec = shape.clone().also { it.props = props?.takeIf { p -> p.length() > 0 } }
+        val fresh = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
+        recs[i] = fresh
+        finishedView.invalidate()
+        savePage(page)
+        mirror?.pageEdited(this, page)
+        return fresh
     }
 
     private fun toLocalOn(sx: Float, sy: Float, page: Int): PointF {
@@ -1542,6 +1568,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 rec.shape.graph?.let { o.put("g", it.toJson()) }
                 if (rec.shape.fillColor != 0) o.put("fc", rec.shape.fillColor)
                 rec.shape.symbol?.let { o.put("sy", it.name); if (rec.shape.symScale != 1f) o.put("ss", rec.shape.symScale.toDouble()) }
+                rec.shape.props?.takeIf { it.length() > 0 }?.let { o.put("pr", it) }
                 rec.shape.solid?.fill?.takeIf { !it.isEmpty }?.let { o.put("sf", it.toJson()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
                 o.put("v", va)
@@ -1559,6 +1586,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     /** Queue a page write on the background writer, coalescing bursts to the newest snapshot. */
     private fun savePage(index: Int) {
         if (index < 0 || index >= notebook.pageIds.size) return
+        onEdited?.invoke(index)
         val pageId = notebook.pageIds[index]
         // Snapshot the rec list on the UI thread (a reference copy — recs are immutable once made),
         // so the writer thread never reads a list that a later stroke is mutating.
@@ -1630,6 +1658,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                         if (type == ShapeType.SYMBOL) {
                             symbol = runCatching { Sym.valueOf(o.optString("sy")) }.getOrNull()
                             symScale = o.optDouble("ss", 1.0).toFloat().coerceIn(0.2f, 20f)
+                            props = o.optJSONObject("pr")
                         }
                     }
                     if (spec.type == ShapeType.SOLID && spec.solid == null) continue

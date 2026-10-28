@@ -15,6 +15,18 @@ A thin native Android shell. It is **not** a second codebase:
 - **S Pen side button** (or an eraser-tip pen) erases whole strokes under the tip.
 - Toolbar: back to app, ink/blue/red, size −/+, clear.
 
+## Drawing analysis (Analyze button, bar-chart icon)
+Reads the class symbols on the focused page and the wires joining them — deterministic geometry,
+no AI — and draws the results onto the page. Circuits: node voltages, part currents, meter
+readings, AC phasors. Thermo: pump/turbine/compressor/heat-exchanger/valve loops are recognised as
+Rankine (± reheat), Brayton or vapor-compression cycles with Moran-numbered states; heat engine /
+refrigerator symbols get the second-law (Carnot / σ_cycle) check. Tap a symbol to enter its values
+(saved with the symbol as `pr` in the page JSON and labelled beside it).
+- Logic: `app/src/main/assets/analysis/ink-analysis.js`, run in a headless WebView (`AnalysisHost.kt`).
+- Solvers: the desktop's `renderer/circuit-engine.js` + `renderer/thermo-engine.js`, copied into the
+  APK at build time by the `copyAnalysisEngines` Gradle task (one tested source for both apps).
+- UI: `AnalysisPanel.kt` (panel, value sheet, T-s plot); labels + overlay in `FinishedStrokesView.kt`.
+
 > Sign-in note: Google blocks its OAuth flow inside raw WebViews, so **sign in with
 > email/password** in the app. The PWA supports that already.
 

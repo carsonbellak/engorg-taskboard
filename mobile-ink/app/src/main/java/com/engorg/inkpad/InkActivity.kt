@@ -81,6 +81,8 @@ class InkActivity : ComponentActivity() {
     private var claude: ClaudePanel? = null
     private var calcButton: ImageButton? = null
     private var calc: CalculatorWindow? = null
+    private var analysisButton: ImageButton? = null
+    private var analysis: AnalysisPanel? = null
     private lateinit var rootFrame: FrameLayout
 
     // Brush width in page units. The size slider maps GEOMETRICALLY across [minBrush, maxBrush] so
@@ -134,7 +136,7 @@ class InkActivity : ComponentActivity() {
             showSolidBuilder(params, "Apply", fill, view) { p, f -> onApply(p, f ?: fill) }
         override fun editFill(color: Int, onApply: (Int) -> Unit) = showFillDialog(color, onApply)
         override fun onPaneFocused(pane: PageCanvas) { setFocused(pane) }
-        override fun onPageChanged(pane: PageCanvas) { if (pane === focused) updatePageLabel() }
+        override fun onPageChanged(pane: PageCanvas) { if (pane === focused) { updatePageLabel(); analysis?.onPageChanged(pane) } }
         override fun onShapeCommitted() { clearPendingShape(); this@InkActivity.tool = Tool.SELECT; updateTools() }
         override fun pickColor(pane: PageCanvas, x: Float, y: Float, onPick: (Int) -> Unit) {
             val loc = IntArray(2); pane.getLocationInWindow(loc)
@@ -213,6 +215,7 @@ class InkActivity : ComponentActivity() {
 
     override fun onDestroy() {
         claude?.dispose()
+        analysis?.dispose()
         MirrorManager.onState = null
         MirrorManager.bind(null)   // keep the socket alive but stop feeding a destroyed pane
         panes.forEach { it.dispose() }   // flush + stop each pane's background writer
@@ -232,6 +235,7 @@ class InkActivity : ComponentActivity() {
         panes.forEach { it.setFocusedVisual(multi && it === pane) }
         MirrorManager.bind(pane)   // stream the focused pane if a desktop mirror is connected
         updatePageLabel()
+        analysis?.onFocusChanged(pane)
     }
 
     // ---------- dynamic split panes (add/close/swap from within a notebook) ----------
@@ -644,6 +648,7 @@ class InkActivity : ComponentActivity() {
             addView(iconBtn(Icons.TABLE) { showTableMenu(it) }.also { tableButton = it })
             addView(iconBtn(Icons.GRAPH) { spawnGraph() }.also { graphButton = it })
             addView(iconBtn(Icons.CALC) { toggleCalculator() }.also { calcButton = it })
+            addView(iconBtn(Icons.ANALYZE) { toggleAnalysis() }.also { analysisButton = it })
             addView(sep())
             addView(colorButton)
             addView(iconBtn(Icons.SIZE) { showSizePopup(it) })
@@ -697,6 +702,29 @@ class InkActivity : ComponentActivity() {
         b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
     }
 
+    /**
+     * Open / close drawing analysis (circuits, thermo cycles, reservoirs) for the focused page. It
+     * docks where the Claude panel does, so one closes the other; opening it switches to the select
+     * tool so a tap on a symbol opens its values.
+     */
+    private fun toggleAnalysis() {
+        val a = analysis ?: AnalysisPanel(this, rootFrame, { focused }) {
+            if (claude?.isOpen == true) { claude?.close(); updateClaudeButton() }
+            clearPendingShape(); tool = Tool.SELECT
+            panes.forEach { it.onToolChanged() }
+            updateTools()
+        }.also { analysis = it; it.onClosed = { updateAnalysisButton() } }
+        a.toggle()
+        updateAnalysisButton()
+    }
+
+    private fun updateAnalysisButton() {
+        val b = analysisButton ?: return
+        val on = analysis?.isOpen == true
+        b.background = pill(if (on) accent else light)
+        b.setColorFilter(if (on) AppTheme.onAccent() else onSurface)
+    }
+
     /** Send the focused pane's page (or all inked pages) to the Claude app, beside EngInk. */
     private fun askInClaude(all: Boolean) {
         val pane = focused ?: return
@@ -706,6 +734,7 @@ class InkActivity : ComponentActivity() {
     /** Open / close the Claude feedback panel (scans the focused pane's page). */
     private fun toggleClaude() {
         val c = claude ?: ClaudePanel(this, rootFrame) { focused }.also { claude = it; it.onClosed = { updateClaudeButton() } }
+        if (!c.isOpen && analysis?.isOpen == true) { analysis?.close(); updateAnalysisButton() }
         c.toggle()
         updateClaudeButton()
     }

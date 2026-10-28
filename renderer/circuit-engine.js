@@ -466,6 +466,7 @@ const CircuitEngine = (() => {
     const firstV = sys.parts.find(q => q.type === 'V') || sys.parts.find(q => q.type === 'I');
     if (!firstV) return { error: 'AC sweep needs a voltage or current source.' };
     const freq = [], mag = {}, phase = {};
+    let cur = null;
     net.nodes.forEach(n => { mag[n] = []; phase[n] = []; });
     const { N, size } = sys;
     for (let k = 0; k < nF; k++) {
@@ -482,8 +483,9 @@ const CircuitEngine = (() => {
           case 'R': yG(a, b, 1 / q.R, 0); break;
           case 'C': yG(a, b, 0, w * q.C); break;
           case 'L': stampVsrc(Ar, br, a, b, q.br, 0); Ai[q.br][q.br] -= w * q.L; break;
-          case 'V': stampVsrc(Ar, br, a, b, q.br, acOf(q, firstV)); break;
-          case 'I': stampI(br, a, b, acOf(q, firstV)); break;
+          // Optional p.acPhase (degrees) puts a source at an angle — several sources at one frequency.
+          case 'V': { const m = acOf(q, firstV), ph = (parseSI(q.p.acPhase) || 0) * Math.PI / 180; stampVsrc(Ar, br, a, b, q.br, m * Math.cos(ph)); bi[q.br] += m * Math.sin(ph); break; }
+          case 'I': { const m = acOf(q, firstV), ph = (parseSI(q.p.acPhase) || 0) * Math.PI / 180; stampI(br, a, b, m * Math.cos(ph)); stampI(bi, a, b, m * Math.sin(ph)); break; }
           case 'D': case 'LED': {
             const vd = op.vj[q.id] != null ? op.vj[q.id] : vAt(op.x, a) - vAt(op.x, b);
             const { gd } = diodeEval(q, vd);
@@ -508,6 +510,27 @@ const CircuitEngine = (() => {
       const s = solveComplex(Ar, Ai, br, bi);
       if (!s) return { error: `AC sweep: singular matrix at ${fmtSI(f, 'Hz')}` };
       freq.push(f);
+      if (opts.currents) {
+        // Phasor current through each part (into pin 0) — branch unknowns where the MNA has them.
+        const V = (n) => (n > 0 ? [s.re[n - 1], s.im[n - 1]] : [0, 0]);
+        const row = {};
+        for (const q of sys.parts) {
+          const [va, vb] = [V(q.n[0]), V(q.n[1])], dv = [va[0] - vb[0], va[1] - vb[1]];
+          let c = null;
+          if (q.type === 'R') c = [dv[0] / q.R, dv[1] / q.R];
+          else if (q.type === 'C') c = [-w * q.C * dv[1], w * q.C * dv[0]];
+          else if (q.type === 'L' || q.type === 'V') c = [s.re[q.br], s.im[q.br]];
+          else if (q.type === 'OA') c = [-s.re[q.br], -s.im[q.br]];
+          else if (q.type === 'I') { const m = acOf(q, firstV), ph = (parseSI(q.p.acPhase) || 0) * Math.PI / 180; c = [m * Math.cos(ph), m * Math.sin(ph)]; }
+          else if (q.type === 'D' || q.type === 'LED') {
+            const vd = op.vj[q.id] != null ? op.vj[q.id] : vAt(op.x, q.n[0]) - vAt(op.x, q.n[1]);
+            const { gd } = diodeEval(q, vd), g = gd / (1 + gd * q.dp.rs);
+            c = [g * dv[0], g * dv[1]];
+          }
+          if (c) row[q.id] = c;
+        }
+        (cur = cur || []).push(row);
+      }
       net.nodes.forEach((n, i) => {
         const re = i > 0 ? s.re[i - 1] : 0, im = i > 0 ? s.im[i - 1] : 0;
         mag[n].push(Math.hypot(re, im));
@@ -522,7 +545,7 @@ const CircuitEngine = (() => {
         while (ph[i] - ph[i - 1] < -180) ph[i] += 360;
       }
     }
-    return { freq, mag, phase, source: (sys.parts.find(q => acOf(q, firstV) > 0) || {}).ref };
+    return { freq, mag, phase, cur, source: (sys.parts.find(q => acOf(q, firstV) > 0) || {}).ref };
   }
 
   // Thevenin equivalent seen between nodes a and b (small-signal at the DC OP):

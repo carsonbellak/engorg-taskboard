@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<!-- Headless host for EngInk's drawing analysis (AnalysisHost.kt). circuit-engine.js and
+     thermo-engine.js are copied here from the desktop's renderer/ at build time. -->
+<script src="circuit-engine.js"></script>
+<script src="thermo-engine.js"></script>
+<script src="ink-analysis.js"></script>
+<script>
+  // Kotlin calls EI.run(pageJson) through evaluateJavascript; the result comes back as a JSON string.
+  window.EI = {
+    run(json) {
+      try { return JSON.stringify(InkAnalysis.analyze(JSON.parse(json))); }
+      catch (e) { return JSON.stringify({ analyses: [{ title: 'Analysis failed', blocks: [{ t: 'err', text: String(e && e.message || e) }] }], annots: [], comps: {} }); }
+    },
+    ready: typeof InkAnalysis !== 'undefined' && typeof CircuitEngine !== 'undefined' && typeof ThermoEngine !== 'undefined',
+  };
+</script>
+</head><body></body></html>
