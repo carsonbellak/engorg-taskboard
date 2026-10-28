@@ -329,6 +329,13 @@ const __api = {
   handwriter: {
     save: (bytes, defaultName) => ipcRenderer.invoke('handwriter:save', bytes, defaultName),
   },
+  // Circuit Lab + Trace Designer — simulation, routing and Gerber writing run in the renderer;
+  // main only does the dialogs: save/open one text file, or write a Gerber set into a folder.
+  circuitLab: {
+    saveText: (text, defaultName) => ipcRenderer.invoke('circuitLab:saveText', text, defaultName),
+    openText: (filters) => ipcRenderer.invoke('circuitLab:openText', filters),
+    saveFolder: (files, folderName) => ipcRenderer.invoke('circuitLab:saveFolder', files, folderName),
+  },
   // Share tab — the transfer runs over Firestore in the renderer (renderer/share.js); main
   // only names this PC and writes received files into Downloads (never overwriting).
   share: {

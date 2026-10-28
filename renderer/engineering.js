@@ -85,6 +85,22 @@ const engineeringUtilities = (() => {
       activate() { handwriter.mount(document.getElementById('view-handwriter')); handwriter.activate(); },
       deactivate() { handwriter.deactivate(); },
     },
+    'circuit-lab': {
+      id: 'circuit-lab', name: 'Circuit Lab', icon: '⚡',
+      color: '#F59E0B', tagline: 'Draw a schematic, simulate it, and analyze the result.',
+      description: 'Schematic editor with a SPICE-style simulator — live DC operating point, transient scope and AC Bode sweeps of R/L/C, sources, diodes, LEDs and op-amps, plus power balance, Thevenin/Norton and waveform/Bode measurements.',
+      paneId: 'eng-util-circuit-lab',
+      activate() { circuitLab.mount(document.getElementById('view-circuit-lab')); circuitLab.activate(); },
+      deactivate() { circuitLab.deactivate(); },
+    },
+    'trace-designer': {
+      id: 'trace-designer', name: 'Trace Designer', icon: '🧵',
+      color: '#14B8A6', tagline: 'Route PCB traces sized for the current they carry.',
+      description: 'Two-layer PCB trace editor — import a Circuit Lab schematic, route with 45° bends and vias or autoroute, size traces with the IPC-2221 calculator, check DRC, and export Gerbers + drill files.',
+      paneId: 'eng-util-trace-designer',
+      activate() { traceDesigner.mount(document.getElementById('view-trace-designer')); traceDesigner.activate(); },
+      deactivate() { traceDesigner.deactivate(); },
+    },
     share: {
       id: 'share', name: 'Share', icon: '📤',
       color: '#3B82F6', tagline: 'Links, notes and files between your devices.',
@@ -95,7 +111,7 @@ const engineeringUtilities = (() => {
       deactivate() { shareView.deactivate(); },
     },
   };
-  const BUILTIN_ORDER = ['share', 'printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger', 'handwriter'];
+  const BUILTIN_ORDER = ['share', 'printer', 'slicer', 'kicad-importer', 'wifi-checker', 'uart-bridge', 'git-manager', 'engink', 'file-merger', 'handwriter', 'circuit-lab', 'trace-designer'];
 
   // ---- Settings-backed install state --------------------------------------
   function getInstalled() {
@@ -110,6 +126,11 @@ const engineeringUtilities = (() => {
     if (!dataManager.settings.shareUtilSeeded) {
       if (!list.includes('share')) list = [...list, 'share'];
       dataManager.updateSettings({ installedUtilities: list, shareUtilSeeded: true });
+    }
+    // Same for the circuit tools (Circuit Lab hands off to Trace Designer, so they come as a pair).
+    if (!dataManager.settings.circuitUtilsSeeded) {
+      list = [...list, ...['circuit-lab', 'trace-designer'].filter(id => !list.includes(id))];
+      dataManager.updateSettings({ installedUtilities: list, circuitUtilsSeeded: true });
     }
     return list;
   }

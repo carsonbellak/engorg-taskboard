@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.0': {
+      title: "What's new",
+      intro: 'Design, simulate and route circuits.',
+      slides: [
+        { emoji: '⚡', title: 'Circuit Lab', body: 'Engineering Utilities → Circuit Lab. Draw a schematic with resistors, capacitors, inductors, sources, diodes, LEDs and op-amps. Net voltages update live as you edit, and hovering a part shows its V, I and P. Run a transient for a scope plot, or an AC sweep for a Bode plot. Try the Examples menu to start.' },
+        { emoji: '📊', title: 'Analysis', body: 'The Analysis tab has the operating point with a power balance, the Thevenin/Norton equivalent between any two nets, and waveform readings (RMS, frequency, rise time, −3 dB, peak). Press P and click wires or parts to choose what gets plotted.' },
+        { emoji: '🧵', title: 'Trace Designer', body: 'Send a schematic to the Trace Designer to lay out a 2-layer board. Route with 45° bends and vias, or Autoroute. Set each net’s current and it suggests an IPC-2221 trace width. DRC catches clearance, short and ampacity problems, and Gerbers + drill files export for fab.' },
+      ],
+    },
     '1.5.23': {
       title: "What's new",
       intro: 'Class symbols in EngInk.',

@@ -11936,6 +11936,167 @@ body.theme-light .syn-builtin { color: #059669; }
 .fmerge-merge { flex-shrink: 0; }
 
 /* ============================================================
+   CIRCUIT LAB + TRACE DESIGNER (shared .clab-* chrome; .td-* = PCB)
+   ============================================================ */
+#view-circuit-lab, #view-trace-designer { display: flex; flex-direction: column; min-height: 0; }
+.clab { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; padding: 10px 14px 12px; box-sizing: border-box; }
+.clab-toolbar, .clab-runbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+.clab-runbar { padding: 6px 8px; border-radius: 10px; background: var(--bg-secondary); border: var(--border-width, 1px) solid var(--border-color); font-size: 12px; color: var(--text-secondary); }
+.clab-runbar label { display: inline-flex; align-items: center; gap: 5px; }
+.clab-mode-opts { display: inline-flex; align-items: center; gap: 10px; }
+.clab-muted { color: var(--text-muted); }
+.clab-sep { width: 1px; align-self: stretch; background: var(--border-color); margin: 2px 4px; }
+.clab-spacer { flex: 1; }
+.clab .clab-sel { width: auto; padding: 6px 8px; font-size: 12px; }
+.clab .clab-num { width: 72px; padding: 5px 7px; font-size: 12px; }
+.clab-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+.clab-mini { padding: 3px 8px; font-size: 11px; }
+.clab-tool {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 5px 2px; min-width: 44px;
+  border-radius: 8px; border: var(--border-width, 1px) solid transparent; background: transparent; color: var(--text-secondary);
+  cursor: pointer; font-size: 10px; line-height: 1.1;
+}
+.clab-tool svg { width: 34px; height: 22px; overflow: visible; }
+.clab-tool:hover { background: var(--bg-hover); color: var(--text-primary); }
+.clab-tool.active { border-color: var(--util-color, var(--accent)); background: color-mix(in srgb, var(--util-color, var(--accent)) 14%, transparent); color: var(--text-primary); }
+.clab-tool .clab-part { stroke-width: .22; }
+.clab-cursor-ico { fill: var(--text-primary); }
+.clab-wire-ico { fill: none; stroke: var(--util-color, var(--accent)); stroke-width: .3; stroke-linecap: round; stroke-linejoin: round; }
+
+.clab-main { display: flex; gap: 10px; flex: 1; min-height: 0; }
+.clab-canvas-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.clab-canvas { position: relative; flex: 1; min-height: 200px; border-radius: 10px; overflow: hidden; border: var(--border-width, 1px) solid var(--border-color); background: var(--bg-secondary); }
+.clab-svg { width: 100%; height: 100%; display: block; user-select: none; touch-action: none; }
+.clab-svg.panning { cursor: grabbing !important; }
+.clab-grid-dot { fill: var(--text-muted); opacity: .35; }
+.clab-part { fill: none; stroke: var(--text-primary); stroke-width: .12; stroke-linecap: round; stroke-linejoin: round; }
+.clab-part circle { fill: var(--bg-secondary); }
+.clab-part .clab-fill { fill: var(--text-primary); }
+.clab-part .clab-led-red { fill: #ef4444; } .clab-part .clab-led-green { fill: #22c55e; } .clab-part .clab-led-blue { fill: #3b82f6; }
+.clab-part .clab-led-yellow { fill: #eab308; } .clab-part .clab-led-white { fill: #e5e7eb; }
+.clab-part.hov { stroke: var(--util-color, var(--accent)); }
+.clab-part.sel { stroke: var(--util-color, var(--accent)); stroke-width: .17; filter: drop-shadow(0 0 .25px var(--util-color, var(--accent))); }
+.clab-part.ghost { opacity: .5; stroke: var(--util-color, var(--accent)); pointer-events: none; }
+.clab-wire { stroke: color-mix(in srgb, var(--util-color, var(--accent)) 80%, var(--text-primary)); stroke-width: .12; stroke-linecap: round; }
+.clab-wire.hov { stroke-width: .2; }
+.clab-wire.sel { stroke: var(--text-primary); stroke-width: .22; }
+.clab-wire.ghost { stroke-dasharray: .35 .25; opacity: .8; pointer-events: none; }
+.clab-junction { fill: color-mix(in srgb, var(--util-color, var(--accent)) 80%, var(--text-primary)); }
+.clab-openpin { fill: none; stroke: #ef4444; stroke-width: .07; opacity: .8; }
+.clab-cursor { fill: none; stroke: var(--util-color, var(--accent)); stroke-width: .08; pointer-events: none; }
+.clab-ref { font-size: .62px; font-weight: 600; fill: var(--text-primary); }
+.clab-val { font-size: .56px; fill: var(--text-muted); }
+.clab-label-txt { font-size: .58px; font-weight: 600; fill: var(--text-primary); }
+.clab-vtag { pointer-events: none; }
+.clab-vtag rect { fill: color-mix(in srgb, var(--util-color, var(--accent)) 22%, var(--bg-secondary)); stroke: color-mix(in srgb, var(--util-color, var(--accent)) 55%, transparent); stroke-width: .04; }
+.clab-vtag text { font: 600 .5px ui-monospace, monospace; fill: var(--text-primary); }
+.clab-probe path { fill: var(--pc); }
+.clab-probe circle { fill: var(--pc); stroke: var(--bg-secondary); stroke-width: .08; }
+.clab-probe.ghost { opacity: .6; pointer-events: none; }
+.clab-probe-ring { fill: none; stroke-width: .1; stroke-dasharray: .3 .2; pointer-events: none; }
+.clab-tip {
+  position: absolute; display: none; pointer-events: none; z-index: 2; padding: 6px 9px; border-radius: 8px; font-size: 12px; line-height: 1.45;
+  background: var(--bg-card); color: var(--text-primary); border: var(--border-width, 1px) solid var(--border-color); box-shadow: var(--card-shadow, 0 4px 14px rgba(0,0,0,.25));
+}
+
+.clab-plot { display: none; flex-direction: column; height: 260px; flex-shrink: 0; border-radius: 10px; border: var(--border-width, 1px) solid var(--border-color); background: var(--bg-secondary); overflow: hidden; }
+.clab-plot.open { display: flex; }
+.clab-plot-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: var(--border-width, 1px) solid var(--border-color); }
+.clab-legend { flex: 1; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
+.clab-leg { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.clab-leg i, .clab-table td i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.clab-leg b { font-weight: 600; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.clab-leg-hint { font-size: 11px; color: var(--text-muted); font-style: italic; }
+.clab-plot canvas { flex: 1; width: 100%; min-height: 0; display: block; cursor: crosshair; }
+
+.clab-side { width: 300px; flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-radius: 10px; border: var(--border-width, 1px) solid var(--border-color); background: var(--bg-secondary); overflow: hidden; }
+.clab-side-tabs { display: flex; border-bottom: var(--border-width, 1px) solid var(--border-color); flex-shrink: 0; }
+.clab-side-tab { flex: 1; padding: 8px 4px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.clab-side-tab:hover { color: var(--text-primary); }
+.clab-side-tab.active { color: var(--text-primary); border-bottom-color: var(--util-color, var(--accent)); }
+.clab-side-body { flex: 1; overflow-y: auto; padding: 10px 12px; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 8px; }
+.clab-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); }
+.clab-field > span { font-weight: 600; letter-spacing: .02em; }
+.clab-field .kicad-input { padding: 6px 8px; font-size: 13px; }
+.clab-field em { font-style: normal; font-size: 10.5px; color: var(--text-faint, var(--text-muted)); }
+.clab-prop-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.clab-prop-type { font-size: 13px; font-weight: 700; color: var(--text-primary); }
+.clab-ref-input { width: 80px; padding: 4px 7px; font-size: 12px; text-align: right; }
+.clab-prop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.clab-prop-actions .kicad-btn { padding: 5px 9px; font-size: 12px; }
+.clab-danger:hover { color: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
+.clab-op-mini { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.clab-op-mini > div { padding: 6px 8px; border-radius: 8px; background: var(--bg-primary, var(--bg-input)); display: flex; flex-direction: column; gap: 1px; }
+.clab-op-mini span { font-size: 10.5px; color: var(--text-muted); }
+.clab-op-mini b { font-size: 13px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.clab-hint p { margin: 0 0 8px; line-height: 1.5; }
+.clab-side kbd { font: 600 10.5px ui-monospace, monospace; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary, var(--bg-input)); color: var(--text-primary); }
+.clab-sec { display: flex; flex-direction: column; gap: 6px; }
+.clab-sec + .clab-sec { padding-top: 8px; border-top: var(--border-width, 1px) solid var(--border-color); }
+.clab-sec-title { font-size: 12px; font-weight: 700; color: var(--text-primary); display: flex; justify-content: space-between; gap: 8px; }
+.clab-sec-title span { font-weight: 500; color: var(--text-muted); font-size: 11px; }
+.clab-table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.clab-table th { text-align: left; font-weight: 600; color: var(--text-muted); padding: 3px 4px; border-bottom: 1px solid var(--border-color); }
+.clab-table td { padding: 3px 4px; color: var(--text-primary); white-space: nowrap; }
+.clab-table tr + tr td { border-top: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent); }
+.clab-row-part { cursor: pointer; }
+.clab-row-part:hover td { background: var(--bg-hover); }
+.clab-neg { color: var(--success, #22c55e) !important; }
+.clab-note { font-size: 11px; color: var(--text-muted); line-height: 1.45; }
+.clab-warn { padding: 7px 9px; border-radius: 8px; font-size: 11.5px; line-height: 1.5; background: color-mix(in srgb, var(--warning, #f59e0b) 14%, transparent); color: var(--text-primary); }
+.clab-err { padding: 7px 9px; border-radius: 8px; font-size: 11.5px; white-space: pre-wrap; background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent); color: var(--text-primary); }
+.clab-thev-row { display: flex; align-items: center; gap: 6px; }
+.clab-thev-row .kicad-input { flex: 1; padding: 5px 7px; font-size: 12px; }
+.clab-netlist { margin: 0; padding: 8px; border-radius: 8px; background: var(--bg-primary, var(--bg-input)); color: var(--text-secondary); font: 11px/1.45 ui-monospace, monospace; white-space: pre; overflow-x: auto; user-select: text; }
+
+/* Trace Designer: the board keeps a PCB look (deep green, never pure black) in every theme. */
+.td-ico { font-size: 17px; line-height: 22px; height: 22px; }
+.td-layer-btn { padding: 5px 10px; border-radius: 7px; font: 700 11px ui-monospace, monospace; cursor: pointer; border: 1px solid var(--border-color); background: transparent; color: var(--text-secondary); }
+.td-layer-btn.td-top.active { background: #c8463c; border-color: #c8463c; color: #fff; }
+.td-layer-btn.td-bottom.active { background: #4a72d0; border-color: #4a72d0; color: #fff; }
+.td-canvas { background: color-mix(in srgb, var(--bg-secondary) 85%, #1d4a37); }
+.td-board { fill: #1d4a37; stroke: #d9c27a; stroke-width: .15; }
+.td-grid-dot { fill: #9fc9b2; opacity: .3; }
+.td-trace { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.td-top .td-trace, .td-trace.td-top { stroke: #c8463c; }
+.td-bottom .td-trace, .td-trace.td-bottom { stroke: #4a72d0; }
+.td-layer:not(.active) { opacity: .45; }
+.td-trace.hov { filter: brightness(1.25); }
+.td-trace.sel { filter: brightness(1.45) drop-shadow(0 0 .3px #fff); }
+.td-trace.hl, .td-pad.hl, .td-via.hl { filter: brightness(1.35); }
+.td-trace.ghost { opacity: .7; stroke-dasharray: .6 .35; pointer-events: none; }
+.td-pad { fill: #cfa648; }
+.td-pad.smd { fill: #d8b257; }
+.td-via { fill: #b8b8b8; }
+.td-via.sel { stroke: #fff; stroke-width: .12; }
+.td-drill { fill: #10251c; }
+.td-silk { fill: none; stroke: #e6e6e6; stroke-width: .15; opacity: .85; }
+.td-silk.hov { opacity: 1; }
+.td-silk.sel { stroke: #ffe58a; }
+.td-ref { font-size: 1.05px; font-weight: 600; fill: #e6e6e6; pointer-events: none; }
+.td-ref.sel { fill: #ffe58a; }
+.td-rat { stroke: #f2f2f2; stroke-width: .1; stroke-dasharray: .5 .35; opacity: .7; pointer-events: none; }
+.td-rat.hl { stroke: #ffe58a; opacity: 1; }
+.td-drc { fill: none; stroke: #ff5a5a; stroke-width: .18; pointer-events: none; }
+.td-cursor { fill: none; stroke: #fff; stroke-width: .07; opacity: .7; pointer-events: none; }
+.td-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--text-muted); flex-shrink: 0; padding: 0 2px; font-variant-numeric: tabular-nums; }
+.td-chip { padding: 1px 7px; border-radius: 6px; font: 700 11px ui-monospace, monospace; color: #fff; }
+.td-chip-top { background: #c8463c; }
+.td-chip-bottom { background: #4a72d0; }
+.td-msg { flex: 1; min-width: 160px; color: var(--text-secondary); }
+.td-good { color: var(--success, #22c55e); }
+.td-warn { color: var(--warning, #f59e0b); font-style: normal; }
+.td-bad { color: var(--danger, #ef4444); }
+.td-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.td-nets .kicad-input, .td-net-input { padding: 3px 6px; font-size: 12px; width: 100%; box-sizing: border-box; }
+.td-nets .td-cur { width: 64px; }
+.td-drc-row { padding: 5px 7px; border-radius: 7px; cursor: pointer; line-height: 1.4; color: var(--text-primary); }
+.td-drc-row:hover { background: var(--bg-hover); }
+.td-drc-k { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 4px; font: 700 10px ui-monospace, monospace; text-transform: uppercase; background: var(--bg-primary, var(--bg-input)); color: var(--text-muted); }
+.td-drc-short, .td-drc-clearance { color: #ff6b6b; }
+.td-drc-current, .td-drc-width { color: var(--warning, #f59e0b); }
+
+/* ============================================================
    KICAD IMPORTER
    ============================================================ */
 .kicad-importer { display: flex; gap: 16px; padding: 16px; height: 100%; box-sizing: border-box; }

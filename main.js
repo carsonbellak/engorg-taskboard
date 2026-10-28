@@ -32,6 +32,7 @@ const registerWindow        = require('./ipc/window');
 const registerEnginkMirror  = require('./ipc/engink-mirror');
 const registerFileMerger    = require('./ipc/file-merger');
 const registerHandwriter    = require('./ipc/handwriter');
+const registerCircuitLab    = require('./ipc/circuit-lab');
 const registerRelease       = require('./ipc/release');
 const registerOsTheme       = require('./ipc/os-theme');
 const registerDesktopMode   = require('./ipc/desktop-mode');
@@ -307,6 +308,7 @@ app.whenReady().then(async () => {
   registerEnginkMirror(getMainWindow);
   registerFileMerger(getMainWindow);
   registerHandwriter(getMainWindow);
+  registerCircuitLab(getMainWindow);
   registerRelease();
   registerOsTheme();
   registerDesktopMode(getMainWindow, { createDesktopWindow });
