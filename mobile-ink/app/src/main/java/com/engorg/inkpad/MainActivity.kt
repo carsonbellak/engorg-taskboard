@@ -2,6 +2,7 @@ package com.engorg.inkpad
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -46,6 +47,10 @@ class MainActivity : ComponentActivity() {
     // The page's open <input type=file>. It must always get a reply, even on cancel: until it does,
     // the WebView ignores every later file input.
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
+
+    // Whether the top-level page is the PWA. Links can navigate this WebView to other sites, which
+    // must not reach FileSaveBridge. Read off the UI thread, so it's tracked rather than read from web.url.
+    @Volatile private var onPwa = false
 
     // Snapshot of the ink-app prefs we last synced with the profile. Stays null until the user has
     // opened Ink at least once (so we never push device defaults before reading the profile); after
@@ -104,8 +109,14 @@ class MainActivity : ComponentActivity() {
             // Exposed to the PWA as window.AndroidAuth so the web Google button can start
             // the native sign-in flow.
             addJavascriptInterface(AuthBridge(), "AndroidAuth")
+            // window.AndroidFiles: the PWA's way to save a file to Downloads.
+            addJavascriptInterface(FileSaveBridge(applicationContext) { onPwa }, "AndroidFiles")
 
             webViewClient = object : WebViewClient() {
+                override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                    onPwa = Uri.parse(url).host == Uri.parse(PWA_URL).host
+                }
+
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val u = request.url
                     val last = u.lastPathSegment ?: ""

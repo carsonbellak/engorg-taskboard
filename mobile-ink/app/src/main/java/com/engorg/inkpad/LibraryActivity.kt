@@ -63,6 +63,7 @@ class LibraryActivity : ComponentActivity() {
         AppTheme.load(this)
         SystemBars.setup(this, lightBackground = !AppTheme.dark)
         store = NotebookStore(filesDir)
+        Workbooks.init(this)
         importPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) runImport(uri) }
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(AppTheme.bg); clipChildren = false }
@@ -172,15 +173,20 @@ class LibraryActivity : ComponentActivity() {
         titleView.text = if (inFolder == null) "Notebooks" else (store.folders.find { it.id == inFolder }?.name ?: "Notebooks")
         // At the top level, offer to reopen the last multi-notebook split exactly as it was left.
         if (inFolder == null) {
-            val session = InkSettings.lastSession(this).filter { store.notebook(it) != null }
+            val session = InkSettings.lastSession(this).filter { paneTitle(it) != null }
             if (session.size >= 2) content.addView(resumeSplitCard(session))
         }
         val subFolders = store.foldersIn(inFolder)
         val nbs = store.notebooksIn(inFolder)
+        val wbs = Workbooks.inFolder(inFolder)
         if (subFolders.isNotEmpty()) content.addView(folderGrid(subFolders))
         if (nbs.isNotEmpty()) content.addView(notebookGrid(nbs))
-        if (subFolders.isEmpty() && nbs.isEmpty()) content.addView(emptyState())
+        if (wbs.isNotEmpty()) content.addView(workbookGrid(wbs))
+        if (subFolders.isEmpty() && nbs.isEmpty() && wbs.isEmpty()) content.addView(emptyState())
     }
+
+    /** The title behind a pane id (a notebook or workbook), or null if it no longer exists. */
+    private fun paneTitle(id: String): String? = store.notebook(id)?.title ?: Workbooks.fromPaneId(id)?.title
 
     /** Navigate to the parent of the current folder. Returns false if already at the top. */
     private fun goUp(): Boolean {
@@ -202,6 +208,11 @@ class LibraryActivity : ComponentActivity() {
     private fun notebookGrid(nbs: List<NotebookStore.Notebook>): View = GridLayout(this).apply {
         columnCount = gridColumns(); clipChildren = false; clipToPadding = false
         for (nb in nbs) addView(notebookTile(nb))
+    }
+
+    private fun workbookGrid(wbs: List<Workbooks.Workbook>): View = GridLayout(this).apply {
+        columnCount = gridColumns(); clipChildren = false; clipToPadding = false
+        for (w in wbs) addView(workbookTile(w))
     }
 
     // ---- drag & drop reorg (hold a tile to drag it into a folder, or onto Back to move it out) ----
@@ -231,6 +242,11 @@ class LibraryActivity : ComponentActivity() {
                 val ok = store.moveFolder(fo, targetFolder)
                 if (!ok) Toast.makeText(this, "Can't move a folder inside itself", Toast.LENGTH_SHORT).show()
                 ok
+            }
+            "wb" -> {
+                val w = Workbooks.get(parts[1]) ?: return false
+                if (w.folderId == targetFolder) return false
+                w.folderId = targetFolder; Workbooks.save(); true
             }
             else -> false
         }
@@ -352,13 +368,50 @@ class LibraryActivity : ComponentActivity() {
         return card
     }
 
+    /** A flat page-like card, so workbooks read as something to study from, not a notebook to fill. */
+    private fun workbookTile(w: Workbooks.Workbook): View {
+        val tile = dp(150); val h = dp(186); val m = dp(6)
+        val card = FrameLayout(this).apply {
+            layoutParams = GridLayout.LayoutParams().apply { width = tile; height = h; setMargins(m, m, m, m) }
+            background = GradientDrawable().apply {
+                cornerRadius = dp(14).toFloat(); setColor(AppTheme.elevated)
+                setStroke(dp(1), Color.argb(0x55, Color.red(AppTheme.accent), Color.green(AppTheme.accent), Color.blue(AppTheme.accent)))
+            }
+            clipToOutline = true
+            elevation = dp(3).toFloat()
+            foreground = rippleFg(14, Color.argb(0x28, Color.red(AppTheme.text), Color.green(AppTheme.text), Color.blue(AppTheme.text)))
+            setOnClickListener { openWorkbook(w) }
+            setOnLongClickListener { startItemDrag(this, "wb:${w.id}"); true }
+        }
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(12), dp(14))
+            layoutParams = FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            addView(iconView(Icons.PAGE, 26, AppTheme.accent))
+            addView(TextView(this@LibraryActivity).apply {
+                text = "Workbook"; setTextColor(muted()); textSize = 11f; setPadding(0, dp(6), 0, 0)
+            })
+            addView(View(this@LibraryActivity), LinearLayout.LayoutParams(1, 0, 1f))
+            addView(TextView(this@LibraryActivity).apply {
+                text = w.title; setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, Typeface.BOLD)
+                maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+        })
+        card.addView(menuDot(AppTheme.text) { workbookMenu(w) }, FrameLayout.LayoutParams(dp(30), dp(30)).apply { gravity = Gravity.TOP or Gravity.END; setMargins(0, dp(4), dp(4), 0) })
+        return card
+    }
+
     private fun openNotebook(nb: NotebookStore.Notebook) {
         startActivity(Intent(this, InkActivity::class.java).putExtra(InkActivity.EXTRA_NOTEBOOK_ID, nb.id))
     }
 
-    /** A banner that relaunches the last split-view session (2–4 notebooks) as it was left. */
+    private fun openWorkbook(w: Workbooks.Workbook) {
+        startActivity(Intent(this, InkActivity::class.java).putStringArrayListExtra(InkActivity.EXTRA_NOTEBOOK_IDS, Workbooks.openIds(this, w, store)))
+    }
+
+    /** A banner that relaunches the last split-view session (2–4 panes) as it was left. */
     private fun resumeSplitCard(ids: List<String>): View {
-        val names = ids.mapNotNull { store.notebook(it)?.title }
+        val names = ids.mapNotNull { paneTitle(it) }
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply {
@@ -393,12 +446,14 @@ class LibraryActivity : ComponentActivity() {
         return row
     }
 
-    // ---- import (a PDF → a new notebook to write on, or a Noteshelf export .zip) ----
+    // ---- import (a PDF → a new notebook to write on, an .html page → a workbook, or a Noteshelf export .zip) ----
     private fun runImport(uri: Uri) {
         val pdf = PdfImport.isPdf(this, uri)
+        val html = !pdf && Workbooks.isHtml(this, uri)
         val pad = dp(24)
         val status = TextView(this).apply {
-            text = if (pdf) "Reading PDF…" else "Reading export…"; setTextColor(AppTheme.text); textSize = 14f
+            text = when { pdf -> "Reading PDF…"; html -> "Saving workbook…"; else -> "Reading export…" }
+            setTextColor(AppTheme.text); textSize = 14f
             gravity = Gravity.CENTER; setPadding(0, dp(16), 0, 0)
         }
         val box = LinearLayout(this).apply {
@@ -414,6 +469,29 @@ class LibraryActivity : ComponentActivity() {
             setCancelable(false)
         }
         dialog.show()
+        if (html) {
+            val folder = currentFolder
+            Thread {
+                val w = Workbooks.importFile(this, uri, folder)
+                runOnUiThread {
+                    if (w == null) {
+                        dialog.dismiss()
+                        Toast.makeText(this, "Import failed: couldn't read that file", Toast.LENGTH_LONG).show()
+                    } else {
+                        status.text = "Saving for offline…"
+                        WorkbookCapture.run(this, w) { failed ->
+                            if (!isFinishing && !isDestroyed) {
+                                dialog.dismiss()
+                                rebuild()
+                                if (failed > 0) Toast.makeText(this, "Open it once while online to finish saving it for offline.", Toast.LENGTH_LONG).show()
+                                openWorkbook(w)
+                            }
+                        }
+                    }
+                }
+            }.start()
+            return
+        }
         if (pdf) {
             PdfImport.importPdf(
                 this, uri, store, currentFolder,
@@ -561,11 +639,17 @@ class LibraryActivity : ComponentActivity() {
         Icons.SPLIT to { splitPickDialog(nb) },
         Icons.PEN to { renameDialog(nb.title) { nb.title = it.ifBlank { nb.title }; store.save(); rebuild() } },
         Icons.PALETTE to { coverDialog(nb) },
-        Icons.FOLDER to { moveDialog(nb) },
+        Icons.FOLDER to { moveDialog { nb.folderId = it; store.save(); rebuild() } },
         Icons.TRASH to { confirmDelete { store.deleteNotebook(nb); rebuild() } },
     ))
 
-    /** Pick 1–3 more notebooks to open beside [primary] as split panes (up to 4 total). */
+    private fun workbookMenu(w: Workbooks.Workbook) = iconMenu(listOf<Pair<String, () -> Unit>>(
+        Icons.PEN to { renameDialog(w.title) { w.title = it.ifBlank { w.title }; Workbooks.save(); rebuild() } },
+        Icons.FOLDER to { moveDialog { w.folderId = it; Workbooks.save(); rebuild() } },
+        Icons.TRASH to { confirmDelete { Workbooks.delete(w); rebuild() } },
+    ))
+
+    /** Pick 1–3 more notebooks or workbooks to open beside [primary] as split panes (up to 4 total). */
     private fun splitPickDialog(primary: NotebookStore.Notebook) = sheet { box, dialog ->
         box.addView(iconView(Icons.SPLIT, 24, AppTheme.text))
         box.addView(TextView(this).apply {
@@ -573,25 +657,26 @@ class LibraryActivity : ComponentActivity() {
             setPadding(0, dp(6), 0, dp(2))
         })
         val selected = linkedSetOf(primary.id)
-        val ordered = listOf(primary) + store.notebooks.filter { it.id != primary.id }
+        val ordered = (listOf(primary) + store.notebooks.filter { it.id != primary.id }).map { Triple(it.id, it.title, it.coverColor) } +
+            Workbooks.all().map { Triple(Workbooks.paneId(it), it.title, AppTheme.accent) }
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        for (rowNb in ordered) {
+        for ((rowId, rowTitle, rowColor) in ordered) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12), dp(10), dp(14), dp(10))
                 layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(8) }
                 addView(View(this@LibraryActivity).apply {
-                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(rowNb.coverColor) }
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(rowColor) }
                     layoutParams = LinearLayout.LayoutParams(dp(16), dp(16)).apply { rightMargin = dp(12) }
                 })
-                addView(TextView(this@LibraryActivity).apply { text = rowNb.title; setTextColor(AppTheme.text); textSize = 15f; maxLines = 1 })
+                addView(TextView(this@LibraryActivity).apply { text = rowTitle; setTextColor(AppTheme.text); textSize = 15f; maxLines = 1 })
             }
-            fun paint() { row.background = pillBg(if (selected.contains(rowNb.id)) AppTheme.accent else AppTheme.elevated) }
+            fun paint() { row.background = pillBg(if (selected.contains(rowId)) AppTheme.accent else AppTheme.elevated) }
             row.setOnClickListener {
-                if (rowNb.id != primary.id) {
-                    if (selected.contains(rowNb.id)) selected.remove(rowNb.id)
-                    else if (selected.size < 4) selected.add(rowNb.id)
-                    else Toast.makeText(this, "Up to 4 notebooks.", Toast.LENGTH_SHORT).show()
+                if (rowId != primary.id) {
+                    if (selected.contains(rowId)) selected.remove(rowId)
+                    else if (selected.size < 4) selected.add(rowId)
+                    else Toast.makeText(this, "Up to 4 side by side.", Toast.LENGTH_SHORT).show()
                     paint()
                 }
             }
@@ -608,7 +693,7 @@ class LibraryActivity : ComponentActivity() {
         Icons.FOLDER to { currentFolder = fo.id; rebuild() },
         Icons.ADD to { createNotebookDialog(fo.id) },
         Icons.PEN to { renameDialog(fo.name) { fo.name = it.ifBlank { fo.name }; store.save(); rebuild() } },
-        Icons.TRASH to { confirmDelete { if (currentFolder == fo.id) currentFolder = null; store.deleteFolder(fo); rebuild() } },
+        Icons.TRASH to { confirmDelete { if (currentFolder == fo.id) currentFolder = null; Workbooks.reparent(fo.id, fo.parentId); store.deleteFolder(fo); rebuild() } },
     ))
 
     private fun coverDialog(nb: NotebookStore.Notebook) = sheet { box, dialog ->
@@ -619,7 +704,7 @@ class LibraryActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(16) })
     }
 
-    private fun moveDialog(nb: NotebookStore.Notebook) = sheet { box, dialog ->
+    private fun moveDialog(onMove: (String?) -> Unit) = sheet { box, dialog ->
         box.addView(iconView(Icons.FOLDER, 24, AppTheme.text))
         fun row(iconPath: String, label: String, action: () -> Unit) = box.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -629,8 +714,8 @@ class LibraryActivity : ComponentActivity() {
             addView(TextView(this@LibraryActivity).apply { text = label; setTextColor(AppTheme.text); textSize = 15f })
             setOnClickListener { action(); dialog.dismiss() }
         })
-        row(Icons.HOME, if (store.folders.isEmpty()) "—" else "") { nb.folderId = null; store.save(); rebuild() }
-        for (fo in store.folders) row(Icons.FOLDER, fo.name) { nb.folderId = fo.id; store.save(); rebuild() }
+        row(Icons.HOME, if (store.folders.isEmpty()) "—" else "") { onMove(null) }
+        for (fo in store.folders) row(Icons.FOLDER, fo.name) { onMove(fo.id) }
     }
 
     private fun confirmDelete(onYes: () -> Unit) = sheet { box, dialog ->

@@ -45,6 +45,24 @@
             android:screenOrientation="fullUser"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density" />
 
+        <!-- Share-sheet target: saves a shared .html file or Claude artifact link as a workbook.
+             Its own task, so the work doesn't stack on top of the app that shared. -->
+        <activity
+            android:name=".WorkbookShareActivity"
+            android:exported="true"
+            android:label="Add workbook to EngInk"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/html" />
+            </intent-filter>
+        </activity>
+
         <!-- Shares the exported notebook PDF with the user's email app. -->
         <provider
             android:name="androidx.core.content.FileProvider"

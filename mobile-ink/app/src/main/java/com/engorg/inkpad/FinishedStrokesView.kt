@@ -616,6 +616,7 @@ class FinishedStrokesView(context: Context) : View(context) {
             return PointF((h[0].x + h[1].x) / 2f, (h[0].y + h[1].y) / 2f)
         }
         if (sp.verts.size < 2) return null
+        if (sym.kind == SymKind.STRIP) return Symbols.StripFrame(sym, sp.verts[0], sp.verts[1], sp.symScale).let { PointF(it.cx, it.cy) }
         val cx = (sp.verts[0].x + sp.verts[1].x) / 2f; val cy = (sp.verts[0].y + sp.verts[1].y) / 2f
         if (sp.rot == 0f) return PointF(cx, cy)
         val a = Math.toRadians(sp.rot.toDouble()); val c = cos(a).toFloat(); val s = sin(a).toFloat()

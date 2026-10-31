@@ -40,6 +40,10 @@ import kotlin.math.roundToInt
  * one shared floating toolbar. Tool/brush state lives here and is read by whichever pane you touch;
  * toolbar buttons (undo, zoom, add page, email…) act on the currently focused pane.
  *
+ * [WorkbookPane]s can share the row. They're only ever in [paneViews], never [panes], and there is
+ * always at least one notebook pane, so the toolbar and everything else that reads [focused] keeps
+ * working on notebooks alone.
+ *
  * All drawing stays in plain Canvas inside PageCanvas — no native ink renderer.
  */
 class InkActivity : ComponentActivity() {
@@ -47,6 +51,8 @@ class InkActivity : ComponentActivity() {
     private lateinit var store: NotebookStore
     private lateinit var panesRow: LinearLayout
     private val panes = ArrayList<PageCanvas>()
+    private val paneViews = ArrayList<View>()   // every pane left to right, workbooks included
+    private val workbookTitles = HashMap<WorkbookPane, TextView>()
     private val paneChips = HashMap<PageCanvas, View>()
     private val paneTitles = HashMap<PageCanvas, TextView>()
     private var focused: PageCanvas? = null
@@ -172,15 +178,23 @@ class InkActivity : ComponentActivity() {
         tableBorder = ip.getBoolean("tableBorder", true)
 
         store = NotebookStore(filesDir)
+        Workbooks.init(this)
 
-        // Accept a list of notebook ids (split view) or a single id (classic open), else the default.
+        // Accept a list of pane ids (split view) or a single id (classic open), else the default.
         val ids: List<String?> = intent.getStringArrayListExtra(EXTRA_NOTEBOOK_IDS)
             ?: intent.getStringExtra(EXTRA_NOTEBOOK_ID)?.let { listOf(it) }
             ?: listOf(null)
-        val n = ids.size.coerceIn(1, 4)
 
         panesRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        for (i in 0 until n) panes.add(makePane(ids.getOrNull(i)))
+        for (id in ids.take(4)) {
+            val wb = Workbooks.fromPaneId(id)
+            if (wb != null) paneViews.add(makeWorkbookPane(wb))
+            else if (id?.startsWith(Workbooks.PANE_PREFIX) != true) makePane(id).let { panes.add(it); paneViews.add(it) }
+        }
+        if (panes.isEmpty()) {   // a split always keeps a notebook for the toolbar to act on
+            if (paneViews.size >= 4) (paneViews.removeAt(3) as WorkbookPane).dispose()
+            makePane(null).let { panes.add(it); paneViews.add(it) }
+        }
 
         val toolbar = buildToolbar()
         val root = FrameLayout(this).apply {
@@ -211,7 +225,16 @@ class InkActivity : ComponentActivity() {
         panes.forEach { it.syncLastPage() }
         panes.forEach { it.flushSaves() }   // ensure queued background page writes are durable before we background
         store.save()
-        InkSettings.saveLastSession(this, panes.mapNotNull { it.notebookId() })
+        workbookPanes().forEach { it.pause(); it.workbook.notesId = focused?.notebookId() }   // reopens as this pair
+        Workbooks.save()
+        InkSettings.saveLastSession(this, paneViews.mapNotNull {
+            if (it is WorkbookPane) Workbooks.paneId(it.workbook) else (it as PageCanvas).notebookId()
+        })
+    }
+
+    override fun onResume() {
+        super.onResume()
+        workbookPanes().forEach { it.resume() }
     }
 
     override fun onDestroy() {
@@ -221,8 +244,11 @@ class InkActivity : ComponentActivity() {
         MirrorManager.onState = null
         MirrorManager.bind(null)   // keep the socket alive but stop feeding a destroyed pane
         panes.forEach { it.dispose() }   // flush + stop each pane's background writer
+        workbookPanes().forEach { it.dispose() }
         super.onDestroy()
     }
+
+    private fun workbookPanes() = paneViews.filterIsInstance<WorkbookPane>()
 
     private fun updateMirrorButton(on: Boolean) {
         val b = mirrorButton ?: return
@@ -264,44 +290,81 @@ class InkActivity : ComponentActivity() {
         return pane
     }
 
-    /** Re-tile the row from the current [panes] list (equal widths) with dividers between. */
+    /** A workbook pane with its title chip (tap the title to swap workbooks). */
+    private fun makeWorkbookPane(wb: Workbooks.Workbook): WorkbookPane {
+        val pane = WorkbookPane(this)
+        pane.open(wb)
+        val title = chipTitle(wb.title) { v ->
+            notebookPickerPopup(v, null, wb = pane.workbook) { id ->
+                Workbooks.fromPaneId(id)?.let { pane.open(it); refreshChrome() }
+            }
+        }
+        workbookTitles[pane] = title
+        val chip = chipRow(title) { removeWorkbookPane(pane) }.apply { visibility = View.VISIBLE }
+        pane.header.addView(chip, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+        return pane
+    }
+
+    /** Re-tile the row from the current [paneViews] list (equal widths) with dividers between. */
     private fun rebuildPanesRow() {
         panesRow.removeAllViews()
-        for (i in panes.indices) {
-            panesRow.addView(panes[i], LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
-            if (i < panes.size - 1) panesRow.addView(makeDivider(panesRow), LinearLayout.LayoutParams(dp(6), MATCH_PARENT))
+        for (i in paneViews.indices) {
+            panesRow.addView(paneViews[i], LinearLayout.LayoutParams(0, MATCH_PARENT, 1f))
+            if (i < paneViews.size - 1) panesRow.addView(makeDivider(panesRow), LinearLayout.LayoutParams(dp(6), MATCH_PARENT))
         }
         refreshChrome()
         panes.forEach { it.refit() }
     }
 
     private fun addPane(id: String?) {
-        if (panes.size >= 4) { Toast.makeText(this, "Up to 4 notebooks side by side.", Toast.LENGTH_SHORT).show(); return }
+        if (paneViews.size >= 4) { Toast.makeText(this, "Up to 4 side by side.", Toast.LENGTH_SHORT).show(); return }
+        val wb = Workbooks.fromPaneId(id)
+        if (wb != null) {
+            paneViews.add(makeWorkbookPane(wb))
+            rebuildPanesRow()
+            return
+        }
         val pane = makePane(id)
-        panes.add(pane)
+        panes.add(pane); paneViews.add(pane)
         rebuildPanesRow()
         setFocused(pane)
     }
 
     private fun removePane(pane: PageCanvas) {
         if (panes.size <= 1) return
-        panes.remove(pane); paneChips.remove(pane); paneTitles.remove(pane)
+        panes.remove(pane); paneViews.remove(pane); paneChips.remove(pane); paneTitles.remove(pane)
         valueEditor?.forget(pane)
         pane.dispose()   // flush + stop the closed pane's background writer
         rebuildPanesRow()
         setFocused(if (focused === pane) panes.first() else (focused ?: panes.first()))
     }
 
-    /** Show pane title chips only in split mode; keep their titles fresh after a swap. */
-    private fun refreshChrome() {
-        val multi = panes.size > 1
-        for (p in panes) {
-            paneChips[p]?.visibility = if (multi) View.VISIBLE else View.GONE
-            if (::panesRow.isInitialized) paneTitles[p]?.text = p.notebook.title
-        }
+    private fun removeWorkbookPane(pane: WorkbookPane) {
+        pane.pause(); Workbooks.save()
+        paneViews.remove(pane); workbookTitles.remove(pane)
+        pane.dispose()
+        rebuildPanesRow()
     }
 
-    private fun buildPaneChip(pane: PageCanvas): View {
+    /** Show pane title chips only in split mode; keep their titles fresh after a swap. */
+    private fun refreshChrome() {
+        val multi = paneViews.size > 1
+        for (p in panes) {
+            paneChips[p]?.visibility = if (multi) View.VISIBLE else View.GONE
+            // The last notebook can't close (see the class note), so it offers no close button.
+            (paneChips[p] as? LinearLayout)?.getChildAt(1)?.visibility = if (panes.size > 1) View.VISIBLE else View.GONE
+            if (::panesRow.isInitialized) paneTitles[p]?.text = p.notebook.title
+        }
+        for ((p, title) in workbookTitles) title.text = p.workbook.title
+    }
+
+    private fun chipTitle(text: String, onClick: (View) -> Unit) = TextView(this).apply {
+        this.text = text; setTextColor(onSurface); textSize = 12.5f
+        maxLines = 1; maxWidth = dp(150); ellipsize = android.text.TextUtils.TruncateAt.END
+        setOnClickListener { onClick(it) }
+    }
+
+    private fun chipRow(title: TextView, onClose: () -> Unit): LinearLayout {
         val muted = Color.argb(0xB0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface))
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
@@ -313,34 +376,38 @@ class InkActivity : ComponentActivity() {
             }
             elevation = dp(6).toFloat(); setPadding(dp(11), dp(5), dp(5), dp(5))
         }
-        val title = TextView(this).apply {
-            text = pane.notebook.title; setTextColor(onSurface); textSize = 12.5f
-            maxLines = 1; maxWidth = dp(150); ellipsize = android.text.TextUtils.TruncateAt.END
-            setOnClickListener { notebookPickerPopup(this, pane) { id -> pane.open(id); refreshChrome(); setFocused(pane) } }
-        }
-        paneTitles[pane] = title
         row.addView(title)
         row.addView(ImageButton(this).apply {
             setImageBitmap(Icons.bitmap(Icons.CLOSE, dp(15))); setColorFilter(muted)
             background = pill(light); scaleType = ImageView.ScaleType.FIT_CENTER; stateListAnimator = null
             val pd = dp(4); setPadding(pd, pd, pd, pd)
             layoutParams = LinearLayout.LayoutParams(dp(26), dp(26)).apply { leftMargin = dp(6) }
-            setOnClickListener { removePane(pane) }
+            setOnClickListener { onClose() }
         })
         return row
     }
 
+    private fun buildPaneChip(pane: PageCanvas): View {
+        val title = chipTitle(pane.notebook.title) { v ->
+            notebookPickerPopup(v, pane) { id -> pane.open(id); refreshChrome(); setFocused(pane) }
+        }
+        paneTitles[pane] = title
+        return chipRow(title) { removePane(pane) }
+    }
+
     private fun showAddPane(anchor: View) {
-        if (panes.size >= 4) { Toast.makeText(this, "Up to 4 notebooks side by side.", Toast.LENGTH_SHORT).show(); return }
-        notebookPickerPopup(anchor, null) { id -> addPane(id) }
+        if (paneViews.size >= 4) { Toast.makeText(this, "Up to 4 side by side.", Toast.LENGTH_SHORT).show(); return }
+        notebookPickerPopup(anchor, null, addingPane = true) { id -> addPane(id) }
     }
 
     /**
      * A folder-navigable dropdown of notebooks. Sub-folders are browsable (drill in / step back up);
      * within a folder, notebooks are listed **most-recently-edited first** (with a recency chip) so
-     * the one you're after is usually right at the top. Reused for add-pane + swap.
+     * the one you're after is usually right at the top. Reused for add-pane + swap. Adding a pane
+     * also offers workbooks; swapping a workbook ([wb]) offers only workbooks, since a notebook
+     * pane can't replace it in place.
      */
-    private fun notebookPickerPopup(anchor: View, current: PageCanvas?, onPick: (String) -> Unit) {
+    private fun notebookPickerPopup(anchor: View, current: PageCanvas?, addingPane: Boolean = false, wb: Workbooks.Workbook? = null, onPick: (String) -> Unit) {
         val list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(8), dp(8), dp(8), dp(8)) }
         val container = android.widget.ScrollView(this).apply {
             background = GradientDrawable().apply {
@@ -353,7 +420,7 @@ class InkActivity : ComponentActivity() {
         val curId = current?.notebook?.id
         // Start where the swapped notebook lives (its folder) so its siblings are right there; the
         // add-pane case (no current notebook) starts at the top level.
-        var browseFolder: String? = current?.notebook?.folderId
+        var browseFolder: String? = current?.notebook?.folderId ?: wb?.folderId
 
         lateinit var rebuild: () -> Unit
         rebuild = {
@@ -365,8 +432,10 @@ class InkActivity : ComponentActivity() {
             // Sub-folders (A→Z), then notebooks (most-recently-edited first).
             for (fo in store.foldersIn(browseFolder).sortedBy { it.name.lowercase() })
                 list.addView(folderPickRow(fo) { browseFolder = fo.id; rebuild() })
-            for ((nb, mod) in store.notebooksIn(browseFolder).map { it to store.lastModified(it) }.sortedByDescending { it.second })
-                list.addView(pickRow(nb, mod, nb.id == curId) { popup.dismiss(); onPick(nb.id) })
+            if (addingPane || wb != null) for (w in Workbooks.inFolder(browseFolder))
+                list.addView(pickRow(w.title, AppTheme.accent, "Workbook", w.id == wb?.id) { popup.dismiss(); onPick(Workbooks.paneId(w)) })
+            if (wb == null) for ((nb, mod) in store.notebooksIn(browseFolder).map { it to store.lastModified(it) }.sortedByDescending { it.second })
+                list.addView(pickRow(nb.title, nb.coverColor, relTime(mod), nb.id == curId) { popup.dismiss(); onPick(nb.id) })
             popup.height = (dp(50) * list.childCount + dp(16)).coerceIn(dp(60), dp(420))
             if (popup.isShowing) popup.update(dp(264), popup.height)
         }
@@ -431,22 +500,22 @@ class InkActivity : ComponentActivity() {
         }
     }
 
-    private fun pickRow(nb: NotebookStore.Notebook, modifiedTs: Long, selected: Boolean, onClick: () -> Unit): View =
+    private fun pickRow(title: String, dot: Int, trailing: String, selected: Boolean, onClick: () -> Unit): View =
         LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(if (selected) AppTheme.accent else AppTheme.elevated) }
             setPadding(dp(10), dp(9), dp(12), dp(9))
             layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(6) }
             addView(View(this@InkActivity).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(nb.coverColor) }
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(dot) }
                 layoutParams = LinearLayout.LayoutParams(dp(14), dp(14)).apply { rightMargin = dp(10) }
             })
             addView(TextView(this@InkActivity).apply {
-                text = nb.title; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
+                text = title; textSize = 14f; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 setTextColor(if (selected) AppTheme.onAccent() else AppTheme.text)
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
             addView(TextView(this@InkActivity).apply {
-                text = relTime(modifiedTs); textSize = 11.5f; setPadding(dp(8), 0, 0, 0)
+                text = trailing; textSize = 11.5f; setPadding(dp(8), 0, 0, 0)
                 setTextColor(if (selected) AppTheme.onAccent() else Color.argb(0xA0, Color.red(onSurface), Color.green(onSurface), Color.blue(onSurface)))
             })
             setOnClickListener { onClick() }
@@ -880,7 +949,12 @@ class InkActivity : ComponentActivity() {
         val sym = pendingSymbol
         val msg = when {
             type == ShapeType.TABLE -> "Drag out the table (or tap to drop one)"
-            type == ShapeType.SYMBOL && sym != null -> if (sym.kind == SymKind.INLINE) "${sym.label}: tap to drop one, or draw a line to lay it along" else "${sym.label}: tap to drop one"
+            type == ShapeType.SYMBOL && sym != null -> when {
+                sym.kind == SymKind.INLINE -> "${sym.label}: tap to drop one, or draw a line to lay it along"
+                sym.kind == SymKind.STRIP -> "${sym.label}: tap to drop one, or draw along it (the other way flips its side)"
+                sym.stretches -> "${sym.label}: tap to drop one, or drag out its size"
+                else -> "${sym.label}: tap to drop one"
+            }
             else -> "Draw a $prefix${shapeLabel(type)}"
         }
         Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()

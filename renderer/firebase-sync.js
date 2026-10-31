@@ -1,6 +1,15 @@
 // Firebase Cloud Sync Module
 // Handles authentication, Firestore sync, and real-time listeners
 
+// Deep equality via JSON with object keys sorted: Firestore returns map keys sorted, so a
+// plain JSON.stringify calls our own data "changed" when it comes back from the server.
+function sameSyncData(a, b) {
+  const sorted = (_, v) => (v && typeof v === 'object' && !Array.isArray(v))
+    ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]]))
+    : v;
+  return JSON.stringify(a, sorted) === JSON.stringify(b, sorted);
+}
+
 class FirebaseSync {
   constructor() {
     this.db = null;
@@ -114,6 +123,7 @@ class FirebaseSync {
     const delay = collectionName === 'settings' ? 300 : 1500;
     clearTimeout(this._uploadTimers[collectionName]);
     this._uploadTimers[collectionName] = setTimeout(async () => {
+      delete this._uploadTimers[collectionName];
       try {
         const docRef = this.db
           .collection('users').doc(this.user.uid)
@@ -233,6 +243,14 @@ class FirebaseSync {
         const items = data[m.key];
         if (!items) return;
 
+        // A newer local edit is waiting to upload — this snapshot is already stale, and
+        // adopting it would briefly undo that edit (e.g. two items ticked in quick succession).
+        if (this._uploadTimers[m.doc]) return;
+
+        // The server-confirmed echo of our own save (its _updatedAt changes, so it always
+        // fires) or a cache replay at startup: same data, so nothing to save or re-render.
+        if (sameSyncData(items, dataManager[m.prop])) return;
+
         console.log(`Firebase: Received ${m.doc} update from ${data._source || 'unknown'}`);
 
         // Update local data
@@ -266,7 +284,7 @@ class FirebaseSync {
       let changed = false, catsChanged = false, ecoChanged = false;
       for (const k of SYNCED_SETTINGS) {
         if (!(k in data)) continue;
-        if (JSON.stringify(data[k]) !== JSON.stringify(dataManager.settings[k])) {
+        if (!sameSyncData(data[k], dataManager.settings[k])) {
           dataManager.settings[k] = data[k];
           changed = true;
           if (k === 'categories') catsChanged = true;

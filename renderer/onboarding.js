@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.5': {
+      title: "What's new",
+      intro: 'Study from Claude workbooks in EngInk, offline.',
+      slides: [
+        { emoji: '📖', title: 'Workbooks beside your notes', body: 'Import an .html study guide from the EngInk library, or share a file or Claude artifact link to "Add workbook to EngInk". It opens in split view next to a notebook, so the pen stays on your notes while you work through it.' },
+        { emoji: '✈️', title: 'Works offline', body: 'Equations, fonts and quizzes are saved on the tablet the first time you add a workbook online. Your answers and place in the page are kept between sessions. A link has to be set to "anyone with the link" unless you can sign in to Claude there.' },
+      ],
+    },
     '1.6.3': {
       title: "What's new",
       intro: 'EngInk analysis: keypad, trusses, pulleys and more.',

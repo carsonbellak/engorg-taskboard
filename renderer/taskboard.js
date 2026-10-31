@@ -1016,14 +1016,42 @@ class ViewRenderer {
     // re-render (e.g. checking off an item) keeps the day open instead of snapping shut.
     if (!this.calSelectedDate) this.calSelectedDate = this._dateStr(new Date());
     container.classList.add('cal-split-view');
-    container.innerHTML = `<div class="cal-view-area"></div><aside class="cal-side" id="cal-side"></aside>`;
-    const area = container.querySelector('.cal-view-area');
+    // Both panes stay in the DOM across renders: .cal-side is its own scroller, so recreating
+    // it would send the day list back to the top every time an item is checked off.
+    let area = container.querySelector('.cal-view-area');
+    if (!area) {
+      container.innerHTML = `<div class="cal-view-area"></div><aside class="cal-side" id="cal-side"></aside>`;
+      area = container.querySelector('.cal-view-area');
+      this._calViewHtml = this._calSideHtml = null;
+    }
     if (this.calendarView === 'day')         this._renderDayView(area);
     else if (this.calendarView === 'week')   this._renderWeekView(area);
     else if (this.calendarView === 'agenda') this._renderAgendaView(area);
-    else                                     this._renderMonthView(area);
+    else {
+      this._renderMonthView(area);
+      // Fit now so a re-render never paints a frame of unfitted cells, then again after
+      // layout settles (startup applies the tab-bar position after this first render).
+      this._fitMonthCells();
+      requestAnimationFrame(() => this._fitMonthCells());
+    }
     this._renderDaySide();
     this._highlightSelectedCell();
+  }
+
+  // Swap a rebuilt view into the area. A render that comes out identical touches nothing
+  // (returns false, so the caller skips rebinding): sync pushes a burst of *-changed events
+  // and rebuilding the DOM for each one is what made the calendar flash. The view's scroller
+  // keeps its place while scrollKey (the range on screen) is the same, else starts at defaultTop.
+  _commitCalView(container, html, scrollKey, defaultTop = 0) {
+    if (html === this._calViewHtml) return false;
+    const SCROLLER = '.calendar-grid, .cal-week-body-wrap, .cal-agenda';
+    const top = scrollKey === this._calScrollKey ? container.querySelector(SCROLLER)?.scrollTop : undefined;
+    container.innerHTML = html;
+    this._calViewHtml = html;
+    this._calScrollKey = scrollKey;
+    const scroller = container.querySelector(SCROLLER);
+    if (scroller) scroller.scrollTop = top ?? defaultTop;
+    return true;
   }
 
   // Mark the cell/column/row for the currently-selected day across whichever view is up.
@@ -1122,15 +1150,12 @@ class ViewRenderer {
     }
 
     html += `</div></div></div>`;
-    container.innerHTML = html;
+    if (!this._commitCalView(container, html, `month ${monthNames[month]} ${year}`)) return;
     this._bindCalHeader(container);
 
     container.querySelectorAll('.cal-day-cell:not(.cal-empty)').forEach(cell => {
       cell.addEventListener('click', () => this._showDayExpanded(cell.dataset.date, cell.dataset.dayName));
     });
-
-    // Fit as many event rows as each cell's height allows (after layout).
-    requestAnimationFrame(() => this._fitMonthCells());
   }
 
   // Per day cell, show as many event dots as physically fit and collapse the rest into
@@ -1345,7 +1370,8 @@ class ViewRenderer {
     html += `</div></div>`; // body + wrap
     html += `</div>`; // calendar-container
 
-    container.innerHTML = html;
+    // Opens at 8am the first time a range is shown; re-renders of that range stay put.
+    if (!this._commitCalView(container, html, rangeTitle, (8 - START_HOUR) * HOUR_H)) return;
     this._bindCalHeader(container);
 
     // Click column header → show day detail
@@ -1389,10 +1415,6 @@ class ViewRenderer {
         }));
       });
     });
-
-    // Scroll to 8am on first render
-    const bodyWrap = container.querySelector('.cal-week-body-wrap');
-    if (bodyWrap) bodyWrap.scrollTop = (8 - START_HOUR) * HOUR_H;
   }
 
   // ── AGENDA VIEW ──────────────────────────────────────────────────
@@ -1482,7 +1504,7 @@ class ViewRenderer {
     }
 
     html += `</div></div>`; // agenda + container
-    container.innerHTML = html;
+    if (!this._commitCalView(container, html, `agenda ${monthNames[month]} ${year}`)) return;
     this._bindCalHeader(container);
 
     // Click a work session → open its project's settings.
@@ -1720,7 +1742,11 @@ class ViewRenderer {
       }
     }
 
+    if (html === this._calSideHtml) return; // nothing changed — keep the panel's DOM
+    this._calSideHtml = html;
     side.innerHTML = html;
+    if (dateStr !== this._calSideDate) side.scrollTop = 0; // a different day starts at the top
+    this._calSideDate = dateStr;
 
     // Click a source badge → open that item's linked app (Gradescope/Variate/…),
     // just like the link chip on the sticky note. Stops the click from also opening

@@ -59,7 +59,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     var graph: GraphCard? = null
     /** A closed 2D shape's fill (ARGB, 0 = none). A solid's paint lives in its [Solid.fill]. */
     var fillColor = 0
-    /** A SYMBOL's symbol, and (INLINE ones) its body size relative to standard — resizing scales it. */
+    /** A SYMBOL's symbol, and its size relative to standard: an INLINE one's body (resizing scales it) or a STRIP's depth. */
     var symbol: Sym? = null
     var symScale = 1f
     /**
@@ -106,20 +106,20 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** The draggable handle points, on the page (rotated with the shape). */
     val handles: List<PointF> get() = when {
         solid != null || type == ShapeType.GRAPH -> emptyList()
-        // A box symbol keeps its proportions: resize it with the selection box. An inline one's handles are its terminals.
-        type == ShapeType.SYMBOL && symbol?.kind != SymKind.INLINE -> emptyList()
+        // A box symbol is resized with the selection box. An inline one's handles are its terminals, a strip's its ends.
+        type == ShapeType.SYMBOL && symbol?.kind?.ended != true -> emptyList()
         rot == 0f -> verts
         else -> verts.map { rotated(it) }
     }
 
     /**
-     * The page point a SYMBOL keeps on the grid: an inline one's first terminal, a box one's
-     * [Sym.ax]/[Sym.ay] anchor (a pin or terminal), turned with it. Null for other shapes.
+     * The page point a SYMBOL keeps on the grid: an inline one's first terminal (a strip's first
+     * end), a box one's [Sym.ax]/[Sym.ay] anchor (a pin or terminal), turned with it. Null for other shapes.
      */
     val gridAnchor: PointF? get() {
         val sym = symbol ?: return null
         if (type != ShapeType.SYMBOL) return null
-        if (sym.kind == SymKind.INLINE) return handles.firstOrNull()?.let { PointF(it.x, it.y) }
+        if (sym.kind.ended) return handles.firstOrNull()?.let { PointF(it.x, it.y) }
         val a = verts[0]; val b = verts[1]
         val p = PointF((a.x + b.x) / 2f + sym.ax * abs(b.x - a.x) / sym.w, (a.y + b.y) / 2f + sym.ay * abs(b.y - a.y) / sym.h)
         return if (rot == 0f) p else rotated(p)
@@ -159,9 +159,28 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
     /** Scale an inline symbol's body by [k] along with its terminals (a box symbol scales with its box). */
     fun scaleSymbol(k: Float) { symScale = (symScale * k).coerceIn(0.2f, 20f) }
 
+    /** A box symbol with fixed proportions, which scales evenly so its circles stay round. */
+    val keepsProportions: Boolean get() = type == ShapeType.SYMBOL && symbol?.let { it.kind == SymKind.BOX && !it.stretches } == true
+
+    /**
+     * Strips used to be saved as boxes (corners + [rot]). Turn one into its line, in place: the two
+     * ends where its old box drew the line, its depth kept in [symScale].
+     */
+    fun stripFromBox() {
+        val sym = symbol ?: return
+        val a = verts[0]; val b = verts[1]
+        val sx = abs(b.x - a.x) / sym.w; val sy = abs(b.y - a.y) / sym.h
+        val hx = if (sym.alongY) 0f else sym.w / 2f; val hy = if (sym.alongY) sym.h / 2f else 0f
+        val cx = (a.x + b.x) / 2f + sym.ax * sx; val cy = (a.y + b.y) / 2f + sym.ay * sy
+        val p0 = rotated(PointF(cx - hx * sx, cy - hy * sy)); val p1 = rotated(PointF(cx + hx * sx, cy + hy * sy))
+        a.set(p0.x, p0.y); b.set(p1.x, p1.y)
+        symScale = (if (sym.alongY) sx else sy).coerceIn(0.2f, 20f)
+        rot = 0f
+    }
+
     /** Line, arrow and triangle are pure point shapes — rotating them just rotates their verts. */
     val rotatesByVerts: Boolean get() = type == ShapeType.LINE || type == ShapeType.ARROW || type == ShapeType.TRIANGLE || type == ShapeType.TRAPEZOID ||
-        (type == ShapeType.SYMBOL && symbol?.kind == SymKind.INLINE)
+        (type == ShapeType.SYMBOL && symbol?.kind?.ended == true)
 
     /** Rotate the whole shape by [deg] about page point ([cx],[cy]). */
     fun rotateBy(deg: Float, cx: Float, cy: Float) {
@@ -253,13 +272,22 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
 
         /**
          * [sym] at [k]× its standard size, centered at (cx,cy): an inline one horizontal across
-         * [Symbols.SPAN] (first terminal on the left), a box one in its standard box.
+         * [Symbols.SPAN] (first terminal on the left), a box one in its standard box, a strip's line
+         * where that box puts it.
          */
         fun symbolAt(sym: Sym, cx: Float, cy: Float, k: Float = 1f): ShapeSpec {
-            val v = if (sym.kind == SymKind.INLINE) {
-                val half = max(Symbols.SPAN, sym.w + 16f) * k / 2f
-                arrayListOf(PointF(cx - half, cy), PointF(cx + half, cy))
-            } else arrayListOf(PointF(cx - sym.w * k / 2f, cy - sym.h * k / 2f), PointF(cx + sym.w * k / 2f, cy + sym.h * k / 2f))
+            val v = when (sym.kind) {
+                SymKind.INLINE -> {
+                    val half = max(Symbols.SPAN, sym.w + 16f) * k / 2f
+                    arrayListOf(PointF(cx - half, cy), PointF(cx + half, cy))
+                }
+                SymKind.BOX -> arrayListOf(PointF(cx - sym.w * k / 2f, cy - sym.h * k / 2f), PointF(cx + sym.w * k / 2f, cy + sym.h * k / 2f))
+                SymKind.STRIP -> {
+                    val lx = cx + sym.ax * k; val ly = cy + sym.ay * k
+                    val hx = if (sym.alongY) 0f else sym.w * k / 2f; val hy = if (sym.alongY) sym.h * k / 2f else 0f
+                    arrayListOf(PointF(lx - hx, ly - hy), PointF(lx + hx, ly + hy))
+                }
+            }
             return ShapeSpec(ShapeType.SYMBOL, v).also { it.symbol = sym; it.symScale = k }
         }
 

@@ -9,6 +9,8 @@ It is one file split by banner comments. Grep `// ===================== <NAME>` 
 
 **EngInk is Android-only.** There is no web ink page. The `ink` nav tab exists only inside the Android shell (`NATIVE_AUTH`): it navigates to `ink.html`, which `mobile-ink` `MainActivity` intercepts to launch native ink, so that page is never served. In a browser the tab is removed. Keep the `NATIVE INK APP SETTINGS BRIDGE`, because the Android app uses it.
 
+**The Android shell is a plain WebView:** no `navigator.share`, no downloads, and `<input type=file>` only works through `MainActivity.onShowFileChooser`. To save a file there, use `window.AndroidFiles` (`mobile-ink` `FileSaveBridge`, see `shareSaveNative`).
+
 Desktop counterparts worth knowing: sticky-note palette + `sourceLogoSvg` mirror `renderer/components/sticky-note.js`; `projectOptionGroups()` renders project groups as `<optgroup>`s; `mountEcosystem` is the read/open-only Ecosystem mirror; `tour.js` is a **verbatim** copy of `renderer/tour.js`.
 
 ## PWA-only settings (no desktop mirror needed)

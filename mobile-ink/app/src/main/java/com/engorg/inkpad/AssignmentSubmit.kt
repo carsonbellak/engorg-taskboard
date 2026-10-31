@@ -149,20 +149,21 @@ object AssignmentSubmit {
         catch (e: Exception) { Outcome.Failed(e.message ?: "Couldn’t reach Gradescope.") }
     }
 
-    /** Copy the PDF to Downloads/EngInk; returns where, or null. */
-    fun saveToDownloads(ctx: Context, pdf: File): String? {
+    /** Copy [file] to Downloads as [name] (under [folder] when set); returns where, or null. */
+    fun saveToDownloads(ctx: Context, file: File, name: String = file.name, mime: String = "application/pdf", folder: String? = "EngInk"): String? {
         if (Build.VERSION.SDK_INT >= 29) {
+            val sub = if (folder != null) "/$folder" else ""
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, pdf.name)
-                put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
-                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/EngInk")
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, mime)
+                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + sub)
             }
             val uri = ctx.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values) ?: return null
-            ctx.contentResolver.openOutputStream(uri)?.use { out -> pdf.inputStream().use { it.copyTo(out) } }
-            return "Downloads/EngInk/${pdf.name}"
+            ctx.contentResolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+            return "Downloads$sub/$name"
         }
         val dir = ctx.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: return null
-        val dest = File(dir, pdf.name); pdf.copyTo(dest, overwrite = true)
+        val dest = File(dir, name); file.copyTo(dest, overwrite = true)
         return dest.absolutePath
     }
 

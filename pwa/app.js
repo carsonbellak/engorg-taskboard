@@ -882,7 +882,7 @@ function render() {
     }
     case 'ecosystem': content.innerHTML = ''; mountEcosystem(content); break;
     case 'timeline': content.innerHTML = renderTimeline(); bindTimelineEvents(); break;
-    case 'calendar': content.innerHTML = renderCalendar(); bindCalendarEvents(); break;
+    case 'calendar': paintCalendar(); break;
     case 'purchases': content.innerHTML = renderPurchases(); bindPurchaseEvents(); break;
     case 'stats': content.innerHTML = renderStats(); break;
     case 'printer': content.innerHTML = renderPrinter(); renderPrinterFeed(); bindPrinterEvents(); break;
@@ -2109,10 +2109,34 @@ function renderCalAgenda() {
   return { title, body: html };
 }
 
-// Re-render the whole calendar (view + panel) into the content area and rebind.
-function rerenderCal() {
-  document.getElementById('app-content').innerHTML = renderCalendar();
+// Paint the calendar (view + panel) into the content area and rebind. A render that comes out
+// identical only refreshes the day list: sync fires a render per snapshot (and per save), and
+// rebuilding for each one made the calendar flash and lost the scroll position. Same idea as
+// the desktop's _commitCalView.
+let calPaintedHtml = null, calPaintedRange = null, calPaintedSideHtml = null;
+function paintCalendar() {
+  const content = document.getElementById('app-content');
+  const html = renderCalendar();
+  const wasCalendar = !!content.querySelector('.cal-view-area');
+  if (wasCalendar && html === calPaintedHtml) {
+    renderCalDaySide();
+    highlightCalSelected();
+    return;
+  }
+  const range = `${calView} ${calWeekStart.getTime()}`;
+  const gridTop = range === calPaintedRange ? content.querySelector('.cal-week-bodywrap')?.scrollTop : undefined;
+  const pageTop = content.scrollTop;
+  content.innerHTML = html;
+  calPaintedHtml = html;
+  calPaintedRange = range;
   bindCalendarEvents();
+  const grid = content.querySelector('.cal-week-bodywrap');
+  if (grid && gridTop != null) grid.scrollTop = gridTop; // else bindCalWeek's 8am
+  if (wasCalendar) content.scrollTop = pageTop;
+}
+
+function rerenderCal() {
+  paintCalendar();
 }
 
 // Move prev/next: weeks in week view, months in month/agenda.
@@ -2348,6 +2372,8 @@ function renderCalDaySide() {
       if (calShowCompleted) html += `<div class="cal-completed-list">${renderItems(doneItems)}</div>`;
     }
   }
+  if (html === calPaintedSideHtml && el.firstChild) return; // nothing changed — keep the panel's DOM
+  calPaintedSideHtml = html;
   el.innerHTML = html;
 
   // Source badge → open the linked app (guarded so it doesn't also open the card).
@@ -4532,6 +4558,7 @@ function mountEcosystem(container) {
 // manifest share_target → sw.js stashes the POST in the SHARE_INBOX cache → consumeShareTarget().
 const SHARE_CHUNK = 900 * 1024;
 const SHARE_MAX_FILE = 25 * 1024 * 1024;
+const SHARE_NATIVE_CHUNK = 768 * 1024;
 const SHARE_MAX_TEXT = 200000;
 const SHARE_TTL_DAYS = 7;
 const SHARE_POOL = 3;
@@ -4690,11 +4717,35 @@ async function shareFetchFile(item) {
   return file;
 }
 
-// Phones: the share sheet (Save to Files / Photos / any app). Elsewhere: a normal download.
-// A long download can outlive the tap's user activation, so a refused share leaves the file
-// cached and asks for one more tap (which then opens the sheet instantly).
+// The Android shell's WebView can neither share nor download, so window.AndroidFiles writes the
+// file to Downloads. Chunks are a multiple of 3 bytes so each one is valid base64 by itself.
+async function shareSaveNative(file) {
+  const bridge = window.AndroidFiles;
+  const failed = `Couldn’t save ${file.name}.`;
+  const id = bridge.begin();
+  if (!id) throw new Error(failed);
+  try {
+    for (let at = 0; at < file.size; at += SHARE_NATIVE_CHUNK) {
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result.split(',')[1] || '');
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file.slice(at, at + SHARE_NATIVE_CHUNK));
+      });
+      if (!bridge.append(id, b64)) throw new Error(failed);
+    }
+    const where = bridge.finish(id, file.name, file.type || '');
+    if (!where) throw new Error(failed);
+    setShareStatus(`Saved to ${where}.`, 'success');
+  } catch (e) { bridge.abort(id); throw e; }
+}
+
+// Android app: straight to Downloads. Phones: the share sheet (Save to Files / Photos / any app).
+// Elsewhere: a normal download. A long download can outlive the tap's user activation, so a refused
+// share leaves the file cached and asks for one more tap (which then opens the sheet instantly).
 async function shareSave(item) {
   const file = await shareFetchFile(item);
+  if (window.AndroidFiles) return shareSaveNative(file);
   const touch = navigator.maxTouchPoints > 0;
   if (touch && navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file] }); return; }

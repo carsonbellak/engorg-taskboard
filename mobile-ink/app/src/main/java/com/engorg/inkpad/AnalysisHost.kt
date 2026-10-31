@@ -2,6 +2,7 @@ package com.engorg.inkpad
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.PointF
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import org.json.JSONArray
@@ -73,10 +74,15 @@ class AnalysisHost(context: Context) {
                 when (sp.type) {
                     ShapeType.SYMBOL -> {
                         val sym = sp.symbol ?: return@forEachIndexed
+                        // A strip reaches the analysis as the turned box it would be, so its local coords still hold.
+                        val strip = if (sym.kind == SymKind.STRIP) Symbols.StripFrame(sym, sp.verts[0], sp.verts[1], sp.symScale) else null
                         val o = JSONObject().put("i", i).put("sym", sym.name).put("inline", sym.kind == SymKind.INLINE)
-                            .put("w", sym.w.toDouble()).put("h", sym.h.toDouble()).put("rot", sp.rot.toDouble())
-                            .put("pivot", pt(sp.pivot)).put("props", sp.props ?: JSONObject())
-                        if (sym.kind == SymKind.INLINE) {
+                            .put("w", sym.w.toDouble()).put("h", sym.h.toDouble()).put("rot", (strip?.rot ?: sp.rot).toDouble())
+                            .put("pivot", pt(strip?.let { PointF(it.cx, it.cy) } ?: sp.pivot)).put("props", sp.props ?: JSONObject())
+                        if (strip != null) {
+                            o.put("box", JSONArray().put((strip.cx - strip.boxW / 2f).toDouble()).put((strip.cy - strip.boxH / 2f).toDouble())
+                                .put((strip.cx + strip.boxW / 2f).toDouble()).put((strip.cy + strip.boxH / 2f).toDouble()))
+                        } else if (sym.kind == SymKind.INLINE) {
                             val h = sp.handles
                             if (h.size < 2) return@forEachIndexed
                             val len = hypot(h[1].x - h[0].x, h[1].y - h[0].y)

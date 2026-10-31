@@ -13,8 +13,15 @@ import kotlin.math.sin
  * INLINE symbols sit on a wire between two terminals (the shape's two verts): the body keeps its
  * standard size and the leads stretch, so dragging a terminal re-wires without distorting it.
  * BOX symbols fill the box between their two verts (like a rectangle) and turn with the rotate knob.
+ * STRIP symbols (a wall, a ground line, a distributed load) are drawn along a line: their two verts
+ * are its ends, so dragging one lengthens or turns it while the hatching keeps its size and spacing.
  */
-enum class SymKind { INLINE, BOX }
+enum class SymKind {
+    INLINE, BOX, STRIP;
+
+    /** Its two verts are the ends of a line (draggable handles), not the corners of a box. */
+    val ended: Boolean get() = this != BOX
+}
 
 /** Picker tabs, grouped by the Purdue BSME course that uses them. */
 enum class SymGroup(val label: String, val courses: String) {
@@ -29,6 +36,8 @@ enum class SymGroup(val label: String, val courses: String) {
  * along the wire). [anchor] is the local point a tap lands on and that snaps to the dot grid — a
  * terminal or a support's pin — so wires and beams meet it on the dots.
  * WIRE, MEMBER and FORCE are "bare" inline symbols ([bare]): no body, just their terminal-to-terminal line.
+ * A STRIP's [w]×[h] is its standard box, its long side running along the line, and [ax]/[ay] put
+ * the line in that box (a wall's face, the tips of a load's arrows) — that's what you draw.
  */
 enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w: Float, val h: Float, val ax: Float = 0f, val ay: Float = 0f) {
     // Circuits
@@ -76,11 +85,11 @@ enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w:
     PIN_SUPPORT("Pin support", SymGroup.MECH, SymKind.BOX, 40f, 36f, 0f, -14f),
     ROLLER_SUPPORT("Roller support", SymGroup.MECH, SymKind.BOX, 40f, 36f, 0f, -14f),
     ROCKER("Rocker", SymGroup.MECH, SymKind.BOX, 40f, 36f, 0f, -14f),
-    FIXED_SUPPORT("Fixed wall", SymGroup.MECH, SymKind.BOX, 16f, 64f, 8f, 0f),
-    COLLAR("Collar on smooth rod", SymGroup.MECH, SymKind.BOX, 24f, 64f),
-    SLIDER("Pin in smooth slot", SymGroup.MECH, SymKind.BOX, 64f, 24f),
+    FIXED_SUPPORT("Fixed wall", SymGroup.MECH, SymKind.STRIP, 16f, 64f, 8f, 0f),
+    COLLAR("Collar on smooth rod", SymGroup.MECH, SymKind.STRIP, 24f, 64f),
+    SLIDER("Pin in smooth slot", SymGroup.MECH, SymKind.STRIP, 64f, 24f),
     HINGE("Hinge (internal pin)", SymGroup.MECH, SymKind.BOX, 10f, 10f),
-    GROUND_SURFACE("Ground", SymGroup.MECH, SymKind.BOX, 96f, 12f, 0f, -6f),
+    GROUND_SURFACE("Ground", SymGroup.MECH, SymKind.STRIP, 96f, 12f, 0f, -6f),
     SPRING("Spring", SymGroup.MECH, SymKind.INLINE, 56f, 20f),
     DAMPER("Damper", SymGroup.MECH, SymKind.INLINE, 40f, 24f),
     CART("Mass on wheels", SymGroup.MECH, SymKind.BOX, 64f, 56f),
@@ -89,7 +98,7 @@ enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w:
     MASS("Mass", SymGroup.MECH, SymKind.BOX, 48f, 40f),
     MOMENT_CCW("Moment ↺", SymGroup.MECH, SymKind.BOX, 48f, 48f),
     MOMENT_CW("Moment ↻", SymGroup.MECH, SymKind.BOX, 48f, 48f),
-    DIST_LOAD("Distributed load", SymGroup.MECH, SymKind.BOX, 96f, 32f, 0f, 16f),
+    DIST_LOAD("Distributed load", SymGroup.MECH, SymKind.STRIP, 96f, 32f, 0f, 16f),
     INCLINE("Incline", SymGroup.MECH, SymKind.BOX, 96f, 56f),
     WATER_TANK("Water tank", SymGroup.MECH, SymKind.BOX, 128f, 112f),
 
@@ -100,6 +109,12 @@ enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w:
 
     /** An inline symbol with no body or leads: drawn straight between its terminals (wire, truss member, force). */
     val bare: Boolean get() = this == WIRE || this == MEMBER || this == FORCE
+
+    /** A STRIP whose line runs along local y (a wall) rather than local x (the ground). */
+    val alongY: Boolean get() = h > w
+
+    /** A BOX symbol with no fixed proportions: it takes the exact box you drag, like a rectangle (an incline's slope is what you drew). */
+    val stretches: Boolean get() = this == MASS || this == INCLINE || this == WATER_TANK || this == HOT_RESERVOIR || this == COLD_RESERVOIR
 
     companion object {
         fun inGroup(g: SymGroup) = values().filter { it.group == g }
@@ -185,12 +200,18 @@ object Symbols {
 
     /**
      * The parts of [sym] placed by [verts]. INLINE: terminals verts[0]→verts[1], body at [k]× its
-     * standard size (shrunk to fit a short span). BOX: fills the box verts[0]–verts[1]. [rot] is the
-     * shape's rotation, so the upright glyphs can be counter-turned.
+     * standard size (shrunk to fit a short span). BOX: fills the box verts[0]–verts[1]. STRIP: along
+     * the line verts[0]→verts[1]. [rot] is the shape's rotation, so the upright glyphs can be counter-turned.
      */
     fun parts(sym: Sym, verts: List<PointF>, k: Float, rot: Float): List<ShapeSpec.Part> {
         val a = verts[0]; val b = verts[1]
         if (sym.bare) return bareParts(sym, a, b, k)
+        if (sym.kind == SymKind.STRIP) {
+            val f = StripFrame(sym, a, b, k)
+            val bl = Builder({ x, y -> f.map(x, y) }, f.kk, 0f)
+            drawStrip(sym, bl, f.half)
+            return bl.out
+        }
         return if (sym.kind == SymKind.INLINE) {
             val len = hypot(b.x - a.x, b.y - a.y)
             val ux = if (len > 1e-3f) (b.x - a.x) / len else 1f
@@ -221,6 +242,27 @@ object Symbols {
         val sx = abs(b.x - a.x) / sym.w
         val sy = abs(b.y - a.y) / sym.h
         fun map(x: Float, y: Float) = PointF(cx + x * sx, cy + y * sy)
+    }
+
+    /**
+     * A STRIP symbol's local → page mapping: the local axes turned onto the line a→b, at [kk]× its
+     * standard depth (clamped so a resize never makes it huge). Local along-the-line runs ±[half].
+     * Seen as a box this is one the analysis can read: [boxW]×[boxH] centered on ([cx],[cy]), turned [rot]°.
+     */
+    class StripFrame(sym: Sym, a: PointF, b: PointF, k: Float) {
+        val kk = k.coerceIn(0.5f, 2f)
+        private val len = hypot(b.x - a.x, b.y - a.y)
+        private val ux = if (len > 1e-3f) (b.x - a.x) / len else 1f
+        private val uy = if (len > 1e-3f) (b.y - a.y) / len else 0f
+        private val exX = if (sym.alongY) uy else ux
+        private val exY = if (sym.alongY) -ux else uy
+        val cx = (a.x + b.x) / 2f - (sym.ax * exX - sym.ay * exY) * kk
+        val cy = (a.y + b.y) / 2f - (sym.ax * exY + sym.ay * exX) * kk
+        val half = len / 2f / kk
+        val rot = Math.toDegrees(atan2(exY, exX).toDouble()).toFloat()
+        val boxW = if (sym.alongY) sym.w * kk else len
+        val boxH = if (sym.alongY) len else sym.h * kk
+        fun map(x: Float, y: Float) = PointF(cx + (x * exX - y * exY) * kk, cy + (x * exY + y * exX) * kk)
     }
 
     /**
@@ -280,8 +322,9 @@ object Symbols {
     /** Local coords: INLINE runs along +x (−w/2 at the first terminal's side), y is the wire's normal; BOX is centered. */
     private fun draw(sym: Sym, g: Builder) {
         when (sym) {
-            // Bare inline symbols are built straight from their terminals in [bareParts].
+            // Bare inline symbols are built straight from their terminals in [bareParts], strips in [drawStrip].
             Sym.WIRE, Sym.MEMBER, Sym.FORCE -> {}
+            Sym.FIXED_SUPPORT, Sym.COLLAR, Sym.SLIDER, Sym.GROUND_SURFACE, Sym.DIST_LOAD -> {}
             Sym.RESISTOR ->g.path(-22f, 0f, -18.33f, -7f, -11f, 7f, -3.67f, -7f, 3.67f, 7f, 11f, -7f, 18.33f, 7f, 22f, 0f)
             Sym.RESISTOR_BOX -> g.path(-22f, -8f, 22f, -8f, 22f, 8f, -22f, 8f, closed = true)
             Sym.CAPACITOR -> { g.line(-4f, -14f, -4f, 14f); g.line(4f, -14f, 4f, 14f) }
@@ -374,23 +417,7 @@ object Symbols {
                 g.line(-20f, 10f, 20f, 10f)
                 var x = -16f; while (x <= 20f) { g.line(x, 10f, x - 6f, 18f, fine = true); x += 6f }
             }
-            // Collar on a smooth rod: the rod is local y, the pin is the collar's centre.
-            Sym.COLLAR -> {
-                g.line(0f, -32f, 0f, 32f)
-                g.path(-8f, -10f, 8f, -10f, 8f, 10f, -8f, 10f, closed = true)
-                g.dot(0f, 0f, 2.5f)
-            }
-            // Pin in a smooth slot running along local x.
-            Sym.SLIDER -> { g.path(-32f, -6f, 32f, -6f, 32f, 6f, -32f, 6f, closed = true); g.circle(0f, 0f, 4f) }
             Sym.HINGE -> g.circle(0f, 0f, 4f)
-            Sym.FIXED_SUPPORT -> {
-                g.line(8f, -32f, 8f, 32f)
-                var y = -30f; while (y <= 30f) { g.line(8f, y, -2f, y + 10f, fine = true); y += 7.5f }
-            }
-            Sym.GROUND_SURFACE -> {
-                g.line(-48f, -6f, 48f, -6f)
-                var x = -44f; while (x <= 48f) { g.line(x, -6f, x - 8f, 6f, fine = true); x += 8f }
-            }
             Sym.SPRING -> {
                 val pts = arrayListOf(-28f, 0f, -22f, 0f)
                 for (i in 0 until 8) { pts.add(-22f + 44f * (i + 0.5f) / 8f); pts.add(if (i % 2 == 0) -9f else 9f) }
@@ -414,11 +441,6 @@ object Symbols {
             // Screen angles run clockwise (y is down), so ↺ sweeps backwards.
             Sym.MOMENT_CCW -> { val e = g.arc(0f, 0f, 18f, 18f, 60f, -210f); val t = Math.toRadians(-210.0); g.head(e.x, e.y, sin(t).toFloat(), -cos(t).toFloat()) }
             Sym.MOMENT_CW -> { val e = g.arc(0f, 0f, 18f, 18f, 120f, 390f); val t = Math.toRadians(390.0); g.head(e.x, e.y, -sin(t).toFloat(), cos(t).toFloat()) }
-            // Load acts on the member along the arrow tips (local y = 16).
-            Sym.DIST_LOAD -> {
-                g.line(-48f, -16f, 48f, -16f)
-                for (x in listOf(-48f, -24f, 0f, 24f, 48f)) g.arrow(x, -16f, x, 16f, 6f)
-            }
             // Slope rises left → right; the fine arc marks the incline angle at the low corner.
             Sym.INCLINE -> {
                 g.path(-48f, 28f, 48f, 28f, 48f, -28f, closed = true)
@@ -434,6 +456,41 @@ object Symbols {
             Sym.BLOCK -> { g.path(-24f, -20f, 24f, -20f, 24f, 20f, -24f, 20f, closed = true); g.arrow(-48f, 0f, -24f, 0f); g.arrow(24f, 0f, 48f, 0f) }
             Sym.SUMMER -> { g.circle(0f, 0f, 14f); g.line(-9.9f, -9.9f, 9.9f, 9.9f); g.line(-9.9f, 9.9f, 9.9f, -9.9f) }
             Sym.GAIN -> { g.path(-20f, -20f, 20f, 0f, -20f, 20f, closed = true); g.line(-32f, 0f, -20f, 0f); g.line(20f, 0f, 32f, 0f) }
+        }
+    }
+
+    /** Stops from [a] to [b] about [step] apart, so a strip's marks keep their spacing at any length. */
+    private fun stops(a: Float, b: Float, step: Float): List<Float> {
+        if (b <= a) return emptyList()
+        val n = Math.round((b - a) / step).coerceAtLeast(1)
+        return (0..n).map { a + (b - a) * it / n }
+    }
+
+    /** Local coords as in [draw], but the along-the-line axis runs ±[h], however long the line is. */
+    private fun drawStrip(sym: Sym, g: Builder, h: Float) {
+        when (sym) {
+            Sym.FIXED_SUPPORT -> {
+                g.line(8f, -h, 8f, h)
+                for (y in stops(-h, h - 10f, 7.5f)) g.line(8f, y, -2f, y + 10f, fine = true)
+            }
+            Sym.GROUND_SURFACE -> {
+                g.line(-h, -6f, h, -6f)
+                for (x in stops(-h + 8f, h, 8f)) g.line(x, -6f, x - 8f, 6f, fine = true)
+            }
+            // Load acts on the member along the arrow tips (local y = 16).
+            Sym.DIST_LOAD -> {
+                g.line(-h, -16f, h, -16f)
+                for (x in stops(-h, h, 24f)) g.arrow(x, -16f, x, 16f, 6f)
+            }
+            // Collar on a smooth rod: the rod is local y, the pin is the collar's centre.
+            Sym.COLLAR -> {
+                g.line(0f, -h, 0f, h)
+                g.path(-8f, -10f, 8f, -10f, 8f, 10f, -8f, 10f, closed = true)
+                g.dot(0f, 0f, 2.5f)
+            }
+            // Pin in a smooth slot running along local x.
+            Sym.SLIDER -> { g.path(-h, -6f, h, -6f, h, 6f, -h, 6f, closed = true); g.circle(0f, 0f, 4f) }
+            else -> {}
         }
     }
 }

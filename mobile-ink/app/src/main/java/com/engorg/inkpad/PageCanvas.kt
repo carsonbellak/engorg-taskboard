@@ -433,8 +433,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     /**
      * Drop the armed symbol at its standard size, so every resistor/source on the page matches. A tap
      * places it there (an inline one horizontal); a drag lays an inline one along the stroke — ends on
-     * the grid, near-square angles squared up — or fits a box one inside what you drew. The symbol stays
-     * armed for the next tap; nothing is selected (switch to the lasso to move or turn one).
+     * the grid, near-square angles squared up — and a strip (a wall, a ground line) along it the same
+     * way; a box one fits inside what you drew, or fills it if it has no fixed proportions. The symbol
+     * stays armed for the next tap; nothing is selected (switch to the lasso to move or turn one).
      */
     private fun commitSymbol(page: Int, pts: List<PointF>) {
         val sym = host.pendingSymbol ?: return
@@ -442,7 +443,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         for (p in pts) { minX = min(minX, p.x); minY = min(minY, p.y); maxX = max(maxX, p.x); maxY = max(maxY, p.y) }
         val tap = hypot(maxX - minX, maxY - minY) < 14f
         val a = pts.first(); val b = pts.last()
-        val spec = if (sym.kind == SymKind.INLINE) {
+        val spec = if (sym.kind == SymKind.INLINE || (sym.kind == SymKind.STRIP && !tap)) {
             val std = ShapeSpec.symbolAt(sym, a.x, a.y)
             val span = std.verts[1].x - std.verts[0].x
             if (tap) {
@@ -457,7 +458,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 var len = hypot(dx, dy)
                 if (len < 1f) { dx = 1f; dy = 0f; len = 1f }
                 // Too short a drag still gets room for the whole body, rounded up to whole grid squares.
-                val need = (sym.w + 16f)
+                val need = if (sym.kind == SymKind.STRIP) Symbols.GRID else sym.w + 16f
                 val l = if (len >= need) len else Math.ceil((need / Symbols.GRID).toDouble()).toFloat() * Symbols.GRID
                 std.verts[0].set(p0.x, p0.y); std.verts[1].set(p0.x + dx / len * l, p0.y + dy / len * l); std
             }
@@ -467,6 +468,13 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 // The anchor (a terminal or a support's pin) lands on the dot nearest the tap.
                 val s = gridSnap(PointF(a.x, a.y))
                 ShapeSpec.symbolAt(sym, s.x - sym.ax, s.y - sym.ay)
+            } else if (sym.stretches) {
+                // Corners on the dots, and never squashed flat by a drag that was nearly a straight line.
+                val p0 = gridSnap(PointF(minX, minY)); val p1 = gridSnap(PointF(maxX, maxY))
+                ShapeSpec.symbolAt(sym, 0f, 0f).also {
+                    it.verts[0].set(p0.x, p0.y)
+                    it.verts[1].set(p0.x + max(p1.x - p0.x, Symbols.GRID), p0.y + max(p1.y - p0.y, Symbols.GRID))
+                }
             } else ShapeSpec.symbolAt(sym, (minX + maxX) / 2f, (minY + maxY) / 2f, k)
         }
         // Keep it on the page.
@@ -942,6 +950,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 var sxf = if (abs(dragStartLocal.x - ax) > 1f) (h.x - ax) / (dragStartLocal.x - ax) else 1f
                 var syf = if (abs(dragStartLocal.y - ay) > 1f) (h.y - ay) / (dragStartLocal.y - ay) else 1f
                 sxf = sxf.coerceIn(0.05f, 20f); syf = syf.coerceIn(0.05f, 20f)
+                // A pulley or pin support stays round: it scales evenly, by whichever way the corner moved more.
+                if (dragStartRecs.any { it.shape?.keepsProportions == true }) { val k = if (abs(sxf - 1f) > abs(syf - 1f)) sxf else syf; sxf = k; syf = k }
                 applyMatrixToSelection(Matrix().apply { setTranslate(ax, ay); preScale(sxf, syf); preTranslate(-ax, -ay) }); refreshSelectionOverlay()
             }
             Grab.VERTEX -> {
@@ -1639,7 +1649,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 rec.shape.solid?.let { o.put("sd", it.params.toJson()).put("sr", Solid.rToJson(it.r)).put("sz", it.size.toDouble()) }
                 rec.shape.graph?.let { o.put("g", it.toJson()) }
                 if (rec.shape.fillColor != 0) o.put("fc", rec.shape.fillColor)
-                rec.shape.symbol?.let { o.put("sy", it.name); if (rec.shape.symScale != 1f) o.put("ss", rec.shape.symScale.toDouble()) }
+                rec.shape.symbol?.let { o.put("sy", it.name); if (rec.shape.symScale != 1f) o.put("ss", rec.shape.symScale.toDouble()); if (it.kind == SymKind.STRIP) o.put("sl", true) }
                 rec.shape.props?.takeIf { it.length() > 0 }?.let { o.put("pr", it) }
                 rec.shape.solid?.fill?.takeIf { !it.isEmpty }?.let { o.put("sf", it.toJson()) }
                 val va = JSONArray(); for (v in rec.shape.verts) va.put(JSONArray().put(v.x.toDouble()).put(v.y.toDouble()))
@@ -1731,6 +1741,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                             symbol = runCatching { Sym.valueOf(o.optString("sy")) }.getOrNull()
                             symScale = o.optDouble("ss", 1.0).toFloat().coerceIn(0.2f, 20f)
                             props = o.optJSONObject("pr")
+                            if (symbol?.kind == SymKind.STRIP && !o.has("sl")) stripFromBox()
                         }
                     }
                     if (spec.type == ShapeType.SOLID && spec.solid == null) continue
