@@ -44,6 +44,7 @@ class WorkbookShareActivity : ComponentActivity() {
     private val http = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
     private var page: String? = null    // the largest frame document so far: the artifact, not a warm-up frame
     private var saving = false
+    private var sharedLink = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -119,6 +120,7 @@ class WorkbookShareActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun openLink(link: String) {
+        sharedLink = link
         val view = WebView(this)
         web = view
         CookieManager.getInstance().apply { setAcceptCookie(true); setAcceptThirdPartyCookies(view, true) }
@@ -177,7 +179,7 @@ class WorkbookShareActivity : ComponentActivity() {
         saving = true
         web?.let { body.removeView(it); it.stopLoading() }
         CookieManager.getInstance().flush()
-        capture(Workbooks.add(Workbooks.titleOf(html, "Workbook"), null, html.toByteArray()))
+        capture(Workbooks.saveFromLink(sharedLink, html.toByteArray(), Workbooks.titleOf(html, "Workbook")))
     }
 
     private fun capture(w: Workbooks.Workbook) {

@@ -146,6 +146,12 @@ class MainActivity : ComponentActivity() {
                         }
                         return true
                     }
+                    // A Claude artifact link tapped in the PWA (Share tab, notes…) would otherwise
+                    // load in this WebView, with no way to save it.
+                    if (onPwa && request.isForMainFrame && Workbooks.isArtifactLink(u)) {
+                        offerArtifact(u)
+                        return true
+                    }
                     return false // let the WebView load everything else (the PWA)
                 }
 
@@ -196,6 +202,25 @@ class MainActivity : ComponentActivity() {
                 if (web.canGoBack()) web.goBack() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
+    }
+
+    /** Ask what to do with a Claude artifact link: save it as an EngInk workbook, or just view it. */
+    private fun offerArtifact(url: Uri) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("Claude artifact")
+            .setMessage("Save this to EngInk to study offline, or open it in your browser?")
+            .setPositiveButton("Import to EngInk") { _, _ ->
+                startActivity(Intent(this, WorkbookShareActivity::class.java)
+                    .setAction(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, url.toString()))
+            }
+            .setNegativeButton("Open in browser") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, url))
+                } catch (e: ActivityNotFoundException) {
+                    Toast.makeText(this, "No browser found on this device.", Toast.LENGTH_LONG).show()
+                }
+            }
+            .show()
     }
 
     /** The picker's result: several files arrive in clipData, a single one usually in data. */

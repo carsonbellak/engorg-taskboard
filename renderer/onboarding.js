@@ -18,6 +18,13 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.6': {
+      title: "What's new",
+      intro: 'Add Claude workbooks to EngInk with one tap.',
+      slides: [
+        { emoji: '🔗', title: 'Tap a link, choose what happens', body: 'On the tablet, tapping a Claude artifact link in the Share tab now asks whether to import it to EngInk or open it in your browser. Importing the same link again refreshes that workbook and keeps your progress.' },
+      ],
+    },
     '1.6.5': {
       title: "What's new",
       intro: 'Study from Claude workbooks in EngInk, offline.',

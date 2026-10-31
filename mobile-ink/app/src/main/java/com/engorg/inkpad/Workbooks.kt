@@ -35,6 +35,7 @@ object Workbooks {
         val created: Long,
         var notesId: String? = null,   // the notebook it was last read beside (reopens as that pair)
         var lastScroll: Int = 0,
+        var source: String? = null,    // the artifact link it came from: importing that again refreshes it
     )
 
     /** Marks a workbook in InkActivity's pane id lists, which otherwise hold notebook ids. */
@@ -69,6 +70,7 @@ object Workbooks {
                     o.optLong("created", 0L),
                     if (o.isNull("notesId")) null else o.optString("notesId").ifBlank { null },
                     o.optInt("lastScroll", 0),
+                    if (o.isNull("source")) null else o.optString("source").ifBlank { null },
                 ))
             }
         } catch (_: Exception) { }
@@ -79,7 +81,8 @@ object Workbooks {
             val arr = JSONArray()
             for (w in items) arr.put(JSONObject()
                 .put("id", w.id).put("title", w.title).put("folderId", w.folderId ?: JSONObject.NULL)
-                .put("created", w.created).put("notesId", w.notesId ?: JSONObject.NULL).put("lastScroll", w.lastScroll))
+                .put("created", w.created).put("notesId", w.notesId ?: JSONObject.NULL).put("lastScroll", w.lastScroll)
+                .put("source", w.source ?: JSONObject.NULL))
             indexFile().writeText(arr.toString())
         } catch (_: Exception) { }
     }
@@ -99,12 +102,21 @@ object Workbooks {
 
     fun all(): List<Workbook> = synchronized(this) { items.sortedByDescending { it.created } }
 
-    fun add(title: String, folderId: String?, html: ByteArray): Workbook {
-        val w = Workbook(UUID.randomUUID().toString().replace("-", "").take(12), title, folderId, System.currentTimeMillis())
+    fun add(title: String, folderId: String?, html: ByteArray, source: String? = null): Workbook {
+        val w = Workbook(UUID.randomUUID().toString().replace("-", "").take(12), title, folderId, System.currentTimeMillis(), source = source)
         htmlFile(w.id).writeBytes(html)
         synchronized(this) { items.add(w) }
         save()
         return w
+    }
+
+    /** Save a page fetched from [link]: a fresh copy of that workbook if it's already here, so its
+     *  id, name and quiz progress carry over, otherwise a new one. */
+    fun saveFromLink(link: String, html: ByteArray, title: String): Workbook {
+        val source = Uri.parse(link).buildUpon().clearQuery().fragment(null).build().toString()
+        val existing = synchronized(this) { items.find { it.source == source } } ?: return add(title, null, html, source)
+        htmlFile(existing.id).writeBytes(html)
+        return existing
     }
 
     fun delete(w: Workbook) {
@@ -149,6 +161,13 @@ object Workbooks {
             add(titleOf(String(bytes, Charsets.UTF_8), fallback), folderId, bytes)
         }
     } catch (_: Exception) { null }
+
+    /** True for a claude.ai link to a published artifact (not just any page on the site). */
+    fun isArtifactLink(url: Uri): Boolean {
+        val host = url.host ?: return false
+        return url.scheme == "https" && (host == "claude.ai" || host.endsWith(".claude.ai")) &&
+            url.pathSegments.any { it == "artifact" || it == "artifacts" }
+    }
 
     fun titleOf(html: String, fallback: String): String =
         Regex("<title[^>]*>([^<]*)</title>", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
