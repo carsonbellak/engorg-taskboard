@@ -2597,6 +2597,13 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   border-color: rgba(239,68,68,0.5);
 }
 
+/* A day with an exam reads gold in Month view, over today / done / incomplete tints. */
+.cal-day-cell.cal-day-exam {
+  background: color-mix(in srgb, var(--exam-gold) 16%, var(--bg-card, #FFFFFF)) !important;
+  border-color: var(--exam-gold) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--exam-gold) 45%, transparent);
+}
+
 .cal-day-cell.cal-today.cal-day-all-done {
   background: rgba(34,197,94,0.12);
   border-color: rgba(34,197,94,0.55);
@@ -2713,6 +2720,38 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 .cal-side-empty-icon { font-size: 30px; opacity: 0.5; margin-bottom: 10px; }
 .cal-side-empty-hint { font-size: 11px; opacity: 0.7; margin-top: 6px; }
 .cal-side-note { cursor: pointer; }
+/* Day-panel note card: a top-aligned row (check · priority-over-time · info · edit), then the
+   expanded checklist / attachments spanning the full card width underneath. */
+.cal-side .schedule-card.cal-side-note { flex-direction: column; align-items: stretch; gap: 0; }
+.cal-side-note-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.cal-side-note-left { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; min-width: 56px; }
+.cal-side-note .schedule-check { width: 30px; height: 30px; font-size: 16px; margin-bottom: 2px; }
+.cal-side-note-left .schedule-time { min-width: 0; }
+.cal-side-toggles { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 8px; min-width: 0; }
+.cal-side-toggle {
+  padding: 2px 8px;
+  font-size: 11px; font-weight: 600;
+  border-radius: 999px; cursor: pointer; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 15%, transparent);
+}
+.cal-side-toggle:hover, .cal-side-toggle.open { color: var(--text-primary); }
+.cal-side-cl, .cal-side-att {
+  display: flex; flex-direction: column; gap: 5px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+.cal-side-cl-item { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.35; cursor: pointer; color: var(--text-primary); }
+.cal-side-cl-item input { margin-top: 2px; flex-shrink: 0; cursor: pointer; accent-color: var(--accent, #6366F1); }
+.cal-side-cl-item.done span { text-decoration: line-through; opacity: 0.55; }
+.cal-side-att-item {
+  text-align: left; font-size: 12px; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  color: var(--text-primary); background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid transparent; overflow-wrap: anywhere;
+}
+.cal-side-att-item:hover { border-color: color-mix(in srgb, var(--text-primary) 25%, transparent); text-decoration: underline; }
 .cal-side-work { cursor: pointer; }
 /* Synced cards launch their source app on click — hint it, and reveal the ✎ on hover. */
 .cal-side .schedule-card.launches-src { cursor: pointer; }
@@ -2995,7 +3034,7 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   cursor: pointer;
 }
 
-.cal-week-day-col:hover {
+.cal-week-container:not(.cal-day-mode) .cal-week-day-col:hover {
   background: var(--bg-hover, #F1F5F9);
 }
 
@@ -3071,6 +3110,23 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
 /* A completed occurrence reads as done. */
 .cal-week-workblock-done { opacity: 0.45; }
 .cal-week-workblock-done .cal-week-event-title { text-decoration: line-through; }
+
+/* Timed note (start + end, e.g. a study block) — drawn in the grid like an event, but as a
+   tinted sticky-note tile with a solid left bar so it reads as a note, not a calendar event. */
+.cal-week-note-block {
+  background: color-mix(in srgb, var(--nb-color) 30%, var(--bg-secondary, #1E293B));
+  border: 1px solid color-mix(in srgb, var(--nb-color) 55%, transparent);
+  border-left: 3px solid var(--nb-color);
+}
+.cal-week-note-block .cal-week-event-title { color: var(--text-primary); }
+.cal-week-note-block .cal-week-event-time  { color: var(--text-secondary); }
+.cal-week-note-block.cal-week-note-done { opacity: 0.45; }
+.cal-week-note-block.cal-week-note-done .cal-week-event-title { text-decoration: line-through; }
+.cal-week-note-block.cal-exam {
+  border-color: var(--exam-gold);
+  border-left-color: var(--exam-gold);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exam-gold) 60%, transparent);
+}
 
 /* Week-view deadline chips (all note due-dates live in the top "Due" strip now). */
 .cal-week-note-chip {
@@ -3888,10 +3944,39 @@ body:has(.modal:not(.hidden), .wifi-modal-overlay, .kicad-modal-overlay, .auth-g
   margin: 6px 0;
   font-size: 11px;
 }
+/* Collapsed card: the checklist is the part that gives way to the max-height
+   clip (min-height:0 lets the flex column shrink it), so the priority/due row
+   stays visible. Items show one line each and fade out instead of being cut
+   mid-line; hover expands the card and reveals the full list. */
+.sticky-note .note-checklist {
+  min-height: 0;
+  flex-shrink: 999; /* shrink the list before the title */
+  overflow: hidden;
+  margin-bottom: 0;
+  padding-bottom: 10px; /* the fade lives in this padding, so it only touches overflowing items */
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent);
+          mask-image: linear-gradient(to bottom, #000 calc(100% - 10px), transparent);
+}
+.sticky-note .note-checklist-item span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sticky-note:hover .note-checklist {
+  overflow: visible;
+  -webkit-mask-image: none;
+          mask-image: none;
+}
+.sticky-note:hover .note-checklist-item { align-items: flex-start; }
+.sticky-note:hover .note-checklist-item span { white-space: normal; }
+.sticky-note:hover .note-checklist-item .note-cl-toggle { margin-top: 1px; }
+/* Untitled checklist notes: don't leave a blank title line above the list. */
+.sticky-note .note-text:empty { display: none; }
 .note-checklist-progress {
   font-size: 10px;
   font-weight: 700;
-  color: rgba(30,41,59,0.5);
+  color: var(--text-muted, rgba(30,41,59,0.5));
   margin-bottom: 4px;
 }
 .note-checklist-item {

@@ -1184,6 +1184,11 @@ select.form-input option { background: var(--bg); color: var(--text); }
 .cal-cell.today { border-color: var(--accent); background: var(--accent-light); }
 .cal-cell.cal-all-done { background: rgba(34,197,94,0.14); border-color: rgba(34,197,94,0.5); }
 .cal-cell.cal-incomplete { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.45); }
+/* A day with an exam reads gold in Month view (mirrors desktop .cal-day-exam). */
+.cal-cell.cal-exam-day {
+  background: color-mix(in srgb, var(--exam-gold) 16%, var(--bg-card)) !important;
+  border-color: var(--exam-gold) !important;
+}
 .cal-cell.cal-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
 .cal-date {
   font-size: 12px;
@@ -1251,6 +1256,30 @@ select.form-input option { background: var(--bg); color: var(--text); }
 .cal-scard.done { opacity: 0.6; }
 .cal-scard.done .cal-stitle { text-decoration: line-through; }
 .cal-scard.launches-src, .cal-snote, .cal-sevent.launches-src { cursor: pointer; }
+/* Day-list note card (mirrors desktop .cal-side-note): top-aligned row (check · priority-over-time ·
+   info · edit), then the expanded checklist / attachments spanning the full card width. */
+.cal-scard.cal-snote { flex-direction: column; align-items: stretch; gap: 0; }
+.cal-snote-row { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.cal-snote-left { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; min-width: 52px; }
+.cal-snote .cal-check { width: 30px; height: 30px; font-size: 16px; margin-bottom: 2px; }
+.cal-snote-left .cal-stime { min-width: 0; text-align: center; }
+.cal-stoggles { display: flex; flex-wrap: nowrap; gap: 6px; margin-top: 8px; min-width: 0; }
+.cal-stoggle {
+  padding: 3px 9px; font-size: 11px; font-weight: 600; border-radius: 999px; cursor: pointer; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 15%, transparent);
+}
+.cal-stoggle.open { color: var(--text); }
+.cal-scl, .cal-satt {
+  display: flex; flex-direction: column; gap: 6px; margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
+.cal-scl-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.35; color: var(--text); }
+.cal-scl-item input { margin-top: 2px; flex-shrink: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+.cal-scl-item.done span { text-decoration: line-through; opacity: 0.55; }
+.cal-satt-item { font-size: 12px; padding: 4px 8px; border-radius: 6px; color: var(--text); background: color-mix(in srgb, var(--text) 6%, transparent); overflow-wrap: anywhere; }
 .cal-check {
   width: 24px; height: 24px; flex-shrink: 0;
   border-radius: 50%; border: 2px solid var(--border);
@@ -1345,6 +1374,18 @@ select.form-input option { background: var(--bg); color: var(--text); }
   border-left: 3px solid color-mix(in srgb, var(--pc) 60%, #000);
 }
 .cal-week-workblock .cal-week-btime { color: rgba(255,255,255,0.85); }
+/* Timed note (start + end, e.g. a study block) — tinted sticky-note tile, mirrors desktop .cal-week-note-block. */
+.cal-week-noteblock {
+  background: color-mix(in srgb, var(--nc) 30%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--nc) 55%, transparent);
+  border-left: 3px solid var(--nc);
+  color: var(--text);
+  cursor: pointer;
+}
+.cal-week-noteblock.cal-exam, .cal-week-chip.cal-exam {
+  border-color: var(--exam-gold) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--exam-gold) 60%, transparent);
+}
 
 /* ── AGENDA VIEW ── */
 .cal-agenda { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }

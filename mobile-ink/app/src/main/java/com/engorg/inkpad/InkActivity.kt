@@ -245,6 +245,8 @@ class InkActivity : ComponentActivity() {
         val pane = PageCanvas(this, store, hostImpl)
         // A select-tool tap on a class symbol opens its values (panel open or not).
         pane.symbolTap = { pg, rec -> analysisEditor().onSymbolTap(pane, pg, rec) }
+        // So does the Values button on a lassoed part or a whole lassoed circuit.
+        pane.selectionValues = { pg, recs, x -> analysisEditor().editAll(pane, pg, recs, x) }
         // Open (which sets pane.notebook) BEFORE building the chip — the chip reads
         // pane.notebook.title, and notebook is a lateinit, so building it first crashes
         // the whole notebook open with UninitializedPropertyAccessException.

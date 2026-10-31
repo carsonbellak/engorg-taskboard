@@ -80,6 +80,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         GRAPH_EDIT("Edit graph"),
         // Second row, shown when a single closed 2D shape is selected.
         FILL("Fill"),
+        // Second row, shown when the selection holds class symbols: enter their values.
+        VALUES("Values"),
     }
 
     companion object {
@@ -361,6 +363,8 @@ class FinishedStrokesView(context: Context) : View(context) {
     private var selMenu: List<MenuAction> = emptyList()
     private var tableMenu: List<MenuAction> = emptyList()
     private var orbit = false   // a lone 3D solid is selected: show the orbit knob
+    private var ringPage = -1   // the part the value sheet is on (see setRing)
+    private val ringBox = RectF()
     private var pasteMenuPage = -1
     private val pasteMenuAt = PointF()
     private val menuHits = ArrayList<Pair<MenuAction, RectF>>()   // screen-space, rebuilt every draw
@@ -399,6 +403,9 @@ class FinishedStrokesView(context: Context) : View(context) {
     }
     fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); orbit = false; pasteMenuPage = -1; menuHits.clear(); invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
+
+    /** Ring the page-local [box] on [page], or nothing when it's null (which part a multi-part value sheet is on). */
+    fun setRing(page: Int, box: RectF?) { ringPage = if (box != null) page else -1; box?.let { ringBox.set(it) }; invalidate() }
 
     /** Show a lone "Paste" pill anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
     fun showPasteMenu(page: Int, x: Float, y: Float) { pasteMenuPage = page; pasteMenuAt.set(x, y); invalidate() }
@@ -722,6 +729,13 @@ class FinishedStrokesView(context: Context) : View(context) {
                 for (k in 1 until pts.size) p.lineTo(pts[k].x, pts[k].y)
                 canvas.drawPath(p, lassoPaint)
             }
+        }
+        if (ringPage >= 0) {
+            val pad = dpf(10f); val rr = dpf(10f)
+            val r = RectF(sx(ringPage, ringBox.left) - pad, sy(ringPage, ringBox.top) - pad, sx(ringPage, ringBox.right) + pad, sy(ringPage, ringBox.bottom) + pad)
+            selFill.color = Color.argb(0x33, Color.red(accent), Color.green(accent), Color.blue(accent))
+            handleStroke.color = accent; handleStroke.strokeWidth = dpf(2.5f)
+            canvas.drawRoundRect(r, rr, rr, selFill); canvas.drawRoundRect(r, rr, rr, handleStroke)
         }
         menuHits.clear()
         if (pasteMenuPage >= 0) {

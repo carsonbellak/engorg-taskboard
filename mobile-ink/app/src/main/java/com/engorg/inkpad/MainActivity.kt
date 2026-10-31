@@ -1,12 +1,15 @@
 package com.engorg.inkpad
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -38,6 +41,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
     private lateinit var googleClient: GoogleSignInClient
     private lateinit var signInLauncher: ActivityResultLauncher<Intent>
+    private lateinit var filePickerLauncher: ActivityResultLauncher<Intent>
+
+    // The page's open <input type=file>. It must always get a reply, even on cancel: until it does,
+    // the WebView ignores every later file input.
+    private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     // Snapshot of the ink-app prefs we last synced with the profile. Stays null until the user has
     // opened Ink at least once (so we never push device defaults before reading the profile); after
@@ -72,6 +80,11 @@ class MainActivity : ComponentActivity() {
             } catch (e: ApiException) {
                 Toast.makeText(this, "Google sign-in failed (code ${e.statusCode}).", Toast.LENGTH_LONG).show()
             }
+        }
+
+        filePickerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            fileChooserCallback?.onReceiveValue(if (result.resultCode == RESULT_OK) pickedUris(result.data) else null)
+            fileChooserCallback = null
         }
 
         // Allow chrome://inspect debugging, and surface web errors on screen (below).
@@ -137,6 +150,26 @@ class MainActivity : ComponentActivity() {
                     Log.e("EngOrgWeb", "${m.messageLevel()} ${m.message()} @${m.sourceId()}:${m.lineNumber()}")
                     return true
                 }
+
+                // A WebView opens no picker by itself: <input type=file> does nothing without this.
+                override fun onShowFileChooser(view: WebView, cb: ValueCallback<Array<Uri>>, params: WebChromeClient.FileChooserParams): Boolean {
+                    fileChooserCallback?.onReceiveValue(null)
+                    fileChooserCallback = cb
+                    // Any type: the PWA's accept lists are bare extensions (.gcode), not MIME types.
+                    val pick = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE)
+                    }
+                    return try {
+                        filePickerLauncher.launch(pick)
+                        true
+                    } catch (e: ActivityNotFoundException) {
+                        fileChooserCallback = null // false tells the WebView to cancel it itself
+                        Toast.makeText(this@MainActivity, "No file picker found on this device.", Toast.LENGTH_LONG).show()
+                        false
+                    }
+                }
             }
         }
 
@@ -152,6 +185,13 @@ class MainActivity : ComponentActivity() {
                 if (web.canGoBack()) web.goBack() else { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
             }
         })
+    }
+
+    /** The picker's result: several files arrive in clipData, a single one usually in data. */
+    private fun pickedUris(result: Intent?): Array<Uri>? {
+        val clip = result?.clipData
+        val uris = if (clip != null) (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } else listOfNotNull(result?.data)
+        return uris.takeIf { it.isNotEmpty() }?.toTypedArray()
     }
 
     /** Bridge exposed to the PWA (window.AndroidAuth) to trigger native Google sign-in. */

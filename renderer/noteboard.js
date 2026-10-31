@@ -99,6 +99,7 @@ class NotesBoard {
     const projRank = (pid) => (projIdx.has(pid) ? projIdx.get(pid) : 1e9);
 
     notes.sort((a, b) => {
+      if (examRank(a) !== examRank(b)) return examRank(a) - examRank(b); // upcoming exams always on top
       let primary = 0;
       switch (sortMode) {
         case 'created':

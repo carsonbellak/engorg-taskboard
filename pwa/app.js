@@ -507,6 +507,8 @@ let editingPurchaseId = null;
 let calendarMonth = new Date();
 let selectedCalDate = null; // YYYY-MM-DD of the open day (persists across re-renders)
 let calShowCompleted = false; // day list: reveal the collapsed "completed" section
+const calOpenChecklists = new Set(); // day list: note ids whose checklist is expanded
+const calOpenAttachments = new Set(); // day list: note ids whose attachment list is expanded
 let calView = 'month';        // 'month' | 'week' | 'agenda' — mirrors the desktop calendar
 let calWeekStart = null;      // Monday of the visible week (lazy-init in renderCalendar)
 let filters = { priority: '', category: '', overdue: false };
@@ -901,6 +903,7 @@ function getWorkBlocks(dayName, dateStr) {
   (data.projects || []).forEach(proj => {
     (proj.workSchedule || []).forEach((wb, i) => {
       if (!wb || wb.day !== dayName || !wb.start) return;
+      if ((wb.skip || []).includes(dateStr)) return; // one occurrence skipped (e.g. a missed lab)
       const endDT = new Date(dateStr + 'T00:00:00');
       const [eh, em] = (wb.end || wb.start).split(':').map(Number);
       endDT.setHours(eh, em || 0, 0, 0);   // auto-complete once the session's end time passes
@@ -1075,6 +1078,20 @@ function stickyDueIdx(note) {
 // Resolve a note to its sticky color {bg, border} for the board, honoring noteColorMode.
 // Exam notes get a gold frame everywhere they render (mirrors desktop isExamNote / .note-exam).
 function isExamNote(note) { return !!note && note.category === 'exam'; }
+// Upcoming exams are never buried: every note list sorts by this first (0 = pinned exam, 1 = the rest).
+function examRank(note) { return isExamNote(note) && !note.completed ? 0 : 1; }
+// A note with an end time is a duration (study block, exam), drawn in the week grid. Its start is
+// startTime when set (e.g. an imported exam whose dueTime is the end), else dueTime.
+function noteStart(note) { return note.startTime || note.dueTime || ''; }
+// End of a timed note. Exams always count as timed: with no end set, assume a 1-hour exam.
+function noteEnd(note) {
+  if (note.endTime) return note.endTime;
+  if (!isExamNote(note) || !noteStart(note)) return '';
+  const [h, m] = noteStart(note).split(':').map(Number);
+  const t = Math.min(h * 60 + m + 60, 24 * 60 - 1);
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+function isTimedNote(note) { return !!(noteStart(note) && noteEnd(note)); }
 
 function resolveBoardStickyColor(note) {
   const palette = getStickyColors();
@@ -1112,6 +1129,7 @@ function renderNotes() {
   const projOf = (pid) => (prank.has(pid) ? prank.get(pid) : 1e9);
   tasks.sort((a, b) => {
     if (a.completed !== b.completed) return a.completed ? 1 : -1;
+    if (examRank(a) !== examRank(b)) return examRank(a) - examRank(b);
     let primary = 0;
     switch (noteSortMode) {
       case 'created': primary = new Date(b.createdAt || 0) - new Date(a.createdAt || 0); break;
@@ -1242,6 +1260,13 @@ function renderNotes() {
     }
   }
 
+  // Upcoming exams get their own pinned group at the very top, whatever the sort mode.
+  const pinned = active.filter(n => examRank(n) === 0);
+  if (pinned.length) {
+    groups.forEach(g => { g.notes = g.notes.filter(n => examRank(n) !== 0); });
+    groups.unshift({ label: '★ Exams', color: '#D4A017', notes: pinned });
+  }
+
   // Remove empty groups
   groups = groups.filter(g => g.notes.length > 0);
 
@@ -1343,6 +1368,7 @@ function sortTasksByMode(arr) {
   const prank = projectTreeRank();
   const projOf = (pid) => (prank.has(pid) ? prank.get(pid) : 1e9);
   return arr.sort((a, b) => {
+    if (examRank(a) !== examRank(b)) return examRank(a) - examRank(b); // upcoming exams always on top
     let primary = 0;
     switch (noteSortMode) {
       case 'created': primary = new Date(b.createdAt || 0) - new Date(a.createdAt || 0); break;
@@ -1788,7 +1814,8 @@ function calDayItems(dateStr, dayName) {
   const events = data.scheduleItems
     .filter(it => it.date === dateStr || (!it.date && it.day === dayName))
     .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-  const notes = data.tasks.filter(n => n.dueDate === dateStr);
+  const notes = data.tasks.filter(n => n.dueDate === dateStr)
+    .sort((a, b) => (examRank(a) - examRank(b)) || noteStart(a).localeCompare(noteStart(b)));
   const workBlocks = getWorkBlocks(dayName, dateStr);
   return { events, notes, workBlocks };
 }
@@ -1856,7 +1883,7 @@ function renderCalMonth() {
       ...events.map(x => ({ item: x, kind: 'event' })),
       ...notes.map(x => ({ item: x, kind: 'note' })),
       ...workBlocks.map(x => ({ item: x, kind: 'work' })),
-    ].sort((a, b) => (a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0));
+    ].sort((a, b) => ((a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0)) || (examRank(a.item) - examRank(b.item)));
 
     let pills = '';
     items.slice(0, CAP).forEach(({ item, kind }) => {
@@ -1875,7 +1902,8 @@ function renderCalMonth() {
     const more = items.length - CAP;
     if (more > 0) pills += `<div class="cal-more">+${more} more</div>`;
 
-    html += `<div class="cal-cell ${isToday ? 'today' : ''} ${doneClass}" data-date="${dateStr}" data-day="${dayName}">
+    const examDay = notes.some(isExamNote) ? ' cal-exam-day' : '';
+    html += `<div class="cal-cell ${isToday ? 'today' : ''} ${doneClass}${examDay}" data-date="${dateStr}" data-day="${dayName}">
       <span class="cal-date">${d}</span>
       <div class="cal-cell-pills">${pills}</div>
     </div>`;
@@ -1888,7 +1916,8 @@ function renderCalMonth() {
 function renderCalWeek() {
   const weekStart = calWeekStart;
   const days = Array.from({ length: 7 }, (_, i) => {
-    const dt = new Date(weekStart.getTime() + i * 86400000);
+    // Step by calendar days, not 24 h — a DST change would otherwise shift every column.
+    const dt = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i);
     return { date: dt, dateStr: calDateStr(dt), dayName: calDayName(dt) };
   });
   const weekEnd = days[6].date;
@@ -1933,14 +1962,17 @@ function renderCalTimeGrid(days, title) {
   });
   html += `</div>`;
 
-  // "Due" strip — note deadlines live here (as chips), not in the timed grid.
-  if (dayData.some(d => d.notes.length > 0)) {
+  // "Due" strip — note deadlines live here (as chips), not in the timed grid. A note with a
+  // start AND end time (e.g. a study block) is a duration, so it draws in the grid instead.
+  // Upcoming exams show in both places — pinned first in this strip and as a block in the grid.
+  const inDueStrip = (n) => !isTimedNote(n) || examRank(n) === 0;
+  if (dayData.some(d => d.notes.some(inDueStrip))) {
     html += `<div class="cal-week-due" style="grid-template-columns:${gridCols}"><div class="cal-week-gutter cal-week-due-lbl">Due</div>`;
     dayData.forEach(({ notes }, i) => {
       html += `<div class="cal-week-due-cell" data-date="${days[i].dateStr}">`;
-      notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
+      notes.filter(inDueStrip).sort((a, b) => (examRank(a) - examRank(b)) || (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
         const sc = resolveBoardStickyColor(note);
-        html += `<div class="cal-week-chip ${note.completed ? 'done' : ''}" data-note-id="${note.id}"
+        html += `<div class="cal-week-chip ${note.completed ? 'done' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"
           style="background:${sc.border}22;border-left:3px solid ${sc.border};color:${sc.border}"
           title="${escapeHtml(note.title)}">${srcLaunch(note)}${escapeHtml(note.title)}</div>`;
       });
@@ -1960,7 +1992,7 @@ function renderCalTimeGrid(days, title) {
 
   days.forEach((d, ci) => {
     const isToday = d.date.toDateString() === today.toDateString();
-    const { events, workBlocks } = dayData[ci];
+    const { events, workBlocks, notes } = dayData[ci];
     html += `<div class="cal-week-col ${isToday ? 'today' : ''}" data-date="${d.dateStr}" data-day="${d.dayName}" style="height:${HOURS * HOUR_H}px">`;
     for (let h = 0; h < HOURS; h++) html += `<div class="cal-week-hline" style="top:${h * HOUR_H}px"></div>`;
     if (isToday) {
@@ -1969,7 +2001,7 @@ function renderCalTimeGrid(days, title) {
       if (mins >= 0 && mins <= HOURS * 60) html += `<div class="cal-week-now" style="top:${(mins / 60) * HOUR_H}px"></div>`;
     }
 
-    const place = (item, cls, extraStyle, inner) => {
+    const place = (item, cls, extraStyle, inner, attrs = '') => {
       const [sh, sm] = (item.startTime || '00:00').split(':').map(Number);
       const [eh, em] = (item.endTime || item.startTime || '00:30').split(':').map(Number);
       const topMins = (sh - START) * 60 + sm;
@@ -1977,7 +2009,7 @@ function renderCalTimeGrid(days, title) {
       if (topMins < 0 || topMins > HOURS * 60) return '';
       const top = (topMins / 60) * HOUR_H;
       const height = Math.min((durMins / 60) * HOUR_H, ((HOURS * 60 - topMins) / 60) * HOUR_H);
-      return `<div class="${cls}" style="top:${top}px;height:${height - 2}px;${extraStyle}">${inner}</div>`;
+      return `<div class="${cls}"${attrs} style="top:${top}px;height:${height - 2}px;${extraStyle}">${inner}</div>`;
     };
 
     workBlocks.forEach(item => {
@@ -1991,6 +2023,17 @@ function renderCalTimeGrid(days, title) {
       html += place(item, `cal-week-block${item.completed ? ' done' : ''}`, `background:${col};border-color:${col}`,
         `<div class="cal-week-btitle">${srcLaunch(item)}${escapeHtml(item.title)}</div>
          <div class="cal-week-btime">${formatTime12(item.startTime)}${item.endTime ? '–' + formatTime12(item.endTime) : ''}</div>`);
+    });
+    // Timed notes (start + end) — tinted like the note; tap opens the note detail.
+    notes.filter(isTimedNote).forEach(note => {
+      const sc = resolveBoardStickyColor(note);
+      const cl = note.checklist || [];
+      const meta = [(note.attachments || []).length ? '&#128206;' : '', cl.length ? `&#9745; ${cl.filter(c => c.done).length}/${cl.length}` : ''].filter(Boolean).join(' ');
+      html += place({ startTime: noteStart(note), endTime: noteEnd(note) },
+        `cal-week-block cal-week-noteblock${note.completed ? ' done' : ''}${isExamNote(note) ? ' cal-exam' : ''}`, `--nc:${sc.border}`,
+        `<div class="cal-week-btitle">&#128204; ${escapeHtml(note.title)}</div>
+         <div class="cal-week-btime">${formatTime12(noteStart(note))}–${formatTime12(noteEnd(note))}${meta ? ' · ' + meta : ''}</div>`,
+        ` data-note-id="${note.id}"`);
     });
 
     html += `</div>`;
@@ -2079,7 +2122,7 @@ function calNav(dir) {
     d.setDate(d.getDate() + dir);
     selectedCalDate = calDateStr(d);
   } else if (calView === 'week') {
-    calWeekStart = new Date(calWeekStart.getTime() + dir * 7 * 86400000);
+    calWeekStart = calWeekStartOf(new Date(calWeekStart.getFullYear(), calWeekStart.getMonth(), calWeekStart.getDate() + dir * 7));
   } else {
     calendarMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + dir, 1);
   }
@@ -2156,8 +2199,8 @@ function bindCalWeek() {
   document.querySelectorAll('.cal-week-colhead').forEach(el => {
     el.addEventListener('click', () => selectCalDay(el.dataset.date, { scroll: true }));
   });
-  // Tap a due chip → open the note detail.
-  document.querySelectorAll('.cal-week-chip').forEach(el => {
+  // Tap a due chip or a timed note block → open the note detail.
+  document.querySelectorAll('.cal-week-chip, .cal-week-noteblock').forEach(el => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       if (e.target.closest('[data-open-url]')) return;
@@ -2223,38 +2266,86 @@ function renderCalDaySide() {
         <span class="cal-badge recurring">Weekly</span></div>
     </div>`;
   };
+  // Note cards (mirrors desktop): circle, priority and time stack on the left; "Show checklist" /
+  // "Show attachments" sit side by side in a full-width row and expand full-width below. Attachments
+  // are PC file paths, so the phone lists their names only.
+  const noteToggles = (note) => {
+    const cl = note.checklist || [], att = note.attachments || [];
+    const btns = [];
+    if (cl.length) {
+      const open = calOpenChecklists.has(note.id);
+      btns.push(`<button class="cal-stoggle cal-scl-toggle${open ? ' open' : ''}" data-id="${note.id}">&#9745; ${cl.filter(c => c.done).length}/${cl.length} &middot; ${open ? 'Hide' : 'Show'} checklist</button>`);
+    }
+    if (att.length) {
+      const open = calOpenAttachments.has(note.id);
+      btns.push(`<button class="cal-stoggle cal-satt-toggle${open ? ' open' : ''}" data-id="${note.id}">&#128206; ${att.length} &middot; ${open ? 'Hide' : 'Show'} attachments</button>`);
+    }
+    return btns.length ? `<div class="cal-stoggles">${btns.join('')}</div>` : '';
+  };
+  const notePanels = (note) => {
+    let out = '';
+    if (calOpenChecklists.has(note.id) && (note.checklist || []).length) {
+      out += `<div class="cal-scl">${note.checklist.map(c =>
+        `<label class="cal-scl-item${c.done ? ' done' : ''}"><input type="checkbox" data-note-id="${note.id}" data-cl-id="${c.id}" ${c.done ? 'checked' : ''}><span>${escapeHtml(c.text)}</span></label>`
+      ).join('')}</div>`;
+    }
+    if (calOpenAttachments.has(note.id) && (note.attachments || []).length) {
+      out += `<div class="cal-satt">${note.attachments.map(a => `<div class="cal-satt-item" title="Open on your PC">&#128206; ${escapeHtml(a.name)}</div>`).join('')}</div>`;
+    }
+    return out;
+  };
   const nCard = (note) => {
     const sc = resolveBoardStickyColor(note);
     const proj = getProjectName(note.projectId);
     const link = launchLink(note); const launches = !!link;
     const pcol = PRIORITY_COLOR[note.priority] || '#F59E0B';
     return `<div class="cal-scard cal-snote sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${sc.bg};border-color:${sc.border};border-left-color:${sc.border}">
-      <button class="cal-check ${note.completed ? 'checked' : ''}" data-type="note" data-id="${note.id}">${note.completed ? '&#10003;' : ''}</button>
-      ${note.dueTime ? `<div class="cal-stime"><div>${formatTime12(note.dueTime)}</div></div>` : ''}
-      <div class="cal-sinfo"><div class="cal-stitle">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
-        ${proj ? `<div class="cal-sproj">${escapeHtml(proj)}</div>` : ''}</div>
-      <span class="cal-pri-dot" style="color:${pcol}">&#9679; ${note.priority || 'Medium'}</span>
-      ${launches ? `<button class="cal-note-detail-btn" data-note-id="${note.id}" title="Details">&#9998;</button>` : ''}
+      <div class="cal-snote-row">
+        <div class="cal-snote-left">
+          <button class="cal-check ${note.completed ? 'checked' : ''}" data-type="note" data-id="${note.id}">${note.completed ? '&#10003;' : ''}</button>
+          <span class="cal-pri-dot" style="color:${pcol}">&#9679; ${note.priority || 'Medium'}</span>
+          ${noteStart(note) ? `<div class="cal-stime"><div>${formatTime12(noteStart(note))}</div>${noteEnd(note) ? `<div class="cal-stime-end">&rarr; ${formatTime12(noteEnd(note))}</div>` : ''}</div>` : ''}
+        </div>
+        <div class="cal-sinfo"><div class="cal-stitle">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
+          ${proj ? `<div class="cal-sproj">${escapeHtml(proj)}</div>` : ''}</div>
+        ${launches ? `<button class="cal-note-detail-btn" data-note-id="${note.id}" title="Details">&#9998;</button>` : ''}
+      </div>
+      ${noteToggles(note)}
+      ${notePanels(note)}
     </div>`;
   };
 
-  const activeEvents = events.filter(e => !e.completed), doneEvents = events.filter(e => e.completed);
-  const activeNotes = notes.filter(n => !n.completed), doneNotes = notes.filter(n => n.completed);
-  const activeWork = workBlocks.filter(w => !w.completed), doneWork = workBlocks.filter(w => w.completed);
-  const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
-  const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
+
+  // Three sections (mirrors desktop): Schedule = anything with a time span (weekly blocks, events,
+  // notes with start + end) in time order, upcoming exams pinned first; Assignments = notes due at
+  // a time (or tagged assignment); Notes = plain notes on the day with no time.
+  const schedule = [
+    ...workBlocks.map(x => ({ x, card: wCard, start: x.startTime || '' })),
+    ...events.map(x => ({ x, card: evCard, start: x.startTime || '' })),
+    ...notes.filter(isTimedNote).map(x => ({ x, card: nCard, start: noteStart(x) })),
+  ].sort((a, b) => (examRank(a.x) - examRank(b.x)) || (a.start || '~').localeCompare(b.start || '~'));
+  const sections = [
+    { label: 'Schedule', items: schedule },
+    { label: 'Assignments', items: notes.filter(n => !isTimedNote(n) && (n.dueTime || n.category === 'assignment')).map(x => ({ x, card: nCard })) },
+    { label: 'Notes', items: notes.filter(n => !isTimedNote(n) && !n.dueTime && n.category !== 'assignment').map(x => ({ x, card: nCard })) },
+  ];
+  const renderItems = (items) => items.map(({ x, card }) => card(x)).join('');
+  const doneItems = sections.flatMap(sec => sec.items.filter(i => i.x.completed));
+  const doneCount = doneItems.length;
+  const hasActive = sections.some(sec => sec.items.some(i => !i.x.completed));
 
   let html = `<div class="cal-side-header"><span class="cal-side-date">${dateTitle}</span>${isToday ? '<span class="cal-side-today">Today</span>' : ''}</div>`;
   if (events.length === 0 && notes.length === 0 && workBlocks.length === 0) {
     html += `<div class="cal-side-empty"><div class="cal-side-empty-icon">&#128197;</div><div>Nothing scheduled for this day.</div></div>`;
   } else {
-    if (activeWork.length) html += `<div class="cal-side-label">Schedule</div>` + activeWork.map(wCard).join('');
-    if (activeEvents.length) html += `<div class="cal-side-label">Events</div>` + activeEvents.map(evCard).join('');
-    if (activeNotes.length) html += `<div class="cal-side-label">Notes</div>` + activeNotes.map(nCard).join('');
+    sections.forEach(sec => {
+      const active = sec.items.filter(i => !i.x.completed);
+      if (active.length) html += `<div class="cal-side-label">${sec.label}</div>` + renderItems(active);
+    });
     if (!hasActive && doneCount > 0) html += `<div class="cal-alldone">&#127881; All done for this day</div>`;
     if (doneCount > 0) {
       html += `<button class="cal-completed-toggle ${calShowCompleted ? 'open' : ''}"><span class="cal-chevron">&#9656;</span> ${calShowCompleted ? 'Hide' : 'Show'} completed (${doneCount})</button>`;
-      if (calShowCompleted) html += `<div class="cal-completed-list">${doneWork.map(wCard).join('') + doneEvents.map(evCard).join('') + doneNotes.map(nCard).join('')}</div>`;
+      if (calShowCompleted) html += `<div class="cal-completed-list">${renderItems(doneItems)}</div>`;
     }
   }
   el.innerHTML = html;
@@ -2309,9 +2400,38 @@ function renderCalDaySide() {
   // Tap a note card → source app (synced) or the note detail (plain).
   el.querySelectorAll('.cal-snote').forEach(card => {
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.cal-check') || e.target.closest('.cal-note-detail-btn') || e.target.closest('[data-open-url]')) return;
+      if (e.target.closest('.cal-check') || e.target.closest('.cal-note-detail-btn') || e.target.closest('[data-open-url]') ||
+          e.target.closest('.cal-stoggle') || e.target.closest('.cal-scl') || e.target.closest('.cal-satt')) return;
       if (card.dataset.launchUrl) { window.open(card.dataset.launchUrl, '_blank', 'noopener'); return; }
       showNoteDetail(card.dataset.noteId);
+    });
+  });
+  // Show / hide a note's checklist; tick items straight from the day list.
+  el.querySelectorAll('.cal-scl-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (calOpenChecklists.has(id)) calOpenChecklists.delete(id); else calOpenChecklists.add(id);
+      renderCalDaySide();
+    });
+  });
+  el.querySelectorAll('.cal-satt-toggle').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if (calOpenAttachments.has(id)) calOpenAttachments.delete(id); else calOpenAttachments.add(id);
+      renderCalDaySide();
+    });
+  });
+  el.querySelectorAll('.cal-scl input[type="checkbox"]').forEach(cb => {
+    cb.addEventListener('click', (e) => e.stopPropagation());
+    cb.addEventListener('change', async () => {
+      const note = data.tasks.find(t => t.id === cb.dataset.noteId);
+      if (!note) return;
+      note.checklist = (note.checklist || []).map(c => c.id === cb.dataset.clId ? { ...c, done: cb.checked } : c);
+      note.modifiedAt = new Date().toISOString();
+      await saveCollection('tasks', { tasks: data.tasks });
+      renderCalDaySide();
     });
   });
   const toggle = el.querySelector('.cal-completed-toggle');

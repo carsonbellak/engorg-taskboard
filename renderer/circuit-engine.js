@@ -11,7 +11,10 @@
 // Netlist shape (built from the schematic by circuitLab, or by hand in tests):
 //   { nodes: ['0', 'in', 'out', …],           // index 0 is ground
 //     parts: [{ id, ref, type, n: [nodeIdx…], p: { …props } }] }
-// Types / pins: R C L D LED (a,b) · V I (+,−) · OA (in−, in+, out).
+// Types / pins: R C L D LED (a,b) · V I (+,−) · OA (in−, in+, out) · DS (+,−).
+// DS = dependent source: p.out 'V' | 'I' (I flows + → − through it), its value the sum of p.ctrl
+// terms, each { k, v: [nodeA, nodeB] } (k·(V(a) − V(b))) or { k, i: partId } (k·that part's current,
+// which must be an R, C, L, V or voltage-output DS). Written for DC and AC; a C's current reads 0 in transient.
 
 const CircuitEngine = (() => {
   const VT = 0.025852;  // thermal voltage @ 300 K
@@ -176,7 +179,7 @@ const CircuitEngine = (() => {
     const parts = net.parts.map(pt => {
       const q = { ...pt, br: -1 };
       const p = pt.p || {};
-      if (pt.type === 'V' || pt.type === 'L' || pt.type === 'OA') q.br = k++;
+      if (pt.type === 'V' || pt.type === 'L' || pt.type === 'OA' || (pt.type === 'DS' && p.out === 'V')) q.br = k++;
       if (pt.type === 'R') { q.R = parseSI(p.value); if (!(q.R > 0)) errors.push(`${pt.ref}: resistance must be > 0`); }
       if (pt.type === 'C') { q.C = parseSI(p.value); if (!(q.C > 0)) errors.push(`${pt.ref}: capacitance must be > 0`); }
       if (pt.type === 'L') { q.L = parseSI(p.value); if (!(q.L > 0)) errors.push(`${pt.ref}: inductance must be > 0`); }
@@ -188,7 +191,33 @@ const CircuitEngine = (() => {
       }
       return q;
     });
+    for (const q of parts) {
+      if (q.type !== 'DS') continue;
+      for (const c of q.p.ctrl || []) {
+        if (c.i == null) continue;
+        const s = parts.find(o => o.id === c.i);
+        if (!s || !(s.type === 'R' || s.type === 'C' || s.br >= 0) || s.type === 'OA') errors.push(`${q.ref}: can't read the current of ${s ? s.ref : c.i}`);
+      }
+    }
     return { N, size: k, parts, errors };
+  }
+
+  // A dependent source's value as a linear sum over the unknowns: [{ col, re, im }] at angular
+  // frequency w (0 = DC, where a capacitor carries no current).
+  function depTerms(sys, q, w) {
+    const out = [];
+    const across = (a, b, re, im) => {
+      if (a > 0) out.push({ col: a - 1, re, im });
+      if (b > 0) out.push({ col: b - 1, re: -re, im: -im });
+    };
+    for (const c of q.p.ctrl || []) {
+      if (c.v) { across(c.v[0], c.v[1], c.k, 0); continue; }
+      const s = sys.parts.find(o => o.id === c.i);
+      if (s.br >= 0) out.push({ col: s.br, re: c.k, im: 0 });
+      else if (s.type === 'R') across(s.n[0], s.n[1], c.k / s.R, 0);
+      else if (s.type === 'C' && w > 0) across(s.n[0], s.n[1], 0, c.k * w * s.C);
+    }
+    return out;
   }
 
   // v(node) helper over the solution vector (node 0 = ground).
@@ -277,6 +306,15 @@ const CircuitEngine = (() => {
             break;
           }
           case 'OA': stampOpAmp(A, z, q, x); break;
+          case 'DS':
+            if (q.p.out === 'V') {
+              stampVsrc(A, z, a, b, q.br, 0);
+              for (const t of depTerms(sys, q, 0)) A[q.br][t.col] -= t.re;
+            } else for (const t of depTerms(sys, q, 0)) {
+              if (a > 0) A[a - 1][t.col] += t.re;
+              if (b > 0) A[b - 1][t.col] -= t.re;
+            }
+            break;
         }
       }
       const xn = solveReal(A.map(r => Array.from(r)), Array.from(z));
@@ -334,6 +372,10 @@ const CircuitEngine = (() => {
           break;
         }
         case 'OA': i = -x[q.br]; break;  // current delivered out of the output pin
+        case 'DS':
+          if (q.p.out === 'V') i = x[q.br];
+          else for (const t of depTerms(sys, q, 0)) i += t.re * x[t.col];
+          break;
       }
       out[q.id] = i;
     }
@@ -505,6 +547,15 @@ const CircuitEngine = (() => {
             if (nm > 0) { Ar[q.br][nm - 1] += gr; Ai[q.br][nm - 1] += gi; }
             break;
           }
+          case 'DS':
+            if (q.p.out === 'V') {
+              stampVsrc(Ar, br, a, b, q.br, 0);
+              for (const t of depTerms(sys, q, w)) { Ar[q.br][t.col] -= t.re; Ai[q.br][t.col] -= t.im; }
+            } else for (const t of depTerms(sys, q, w)) {
+              if (a > 0) { Ar[a - 1][t.col] += t.re; Ai[a - 1][t.col] += t.im; }
+              if (b > 0) { Ar[b - 1][t.col] -= t.re; Ai[b - 1][t.col] -= t.im; }
+            }
+            break;
         }
       }
       const s = solveComplex(Ar, Ai, br, bi);
@@ -519,7 +570,11 @@ const CircuitEngine = (() => {
           let c = null;
           if (q.type === 'R') c = [dv[0] / q.R, dv[1] / q.R];
           else if (q.type === 'C') c = [-w * q.C * dv[1], w * q.C * dv[0]];
-          else if (q.type === 'L' || q.type === 'V') c = [s.re[q.br], s.im[q.br]];
+          else if (q.type === 'L' || q.type === 'V' || (q.type === 'DS' && q.p.out === 'V')) c = [s.re[q.br], s.im[q.br]];
+          else if (q.type === 'DS') {
+            c = [0, 0];
+            for (const t of depTerms(sys, q, w)) { c[0] += t.re * s.re[t.col] - t.im * s.im[t.col]; c[1] += t.re * s.im[t.col] + t.im * s.re[t.col]; }
+          }
           else if (q.type === 'OA') c = [-s.re[q.br], -s.im[q.br]];
           else if (q.type === 'I') { const m = acOf(q, firstV), ph = (parseSI(q.p.acPhase) || 0) * Math.PI / 180; c = [m * Math.cos(ph), m * Math.sin(ph)]; }
           else if (q.type === 'D' || q.type === 'LED') {

@@ -2,6 +2,7 @@ package com.engorg.inkpad
 
 import android.app.Activity
 import android.widget.FrameLayout
+import android.widget.Toast
 import org.json.JSONObject
 import java.util.WeakHashMap
 import kotlin.math.abs
@@ -59,6 +60,41 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
     /** Open [rec]'s value sheet (the panel's Values list); does nothing for a symbol without fields. */
     fun edit(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec) { open(pane, page, current(rec), selectIfNone = false) }
 
+    /**
+     * The selection's "Values" button: a lone part gets its usual sheet, several (a lassoed circuit)
+     * share one sheet with Next running through them all. [x] = the selection's center in [pane].
+     */
+    fun editAll(pane: PageCanvas, page: Int, recs: List<FinishedStrokesView.Rec>, x: Float) {
+        val syms = recs.filter { it.shape?.type == ShapeType.SYMBOL }
+        if (cacheValid(pane, page)) { showAll(pane, page, syms, cRecs, cComps, x); return }
+        val seq = ++tapSeq
+        analyse(pane, page) { seen, comps ->
+            if (seq == tapSeq) showAll(pane, page, syms, seen, comps ?: emptyMap(), x)
+        }
+    }
+
+    private fun showAll(pane: PageCanvas, page: Int, syms: List<FinishedStrokesView.Rec>, seen: List<FinishedStrokesView.Rec>, comps: Map<Int, JSONObject>, x: Float) {
+        val all = syms.mapNotNull { rec -> comps[seen.indexOf(rec)]?.takeIf { hasFields(it) }?.let { rec to it } }
+        // Parts with something to enter, by name (R1, R2, V1); meters and grounds only have a name to set.
+        val valued = all.filter { (_, comp) -> (0 until comp.getJSONArray("fields").length()).any { comp.getJSONArray("fields").getJSONObject(it).optString("key") != "name" } }
+            .sortedWith(compareBy({ it.second.optString("name").takeWhile { c -> !c.isDigit() } }, { it.second.optString("name").dropWhile { c -> !c.isDigit() }.toIntOrNull() ?: 0 }))
+        when {
+            valued.size > 1 -> {
+                val loc = IntArray(2); pane.getLocationInWindow(loc)
+                val parts = valued.map { (rec, comp) -> ValueSheet.Part(comp, current(rec).shape?.props) }
+                sheetPane = pane
+                // Docked away from the selection so the circuit stays in view.
+                sheet.showParts(parts, dockEnd = loc[0] + x < act.window.decorView.width / 2f,
+                    onPart = { k -> pane.ringRec(page, current(valued[k].first)) },
+                    onClosed = { pane.ringRec(page, null) },
+                    onSave = { values -> saveAll(pane, page, valued.map { it.first }, values) })
+            }
+            valued.size == 1 -> showSheet(pane, page, valued[0].first, valued[0].second)
+            all.size == 1 -> showSheet(pane, page, all[0].first, all[0].second)
+            else -> Toast.makeText(act, "No values to enter here", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun open(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, selectIfNone: Boolean): Boolean {
         if (cacheValid(pane, page)) {
             val comp = cComps[cRecs.indexOf(rec)]
@@ -106,8 +142,8 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
             onDelete = { pane.removeRec(page, current(rec)) })
     }
 
-    private fun save(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, values: Map<String, String>) {
-        val live = current(rec)
+    /** [live]'s props with [values] applied, or null if that changes nothing. */
+    private fun merged(live: FinishedStrokesView.Rec, values: Map<String, String>): JSONObject? {
         val old = live.shape?.props
         val np = JSONObject(old?.toString() ?: "{}")
         var changed = false
@@ -116,10 +152,32 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
             changed = true
             if (v.isEmpty()) np.remove(key) else np.put(key, v)
         }
-        if (!changed) return   // nothing new: no undo step, no re-run
+        return np.takeIf { changed }
+    }
+
+    private fun save(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, values: Map<String, String>) {
+        val live = current(rec)
+        val np = merged(live, values) ?: return   // nothing new: no undo step, no re-run
         val fresh = pane.updateShapeProps(page, live, np, undoable = true) ?: return
         successor[live] = fresh
-        // The panel re-runs on the edit itself; otherwise refresh the labels quietly.
+        relabel(pane, page)
+    }
+
+    /** Save a multi-part sheet: [values][k] belongs to [recs][k], and the lot is one undo step. */
+    private fun saveAll(pane: PageCanvas, page: Int, recs: List<FinishedStrokesView.Rec>, values: List<Map<String, String>>) {
+        var saved = false
+        recs.forEachIndexed { k, rec ->
+            val live = current(rec)
+            val np = merged(live, values.getOrNull(k) ?: return@forEachIndexed) ?: return@forEachIndexed
+            val fresh = pane.updateShapeProps(page, live, np, undoable = !saved) ?: return@forEachIndexed
+            successor[live] = fresh
+            saved = true
+        }
+        if (saved) relabel(pane, page)
+    }
+
+    /** The panel re-runs on an edit itself; otherwise refresh the drawn labels quietly. */
+    private fun relabel(pane: PageCanvas, page: Int) {
         if (panelShows(pane, page)) return
         analyse(pane, page) { recs, comps ->
             if (comps == null) return@analyse

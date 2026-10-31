@@ -62,6 +62,20 @@ const DEFAULT_CATEGORIES = [
 // Exam notes get a gold frame everywhere they render (board, calendar, notes) — see .note-exam etc.
 const EXAM_CATEGORY = DEFAULT_CATEGORIES.find(c => c.id === 'exam');
 function isExamNote(note) { return !!note && note.category === 'exam'; }
+// Upcoming exams are never buried: every note list sorts by this first (0 = pinned exam, 1 = the rest).
+function examRank(note) { return isExamNote(note) && !note.completed ? 0 : 1; }
+// A note with an end time is a duration (study block, exam), drawn in the calendar's hour grid.
+// Its start is startTime when set (e.g. an imported exam whose dueTime is the end), else dueTime.
+function noteStart(note) { return note.startTime || note.dueTime || ''; }
+// End of a timed note. Exams always count as timed: with no end set, assume a 1-hour exam.
+function noteEnd(note) {
+  if (note.endTime) return note.endTime;
+  if (!isExamNote(note) || !noteStart(note)) return '';
+  const [h, m] = noteStart(note).split(':').map(Number);
+  const t = Math.min(h * 60 + m + 60, 24 * 60 - 1);
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+}
+function isTimedNote(note) { return !!(noteStart(note) && noteEnd(note)); }
 
 // These get populated on init from settings
 let APP_CATEGORIES = [...DEFAULT_CATEGORIES];

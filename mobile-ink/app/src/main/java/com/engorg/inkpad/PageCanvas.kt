@@ -98,6 +98,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
      * return true to consume it, false to select the symbol as usual.
      */
     var symbolTap: ((page: Int, rec: FinishedStrokesView.Rec) -> Boolean)? = null
+    /** The selection's "Values" button: enter the values of the symbols among [recs]; [x] = the selection's center, pane-local. */
+    var selectionValues: ((page: Int, recs: List<FinishedStrokesView.Rec>, x: Float) -> Unit)? = null
 
     val finishedView = FinishedStrokesView(context).apply {
         backdrop = AppTheme.bg; accent = AppTheme.accent; textColor = AppTheme.text; menuBg = AppTheme.elevated
@@ -417,6 +419,16 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     /** Snap a page point to the nearest paper dot/grid crossing (none on plain paper). */
     private fun gridSnap(p: PointF): PointF =
         if (finishedView.paperStyle == FinishedStrokesView.PaperStyle.PLAIN) p else PointF(Symbols.snap(p.x), Symbols.snap(p.y))
+
+    /**
+     * Where [recs] lock to the grid: the anchor of their first circuit symbol, or null when they
+     * move freely (no circuit symbol, or plain paper). Thermo and mechanics parts stay free, since
+     * their drawings often sit at angles the grid can't hold.
+     */
+    private fun gridAnchorOf(recs: List<FinishedStrokesView.Rec>): PointF? {
+        if (finishedView.paperStyle == FinishedStrokesView.PaperStyle.PLAIN) return null
+        return recs.firstOrNull { it.shape?.symbol?.group == SymGroup.ECE }?.shape?.gridAnchor
+    }
 
     /**
      * Drop the armed symbol at its standard size, so every resistor/source on the page matches. A tap
@@ -819,6 +831,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.GRAPH_EDIT,
         ) else if (selectedFillable() != null) listOf(
             FinishedStrokesView.MenuAction.FILL,
+        ) else if (selRecs.any { it.shape?.type == ShapeType.SYMBOL }) listOf(
+            FinishedStrokesView.MenuAction.VALUES,
         ) else emptyList()
         finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
     }
@@ -904,7 +918,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             Grab.MOVE -> {
                 lastSelX = sx; lastSelY = sy
                 val h = toLocalOn(sx, sy, selPage)
-                val dx = h.x - dragStartLocal.x; val dy = h.y - dragStartLocal.y
+                var dx = h.x - dragStartLocal.x; var dy = h.y - dragStartLocal.y
+                // A circuit moves in whole grid squares, so its terminals stay on the dots.
+                gridAnchorOf(dragStartRecs)?.let { a ->
+                    val s = gridSnap(PointF(a.x + dx, a.y + dy))
+                    dx = s.x - a.x; dy = s.y - a.y
+                }
                 applyMatrixToSelection(Matrix().apply { setTranslate(dx, dy) })
                 selBox = RectF(dragStartBox).apply { offset(dx, dy) }
                 // Carried past a page edge: hand the selection to the page its center is now over.
@@ -928,8 +947,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             Grab.VERTEX -> {
                 val h = toLocalOn(sx, sy, selPage); val base = dragStartRecs[0]; val spec = base.shape!!.clone()
                 var hp = PointF(h.x.coerceIn(0f, FinishedStrokesView.PAGE_W), h.y.coerceIn(0f, FinishedStrokesView.PAGE_H))
-                // A symbol's terminal clicks onto a nearby dot, so wires meet it cleanly.
-                if (spec.type == ShapeType.SYMBOL) gridSnap(hp).let { if (hypot(it.x - hp.x, it.y - hp.y) < 8f) hp = it }
+                // A circuit part's terminal stays on the dots; any other symbol's clicks onto a nearby one.
+                if (spec.symbol?.group == SymGroup.ECE) hp = gridSnap(hp)
+                else if (spec.type == ShapeType.SYMBOL) gridSnap(hp).let { if (hypot(it.x - hp.x, it.y - hp.y) < 8f) hp = it }
                 spec.setHandle(grabVertex, hp.x, hp.y)
                 val newRec = buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
                 replaceRec(base, newRec); selRecs[0] = newRec; dragStartRecs[0] = newRec
@@ -938,10 +958,14 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             Grab.ROTATE -> {
                 val h = toLocalOn(sx, sy, selPage)
                 var deg = Math.toDegrees((atan2(h.y - rotCy, h.x - rotCx) - rotStartAngle).toDouble()).toFloat()
-                // Gentle detents at every 45° so square-ups (90°, 180°…) are easy to hit.
-                val snap = Math.round(deg / 45f) * 45f
-                if (abs(deg - snap) < 4f) deg = snap
-                applyRotationToSelection(deg)
+                val anchor = gridAnchorOf(dragStartRecs)
+                if (anchor != null) deg = Math.round(deg / 90f) * 90f   // a circuit turns in quarter turns
+                else {
+                    // Gentle detents at every 45° so square-ups (90°, 180°…) are easy to hit.
+                    val snap = Math.round(deg / 45f) * 45f
+                    if (abs(deg - snap) < 4f) deg = snap
+                }
+                applyRotationToSelection(deg, anchor)
                 selBox = recBounds(selRecs); refreshSelectionOverlay()
             }
             Grab.ORBIT -> {
@@ -1000,6 +1024,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         when (grab) {
             Grab.LASSO -> finishLasso()
             Grab.MOVE, Grab.RESIZE, Grab.VERTEX, Grab.ROTATE, Grab.ORBIT -> {
+                // Pages aren't a whole number of grid squares apart, so a part just carried onto a new page snaps again.
+                if (grab == Grab.MOVE && moveStartPage >= 0 && selPage != moveStartPage && gridAnchorOf(dragStartRecs) != null) moveSelect(lastSelX, lastSelY)
                 selBox = recBounds(selRecs); refreshSelectionOverlay()
                 if (selPage >= 0) { savePage(selPage); mirror?.pageEdited(this, selPage) }
                 if (moveStartPage >= 0 && moveStartPage != selPage) { savePage(moveStartPage); mirror?.pageEdited(this, moveStartPage) }
@@ -1107,11 +1133,16 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         val spec = shape.clone().also { it.props = props?.takeIf { p -> p.length() > 0 } }
         val fresh = buildShapeRec(spec, rec.color, rec.widthPx, rec.highlighter)
         recs[i] = fresh
+        // A selected symbol stays selected (a stale record here would come back as a duplicate on its next drag).
+        selRecs.indexOf(rec).let { if (it >= 0) selRecs[it] = fresh }
         finishedView.invalidate()
         savePage(page)
         mirror?.pageEdited(this, page)
         return fresh
     }
+
+    /** Ring [rec] on [page] (null = clear), to show which part the value sheet is on. */
+    fun ringRec(page: Int, rec: FinishedStrokesView.Rec?) { finishedView.setRing(page, rec?.let { recBounds(listOf(it)) }) }
 
     /**
      * Select [rec] on [page] exactly as a plain tap would, without asking [symbolTap] (the value
@@ -1176,14 +1207,27 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         }
     }
 
-    /** Rotate the drag-start selection by [deg] about the rotation center (shapes keep exact geometry). */
-    private fun applyRotationToSelection(deg: Float) {
+    /**
+     * Rotate the drag-start selection by [deg] about the rotation center (shapes keep exact geometry).
+     * With a grid [anchor], the whole turned selection then shifts so that point lands on the grid;
+     * a quarter turn maps the grid onto itself, so every other terminal on it lands on it too.
+     */
+    private fun applyRotationToSelection(deg: Float, anchor: PointF? = null) {
         val m = Matrix().apply { setRotate(deg, rotCx, rotCy) }
         val f = FloatArray(2)
+        var ox = 0f; var oy = 0f
+        if (anchor != null) {
+            f[0] = anchor.x; f[1] = anchor.y; m.mapPoints(f)
+            val s = gridSnap(PointF(f[0], f[1]))
+            ox = s.x - f[0]; oy = s.y - f[1]
+            m.postTranslate(ox, oy)
+        }
         for (k in dragStartRecs.indices) {
             val base = dragStartRecs[k]
             val newRec = if (base.shape != null) {
                 val spec = base.shape.clone(); spec.rotateBy(deg, rotCx, rotCy)
+                for (v in spec.verts) v.offset(ox, oy)
+                spec.pivot.offset(ox, oy)
                 buildShapeRec(spec, base.color, base.widthPx, base.highlighter)
             } else {
                 val np = base.points.map { f[0] = it.x; f[1] = it.y; m.mapPoints(f); PointF(f[0], f[1]) }
@@ -1213,6 +1257,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.DUPLICATE -> duplicateSelection()
             FinishedStrokesView.MenuAction.COLOR -> host.pickColor(this, x, y + dp(26)) { c -> recolorSelection(c) }
             FinishedStrokesView.MenuAction.DELETE -> deleteSelection()
+            FinishedStrokesView.MenuAction.VALUES -> selectionValues?.invoke(selPage, ArrayList(selRecs), x)
             FinishedStrokesView.MenuAction.ROW_ADD, FinishedStrokesView.MenuAction.ROW_DEL,
             FinishedStrokesView.MenuAction.COL_ADD, FinishedStrokesView.MenuAction.COL_DEL,
             FinishedStrokesView.MenuAction.BORDER -> editTable(a)

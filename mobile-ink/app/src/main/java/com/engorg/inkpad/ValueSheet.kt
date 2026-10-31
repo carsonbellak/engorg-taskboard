@@ -44,6 +44,9 @@ internal fun analysisRich(s: String): CharSequence {
  * `units` → unit-suffix buttons (the first is the implied default); `'text'` (or no unit) → a normal
  * text box with the system keyboard. Stored values are the typed strings ("4.7k", "8 MPa", "85 %").
  *
+ * [showParts] lists several symbols on one sheet (a lassoed circuit): their value fields under a
+ * heading each, with Next running on through all of them and the page left in view beside it.
+ *
  * Owned by [AnalysisEditor]; it only edits strings — saving, selecting and deleting are callbacks.
  */
 @SuppressLint("SetTextI18n")
@@ -54,12 +57,17 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
     private val muted get() = tint(onSurface, 0xA8)
     private fun tint(c: Int, a: Int) = Color.argb(a, Color.red(c), Color.green(c), Color.blue(c))
 
-    /** One field's editing state. Keypad fields keep the number, SI prefix and unit suffix apart. */
-    private class Entry(val f: JSONObject, val raw: String) {
+    /** One symbol on a multi-part sheet: its analysis comp and current props. */
+    class Part(val comp: JSONObject, val props: JSONObject?)
+
+    /** One field's editing state ([part] = its symbol on a multi-part sheet). Keypad fields keep the number, SI prefix and unit suffix apart. */
+    private class Entry(val f: JSONObject, val raw: String, val part: Int = 0) {
         val key: String = f.optString("key")
         val unit: String = f.optString("unit")
         val options: JSONArray? = f.optJSONArray("options")
         val units: List<String> = f.optJSONArray("units")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
+        /** Circuit variables a source's value can use: keys that put "ix" after the number ("2 ix"). */
+        val vars: List<String> = f.optJSONArray("vars")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
         val mode: String = when {
             options != null -> "opt"
             else -> when (val k = f.optString("keypad")) {
@@ -97,8 +105,8 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             if (mode == "text") return (edit?.text?.toString() ?: text).trim()
             if (mode == "opt") return if (dirty) text.trim() else raw.trim()   // an untouched default stays implied
             if (!dirty) return raw.trim()
-            val n = num.replace(Regex("[eE][-+]?$"), "")
-            if (n.none { it.isDigit() }) return ""
+            val n = num.replace(Regex("[eE][-+]?$"), "").trimEnd('/')
+            if (n.none { it.isDigit() }) return if (suffix in vars) (if (n == "-") "-" else "") + suffix else ""   // a bare Vx
             return n + prefix + if (suffix.isNotEmpty()) " $suffix" else ""
         }
 
@@ -108,10 +116,13 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             num = if (num == "0") "$d" else if (num == "-0") "-$d" else num + d
         }
         fun dot() {
-            if (num.contains('.') || num.contains('e', ignoreCase = true)) return
-            num += if (num.none { it.isDigit() }) "0." else "."
+            val tail = num.substringAfter('/')   // the denominator takes its own point
+            if (tail.contains('.') || num.contains('e', ignoreCase = true)) return
+            num += if (tail.none { it.isDigit() }) "0." else "."
         }
-        fun exp() { if (num.any { it.isDigit() } && !num.contains('e', ignoreCase = true)) num += "E" }
+        fun exp() { if (num.any { it.isDigit() } && !num.contains('e', ignoreCase = true) && !num.contains('/')) num += "E" }
+        /** Start the denominator of a fraction: 1/2. */
+        fun frac() { if (num.any { it.isDigit() } && !num.contains('/') && num.last().let { it.isDigit() || it == '.' }) num += "/" }
         fun minus() {
             num = when {
                 num.endsWith("E") || num.endsWith("e") -> "$num-"
@@ -131,9 +142,12 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
     private var entries: List<Entry> = emptyList()
     private var focus = -1
     private var saveNow: (() -> Unit)? = null
+    private var onPart: ((Int) -> Unit)? = null
+    private var onClosed: (() -> Unit)? = null
     // The live prefix / unit / Next keys of the keypad on show (repainted after each key).
     private val prefixKeys = ArrayList<Pair<String, TextView>>()
     private val unitKeys = ArrayList<Pair<Int, TextView>>()
+    private val varKeys = ArrayList<Pair<String, TextView>>()
     private var nextKey: TextView? = null
 
     val isOpen: Boolean get() = scrim != null
@@ -154,29 +168,14 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         }
         focus = -1
 
-        val c = LinearLayout(act).apply {
-            orientation = LinearLayout.VERTICAL
-            background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(AppTheme.surface) }
-            elevation = dp(20).toFloat()
-            setPadding(dp(18), dp(16), dp(18), dp(14))
-            isClickable = true
-            // Holds focus itself so no text box grabs it (and pops the keyboard) on open.
-            isFocusable = true; isFocusableInTouchMode = true
-        }
-        card = c
+        val c = newCard()
         c.addView(TextView(act).apply { text = analysisRich(comp.optString("title").ifEmpty { comp.optString("name") }); textSize = 17f; setTypeface(null, Typeface.BOLD); setTextColor(onSurface) })
         if (comp.optString("name").isNotEmpty() && comp.optString("name") != comp.optString("title"))
             c.addView(TextView(act).apply { text = analysisRich(comp.optString("name")); textSize = 12.5f; setTextColor(muted) })
 
         val form = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(6), 0, dp(8)) }
         entries.forEachIndexed { idx, e -> form.addView(fieldRow(idx, e)) }
-        val sc = ScrollView(act).apply { addView(form); isVerticalScrollBarEnabled = false }
-        scroll = sc
-        c.addView(sc, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
-
-        val kp = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(0, dp(4), 0, dp(4)) }
-        keypad = kp
-        c.addView(kp, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        addFormAndKeypad(c, form)
 
         val save = {
             val out = LinkedHashMap<String, String>()
@@ -204,6 +203,92 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
                 topMargin = dp(24); bottomMargin = dp(24)
             })
         }
+        attach(s, c)
+    }
+
+    /**
+     * Show several symbols on one sheet, each one's value fields under its name (a symbol's "name"
+     * field is left out: this is for getting the numbers in). The card docks at the window's end
+     * ([dockEnd]) or start, with the page undimmed so the parts stay readable, and only Save or
+     * Cancel closes it, so a stray tap can't lose a whole circuit's worth of typing.
+     * [onPart] reports the part being edited; [onSave] gets one key → value map per part, in order.
+     */
+    fun showParts(parts: List<Part>, dockEnd: Boolean, onPart: (Int) -> Unit, onClosed: () -> Unit, onSave: (List<Map<String, String>>) -> Unit) {
+        close()
+        entries = parts.flatMapIndexed { k, part ->
+            val fields = part.comp.optJSONArray("fields") ?: JSONArray()
+            (0 until fields.length()).map { fields.getJSONObject(it) }.filter { it.optString("key") != "name" }.map { f ->
+                val raw = part.props?.optString(f.optString("key")).orEmpty()
+                Entry(f, raw, k).also { e -> if (e.mode == "opt") e.text = raw.ifEmpty { f.optString("value") }.ifEmpty { f.optString("ph") } }
+            }
+        }
+        focus = -1
+        this.onPart = onPart; this.onClosed = onClosed
+
+        val c = newCard()
+        c.addView(TextView(act).apply { text = "Values"; textSize = 17f; setTypeface(null, Typeface.BOLD); setTextColor(onSurface) })
+        c.addView(TextView(act).apply { text = "${parts.size} parts"; textSize = 12.5f; setTextColor(muted) })
+
+        val form = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(2), 0, dp(8)) }
+        entries.forEachIndexed { idx, e ->
+            if (idx == 0 || entries[idx - 1].part != e.part) form.addView(TextView(act).apply {
+                val comp = parts[e.part].comp
+                text = analysisRich(comp.optString("name") + "  ·  " + comp.optString("title"))
+                textSize = 14f; setTypeface(null, Typeface.BOLD); setTextColor(onSurface)
+                setPadding(dp(2), dp(14), 0, 0)
+                setOnClickListener { setFocus(idx) }
+            })
+            form.addView(fieldRow(idx, e))
+        }
+        addFormAndKeypad(c, form)
+
+        val save = {
+            val out = parts.indices.map { LinkedHashMap<String, String>() }
+            for (e in entries) if (e.key.isNotEmpty()) out[e.part][e.key] = e.value()
+            close()
+            onSave(out)
+        }
+        saveNow = save
+        c.addView(LinearLayout(act).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, 0)
+            addView(View(act), LinearLayout.LayoutParams(0, 1, 1f))
+            addView(action("Cancel", AppTheme.elevated, onSurface) { close() })
+            addView(action("Save", AppTheme.accent, AppTheme.onAccent(), bold = true) { save() })
+        })
+
+        val s = FrameLayout(act).apply {
+            isClickable = true
+            val dm = act.resources.displayMetrics
+            val side = if (dockEnd) Gravity.END else Gravity.START
+            addView(c, FrameLayout.LayoutParams(minOf(dp(420), (dm.widthPixels * 0.94f).toInt()), WRAP_CONTENT, side or Gravity.CENTER_VERTICAL).apply {
+                topMargin = dp(24); bottomMargin = dp(24); leftMargin = dp(12); rightMargin = dp(12)
+            })
+        }
+        attach(s, c)
+        if (focus < 0) setFocus(0)
+    }
+
+    private fun newCard() = LinearLayout(act).apply {
+        orientation = LinearLayout.VERTICAL
+        background = GradientDrawable().apply { cornerRadius = dp(20).toFloat(); setColor(AppTheme.surface) }
+        elevation = dp(20).toFloat()
+        setPadding(dp(18), dp(16), dp(18), dp(14))
+        isClickable = true
+        // Holds focus itself so no text box grabs it (and pops the keyboard) on open.
+        isFocusable = true; isFocusableInTouchMode = true
+    }.also { card = it }
+
+    private fun addFormAndKeypad(c: LinearLayout, form: LinearLayout) {
+        val sc = ScrollView(act).apply { addView(form); isVerticalScrollBarEnabled = false }
+        scroll = sc
+        c.addView(sc, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
+        val kp = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE; setPadding(0, dp(4), 0, dp(4)) }
+        keypad = kp
+        c.addView(kp, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+    }
+
+    private fun attach(s: View, c: LinearLayout) {
         host.addView(s, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
         scrim = s
         c.requestFocus()
@@ -216,8 +301,10 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         hideKeyboard(s)
         host.removeView(s)
         scrim = null; card = null; scroll = null; keypad = null; saveNow = null; nextKey = null
-        prefixKeys.clear(); unitKeys.clear()
+        prefixKeys.clear(); unitKeys.clear(); varKeys.clear()
         entries = emptyList(); focus = -1
+        onPart = null
+        onClosed?.also { onClosed = null }?.invoke()
     }
 
     private fun hideKeyboard(v: View) {
@@ -256,7 +343,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
                     chips.add(TextView(act).apply {
                         text = v; tag = v; textSize = 14f; gravity = Gravity.CENTER; setPadding(dp(16), 0, dp(16), 0)
                         layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, dp(42)).apply { rightMargin = dp(6) }
-                        setOnClickListener { e.text = v; e.dirty = true; paint() }
+                        setOnClickListener { e.text = v; e.dirty = true; paint(); onPart?.invoke(e.part) }
                     })
                 }
                 chips.forEach { row.addView(it) }; paint()
@@ -301,7 +388,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         val untouched = !e.dirty && e.num.isEmpty() && e.prefix.isEmpty()
         if (untouched && e.suffix.isNotEmpty()) {
             span(e.raw, onSurface)          // a value the keypad can't take apart: show it as stored
-        } else if (e.num.isEmpty() && e.prefix.isEmpty()) {
+        } else if (e.num.isEmpty() && e.prefix.isEmpty() && e.suffix.isEmpty()) {
             if (focused) span("▏", AppTheme.accent)
             val ph = e.f.optString("ph")
             if (ph.isNotEmpty()) span(ph + if (e.defaultUnit.isNotEmpty()) " ${e.defaultUnit}" else "", tint(onSurface, 0x60))
@@ -319,6 +406,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         val prev = entries.getOrNull(focus)
         focus = idx
         prev?.let { paintBox(it, false) }
+        if (prev?.part != e.part) onPart?.invoke(e.part)
         val kp = keypad ?: return
         if (e.keypad) {
             // Leaving a text box: put the system keyboard away and take its focus back.
@@ -361,7 +449,20 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
 
     private fun buildKeypad(e: Entry) {
         val kp = keypad ?: return
-        kp.removeAllViews(); prefixKeys.clear(); unitKeys.clear()
+        kp.removeAllViews(); prefixKeys.clear(); unitKeys.clear(); varKeys.clear()
+        if (e.vars.isNotEmpty()) {
+            val keys = e.vars.map { v ->
+                key(v, K.PICK) { e.suffix = if (e.suffix == v) "" else v; e.dirty = true; changed(e) }.also { varKeys.add(v to it) }
+            }
+            if (keys.size <= 6) kp.addView(pickRow(keys))
+            else kp.addView(HorizontalScrollView(act).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(LinearLayout(act).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    for (k in keys) addView(k, LinearLayout.LayoutParams(dp(64), dp(44)).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
+                })
+            })
+        }
         if (e.units.isNotEmpty()) {
             val keys = e.units.mapIndexed { i, u ->
                 key(u, K.PICK) { e.suffix = if (i == 0) "" else u; e.dirty = true; changed(e) }.also { unitKeys.add(i to it) }
@@ -381,26 +482,27 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
                 key(p, K.PICK) { e.prefix = if (e.prefix == p) "" else p; e.dirty = true; changed(e) }.also { prefixKeys.add(p to it) }
             }))
         }
-        val grid = GridLayout(act).apply { columnCount = 4 }
-        fun add(v: TextView) {
-            grid.addView(v, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, 1, 1f)).apply {
+        val grid = GridLayout(act).apply { columnCount = 5 }
+        fun add(v: TextView, span: Int = 1) {
+            grid.addView(v, GridLayout.LayoutParams(GridLayout.spec(GridLayout.UNDEFINED), GridLayout.spec(GridLayout.UNDEFINED, span, span.toFloat())).apply {
                 width = 0; height = dp(54); setMargins(dp(3), dp(3), dp(3), dp(3))
             })
         }
         fun tap(op: () -> Unit) { op(); e.dirty = true; changed(e) }
         for (d in "789") add(key("$d", K.NUM) { tap { e.digit(d) } })
         add(key("⌫", K.ACT) { tap { e.back() } })
-        for (d in "456") add(key("$d", K.NUM) { tap { e.digit(d) } })
         add(key("C", K.ACT) { tap { e.clear() } })
-        for (d in "123") add(key("$d", K.NUM) { tap { e.digit(d) } })
+        for (d in "456") add(key("$d", K.NUM) { tap { e.digit(d) } })
         add(key("−", K.ACT) { tap { e.minus() } })
-        add(key(".", K.NUM) { tap { e.dot() } })
-        add(key("0", K.NUM) { tap { e.digit('0') } })
+        add(key("/", K.ACT) { tap { e.frac() } })
+        for (d in "123") add(key("$d", K.NUM) { tap { e.digit(d) } })
         add(key("E", K.ACT) { tap { e.exp() } })
+        add(key(".", K.NUM) { tap { e.dot() } })
+        add(key("0", K.NUM) { tap { e.digit('0') } }, 3)
         add(key("Next", K.NEXT) {
             val n = nextKeypadAfter(focus)
             if (n >= 0) setFocus(n) else saveNow?.invoke()
-        }.also { nextKey = it })
+        }.also { nextKey = it }, 2)
         kp.addView(grid, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         changed(e)
     }
@@ -418,6 +520,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             val on = if (e.suffix.isEmpty()) i == 0 else e.units.getOrNull(i)?.equals(e.suffix, ignoreCase = true) == true
             v.background = pill(keyBg(K.PICK, on), 12); v.setTextColor(if (on) AppTheme.onAccent() else onSurface)
         }
+        for ((name, v) in varKeys) { val on = e.suffix == name; v.background = pill(keyBg(K.PICK, on), 12); v.setTextColor(if (on) AppTheme.onAccent() else onSurface) }
         nextKey?.text = if (nextKeypadAfter(focus) >= 0) "Next" else "Save"
     }
 
@@ -426,8 +529,8 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         private const val PREFIX_CHARS = "fpnuµμmkKMGT"
         // Units whose values are usually written with SI prefixes (4.7k, 100n, 1m), when a field doesn't say.
         private val SI_UNITS = setOf("Ω", "F", "H", "V", "A", "Hz", "S")
-        // A number as typed (sign, digits, point, exponent — possibly unfinished), then the rest.
-        private val NUM_RE = Regex("""\s*([-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]*)?(?:(?<=[0-9.])[eE][-+]?[0-9]*)?)\s*(.*?)\s*""")
+        // A number as typed (sign, digits, point, exponent or fraction — possibly unfinished), then the rest.
+        private val NUM_RE = Regex("""\s*([-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]*)?(?:(?<=[0-9.])[eE][-+]?[0-9]*)?(?:(?<=[0-9.])/[0-9]*\.?[0-9]*)?)\s*(.*?)\s*""")
 
         private fun normPrefix(c: Char): String = when (c) { 'u', 'μ' -> "µ"; 'K' -> "k"; else -> c.toString() }
     }

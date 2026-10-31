@@ -112,6 +112,19 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
         else -> verts.map { rotated(it) }
     }
 
+    /**
+     * The page point a SYMBOL keeps on the grid: an inline one's first terminal, a box one's
+     * [Sym.ax]/[Sym.ay] anchor (a pin or terminal), turned with it. Null for other shapes.
+     */
+    val gridAnchor: PointF? get() {
+        val sym = symbol ?: return null
+        if (type != ShapeType.SYMBOL) return null
+        if (sym.kind == SymKind.INLINE) return handles.firstOrNull()?.let { PointF(it.x, it.y) }
+        val a = verts[0]; val b = verts[1]
+        val p = PointF((a.x + b.x) / 2f + sym.ax * abs(b.x - a.x) / sym.w, (a.y + b.y) / 2f + sym.ay * abs(b.y - a.y) / sym.h)
+        return if (rot == 0f) p else rotated(p)
+    }
+
     /** Move handle [i] to page point ([x],[y]). */
     fun setHandle(i: Int, x: Float, y: Float) {
         if (type == ShapeType.TRAPEZOID) { verts[i].set(x, y); keepTrapezoid(i); return }

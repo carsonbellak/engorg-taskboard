@@ -193,7 +193,39 @@ const InkAnalysis = (() => {
     let s = String(v == null ? '' : v).trim();
     if (u) s = s.replace(new RegExp('\\s*' + u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), '');
     s = s.replace(/\s*(ohms?|Ω)$/i, '');
+    // A fraction: "1/2" = 0.5; a prefix after it scales the whole thing ("1/2k" = 500).
+    const fr = s.match(/^([-+]?[\d.]+(?:e[-+]?\d+)?)\s*\/\s*([\d.]+(?:e[-+]?\d+)?)\s*(.*)$/i);
+    if (fr) return parseFloat(fr[1]) / parseFloat(fr[2]) * CE.parseSI('1' + fr[3]);
     return CE.parseSI(s);
+  }
+  // A value written in circuit variables ("2ix", "1/2 Vx", "Vx/2", "2ix − 3Vy"): [{ k, name }], or
+  // null when it's a plain number. Variable names start with i or v and run at least two characters,
+  // so "5 V" and "10 mV" stay numbers. A value that mixes in anything else comes back with bad: true.
+  function varExpr(v) {
+    if (blank(v) || typeof v === 'number') return null;
+    const s = String(v).replace(/[()*·\s]/g, '').replace(/−/g, '-');
+    if (!/(^|[\d.\/+\-pnuµmkMG])[iIvV][A-Za-z0-9_]/.test(s)) return null;
+    const terms = [];
+    const re = /([-+]?)((?:[\d.]+(?:e[-+]?\d+)?)(?:\/[\d.]+)?)?([pnuµmkMG])?([iIvV][A-Za-z0-9_]+)(?:\/([\d.]+))?/y;
+    let at = 0;
+    while (at < s.length) {
+      re.lastIndex = at;
+      const m = re.exec(s);
+      if (!m || (!m[1] && at > 0)) { terms.bad = true; break; }
+      let k = m[2] ? siVal(m[2] + (m[3] || '')) : m[3] ? NaN : 1;
+      if (m[5]) k /= parseFloat(m[5]);
+      if (!isFinite(k)) { terms.bad = true; break; }
+      terms.push({ k: m[1] === '-' ? -k : k, name: m[4] });
+      at = re.lastIndex;
+    }
+    return terms;
+  }
+  // The variables a part names ("ix", "Vx, ix", "-ix" = the opposite way round): [{ name, sign }].
+  function partVars(p) {
+    return String((p && p.vars) || '').split(/[,;\s]+/).filter(Boolean).map(t => {
+      const m = t.replace(/−/g, '-').match(/^([-+]?)([iIvV][A-Za-z0-9_]*)$/);
+      return m ? { name: m[2], sign: m[1] === '-' ? -1 : 1 } : null;
+    }).filter(Boolean);
   }
 
   // ---- value fields (contract §3: keypad + unit buttons for every field) ------------------------------
@@ -234,38 +266,63 @@ const InkAnalysis = (() => {
   };
   const probeNum = (s) => { const n = Math.round(num((s.props || {}).n)); return n > 0 ? n : 1; };
   const probeName = (s) => 'V' + probeNum(s) + (s.sym === 'PROBE_POS' ? '+' : '−');
+  // The page's circuit variables (variable keys on the source keypads), set at the start of circuit().
+  let PAGE_VARS = [];
   function circuitFields(s) {
     const p = s.props || {};
     const f = fld(p);
     const nm = f('name', 'Name', '', '');
+    // Names this part's voltage or current so a source elsewhere can depend on it.
+    const vr = f('vars', 'Variable here', '', 'ix or Vx', { keypad: 'text', hint: 'Vx: + at the first end. ix: first end → second. Use -ix for the other way.' });
+    const src = (hint) => ({ vars: PAGE_VARS.slice(), hint });
     switch (s.sym) {
-      case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg' }), nm];
-      case 'CAPACITOR': case 'CAP_POLAR': return [f('value', 'Capacitance', 'F', '1u', { hint: 'e.g. 100n, 10u' }), nm];
-      case 'INDUCTOR': return [f('value', 'Inductance', 'H', '1m'), nm];
-      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', { hint: '+ is at the end you dragged to' }), nm];
-      case 'BATTERY': return [f('value', 'Voltage', 'V', '9'), nm];
-      case 'VSOURCE_AC': return [f('amp', 'Amplitude (peak)', 'V', '10'), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), nm];
-      case 'ISOURCE_AC': return [f('amp', 'Amplitude (peak)', 'A', '1m', { hint: 'flows the way the arrow points' }), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), nm];
-      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', { hint: 'flows the way the arrow points' }), nm];
-      case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), nm];
-      case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), nm];
-      case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open'] }), nm];
+      case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg, 1/2' }), vr, nm];
+      case 'CAPACITOR': case 'CAP_POLAR': return [f('value', 'Capacitance', 'F', '1u', { hint: 'e.g. 100n, 10u, 1/4' }), vr, nm];
+      case 'INDUCTOR': return [f('value', 'Inductance', 'H', '1m', { hint: 'e.g. 10m, 1/2' }), vr, nm];
+      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', src('+ is at the end you dragged to. A variable makes it dependent: 2ix')), vr, nm];
+      case 'BATTERY': return [f('value', 'Voltage', 'V', '9', src('')), vr, nm];
+      case 'VSOURCE_DEP': return [f('value', 'Value', 'V', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. + is at the end you dragged to') }), vr, nm];
+      case 'ISOURCE_DEP': return [f('value', 'Value', 'A', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. Flows the way the arrow points') }), vr, nm];
+      case 'VSOURCE_AC': return [f('amp', 'Amplitude (peak)', 'V', '10'), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
+      case 'ISOURCE_AC': return [f('amp', 'Amplitude (peak)', 'A', '1m', { hint: 'flows the way the arrow points' }), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
+      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('flows the way the arrow points. A variable makes it dependent: 2Vx')), vr, nm];
+      case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), vr, nm];
+      case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), vr, nm];
+      case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open'] }), vr, nm];
       case 'OPAMP': return [f('vsat', 'Output limit ±', 'V', '15'), f('gain', 'Open-loop gain', '', '100k', { keypad: 'si' }), nm];
-      case 'PROBE_POS': case 'PROBE_NEG': return [f('n', 'Probe number', '', '1', { keypad: 'num', hint: `V${probeNum(s)}+ pairs with V${probeNum(s)}− — reads V(+) − V(−)` })];
-      case 'AMMETER': case 'VOLTMETER': return [nm];
+      case 'PROBE_POS': case 'PROBE_NEG': return [f('n', 'Probe number', '', '1', { keypad: 'num', hint: `V${probeNum(s)}+ pairs with V${probeNum(s)}− — reads V(+) − V(−), and 2V${probeNum(s)} works as a source value` })];
+      case 'AMMETER': case 'VOLTMETER': return [vr, nm];
       default: return [nm];
     }
   }
+  // A part's named variables as drawn beside it, showing their sense: "+Vx−", "ix→".
+  function varLabel(s) {
+    if (!s.inline) return '';
+    const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
+    return partVars(s.props).map(({ name, sign }) => {
+      const fwd = (flat ? dx > 0 : dy > 0) === (sign > 0);
+      if (/^v/i.test(name)) return fwd ? `+${name}−` : `−${name}+`;
+      return flat ? (fwd ? `${name}→` : `←${name}`) : `${name}${fwd ? '↓' : '↑'}`;
+    }).join(' ');
+  }
   function circuitLabel(s) {
     const p = s.props || {}, v = (k, d) => (blank(p[k]) ? d : p[k]);
-    const val = (k, u) => { const n = siVal(p[k], u); return blank(p[k]) ? '' : isFinite(n) ? si(n, u) : p[k] + ' ' + u; };
+    const val = (k, u) => {
+      if (blank(p[k])) return '';
+      const typed = String(p[k]).trim();
+      if (varExpr(typed)) return typed;
+      const n = siVal(p[k], u);
+      // A fraction stays a fraction on the page, as it's written in the problem.
+      if (isFinite(n) && typed.includes('/')) return typed.replace(new RegExp('\\s*' + u + '$'), '') + ' ' + u;
+      return isFinite(n) ? si(n, u) : p[k] + ' ' + u;
+    };
     const acLabel = (u, defAmp) => (blank(p.amp) && blank(p.freq) ? '' : `${si(siVal(v('amp', defAmp), u), u)} ${si(siVal(v('freq', 60), 'Hz'), 'Hz')}` + (siVal(p.phase, '°') ? ` ∠${siVal(p.phase, '°')}°` : ''));
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return val('value', 'Ω');
       case 'CAPACITOR': case 'CAP_POLAR': return val('value', 'F');
       case 'INDUCTOR': return val('value', 'H');
-      case 'VSOURCE': case 'BATTERY': return val('value', 'V');
-      case 'ISOURCE': return val('value', 'A');
+      case 'VSOURCE': case 'BATTERY': case 'VSOURCE_DEP': return val('value', 'V');
+      case 'ISOURCE': case 'ISOURCE_DEP': return val('value', 'A');
       case 'VSOURCE_AC': return acLabel('V', 10);
       case 'ISOURCE_AC': return acLabel('A', '1m');
       case 'PROBE_POS': case 'PROBE_NEG': return probeName(s);
@@ -279,6 +336,7 @@ const InkAnalysis = (() => {
   function circuit(syms, wires, out) {
     const parts = syms.filter(s => ECE.has(s.sym));
     if (!parts.length) return;
+    PAGE_VARS = [...new Set(parts.flatMap(s => (PROBES.has(s.sym) ? (s.sym === 'PROBE_POS' ? ['V' + probeNum(s)] : []) : partVars(s.props).map(v => v.name))))];
     const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE' && !PROBES.has(s.sym));
     const probes = parts.filter(s => PROBES.has(s.sym));
     // Terminals (a probe's contact point joins nets like a terminal but carries no current)
@@ -339,17 +397,25 @@ const InkAnalysis = (() => {
       // Values go to the engine as numbers (unit suffix stripped); unreadable ones fall back to the placeholder.
       const need = (k, def, unitHint, u) => {
         if (blank(p[k])) { missing.push(`${name} (${unitHint || k})`); return siVal(def, u); }
-        const v = siVal(p[k], u);
+        const v = varExpr(p[k]) ? NaN : siVal(p[k], u);   // only sources can take a variable
         if (!isFinite(v)) { unreadable.push(`${name} (“${p[k]}”)`); return siVal(def, u); }
         return v;
       };
       const id = 'p' + s.i;
       let ep = null;
+      // A source whose value is written in variables is a dependent source (pins as the plain one's: + at t1, I flows t0 → t1).
+      const dep = (isV) => {
+        const expr = varExpr(p.value);
+        if (expr && expr.bad) { unreadable.push(`${name} (“${p.value}”)`); return { type: isV ? 'V' : 'I', n: isV ? [pins[1], pins[0]] : pins, p: { wave: 'dc', dc: 0 } }; }
+        return expr ? { type: 'DS', n: isV ? [pins[1], pins[0]] : pins, p: { out: isV ? 'V' : 'I', expr, ctrl: [] } } : null;
+      };
       switch (s.sym) {
         case 'RESISTOR': case 'RESISTOR_BOX': ep = { type: 'R', n: pins, p: { value: need('value', '1k', 'resistance', 'Ω') } }; break;
         case 'CAPACITOR': case 'CAP_POLAR': ep = { type: 'C', n: pins, p: { value: need('value', '1u', 'capacitance', 'F') } }; break;
         case 'INDUCTOR': ep = { type: 'L', n: pins, p: { value: need('value', '1m', 'inductance', 'H') } }; break;
-        case 'VSOURCE': case 'BATTERY': ep = { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', s.sym === 'BATTERY' ? '9' : '5', 'voltage', 'V') } }; break;
+        case 'VSOURCE': case 'BATTERY': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', s.sym === 'BATTERY' ? '9' : '5', 'voltage', 'V') } }; break;
+        case 'VSOURCE_DEP': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', '0', 'value', 'V') } }; break;
+        case 'ISOURCE_DEP': ep = dep(false) || { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '0', 'value', 'A') } }; break;
         case 'VSOURCE_AC': case 'ISOURCE_AC': {
           // AC sources: DC part 0, phasor amplitude/phase at the page's AC frequency.
           const isV = s.sym === 'VSOURCE_AC';
@@ -363,14 +429,13 @@ const InkAnalysis = (() => {
             : { type: 'I', n: pins, p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } };
           break;
         }
-        case 'ISOURCE': ep = { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '1m', 'current', 'A') } }; break;
+        case 'ISOURCE': ep = dep(false) || { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '1m', 'current', 'A') } }; break;
         case 'DIODE': ep = { type: 'D', n: pins, p: { ...(DIODE_MODELS[p.model] || DIODE_MODELS['1N4148']) } }; break;
         case 'LED': ep = { type: 'LED', n: pins, p: { color: p.color || 'red' } }; break;
         case 'SWITCH': if (p.state !== 'open') ep = { type: 'R', n: pins, p: { value: '1m' } }; break;
         case 'AMMETER': ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } }; break;
         case 'VOLTMETER': break;
         case 'OPAMP': ep = { type: 'OA', n: pins, p: { gain: blank(p.gain) ? 1e5 : siVal(p.gain) || 1e5, vsat: blank(p.vsat) ? 15 : siVal(p.vsat, 'V') || 15, gbw: '1meg' } }; break;
-        case 'VSOURCE_DEP': case 'ISOURCE_DEP': warns.push(`${name}: dependent sources aren't analysed yet — it's left out.`); break;
       }
       comp.set(s, { name, pins, id, ep });
       if (ep) eparts.push({ id, ref: name, ...ep });
@@ -385,7 +450,7 @@ const InkAnalysis = (() => {
     }
     for (const s of parts) {
       if (PROBES.has(s.sym)) { out.comps[s.i] = { name: probeName(s), title: s.sym === 'PROBE_POS' ? 'V+ probe' : 'V− probe', label: probeName(s), fields: circuitFields(s) }; continue; }
-      out.comps[s.i] = { name: names.get(s) || (s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: circuitLabel(s), fields: circuitFields(s) };
+      out.comps[s.i] = { name: names.get(s) || (s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: [circuitLabel(s), varLabel(s)].filter(Boolean).join('  '), fields: circuitFields(s) };
     }
     if (missing.length) warns.push('No value yet for ' + missing.join(', ') + ' — tap the part to set it. Using a placeholder for now.');
     if (unreadable.length) warns.push('Couldn\'t read the value of ' + unreadable.join(', ') + ' — use a number with an optional SI prefix (e.g. 4.7k, 100n). Using a placeholder for now.');
@@ -403,6 +468,27 @@ const InkAnalysis = (() => {
         let ok = true;
         for (const s of [pos, neg]) if (s && probeNet(s) == null) { warns.push(`${probeName(s)} isn't touching the circuit — drop its tip onto a wire or terminal.`); ok = false; }
         if (ok) probePairs.push({ n, pos, neg, a: probeNet(pos), b: neg ? probeNet(neg) : 0 });
+      }
+    }
+
+    // Circuit variables: named on a part (its voltage t0 − t1, its current t0 → t1) or a probe pair's Vn.
+    const varTab = new Map();
+    for (const s of order) {
+      const c = comp.get(s), flipped = c.ep && c.ep.n[0] !== c.pins[0];   // voltage sources are stamped + at t1
+      for (const { name, sign } of partVars(s.props)) {
+        if (/^v/i.test(name)) varTab.set(name.toLowerCase(), { name, v: [c.pins[0], c.pins[1]], sign });
+        else if (c.ep && (c.ep.type === 'R' || c.ep.type === 'C' || c.ep.type === 'L' || c.ep.type === 'V' || (c.ep.type === 'DS' && c.ep.p.out === 'V'))) varTab.set(name.toLowerCase(), { name, i: c.id, sign: flipped ? -sign : sign });
+        else warns.push(`${name} can't be read on ${c.name} — put an ammeter in series and name it there.`);
+      }
+    }
+    for (const pr of probePairs) if (!varTab.has('v' + pr.n)) varTab.set('v' + pr.n, { name: 'V' + pr.n, v: [pr.a, pr.b], sign: 1 });
+    for (const c of comp.values()) {
+      if (!c.ep || c.ep.type !== 'DS') continue;
+      for (const { k, name } of c.ep.p.expr) {
+        const t = varTab.get(name.toLowerCase());
+        if (!t) warns.push(`${c.name} depends on ${name}, but no part is named ${name} — enter it under Variable here on the part it belongs to.`);
+        else if (t.v) c.ep.p.ctrl.push({ k: k * t.sign, v: t.v });
+        else c.ep.p.ctrl.push({ k: k * t.sign, i: t.i });
       }
     }
 
@@ -485,9 +571,20 @@ const InkAnalysis = (() => {
       probeRows.push([`V${pr.n}`, nodeLabel(pr.a), pr.neg ? nodeLabel(pr.b) : nodeLabel(0) + ' (no V' + pr.n + '−)', si(vd, 'V'), ...(ac ? [acTxt] : [])]);
       if (!pr.neg) blocks.push({ t: 'note', text: `V${pr.n} has no V${pr.n}− probe, so it's measured from ${refName}. Add a V${pr.n}− probe to measure across a part.` });
     }
+    const varRows = [...varTab.values()].map(t => {
+      const dc = t.v ? (vAt(t.v[0]) - vAt(t.v[1])) * t.sign : (res.get(t.i) || { i: 0 }).i * t.sign;
+      let acTxt = '';
+      if (ac) {
+        const za = t.v ? zAt(t.v[0]) : (ac.cur && ac.cur[0][t.i]) || [0, 0], zb = t.v ? zAt(t.v[1]) : [0, 0];
+        const d = cplx([(za[0] - zb[0]) * t.sign, (za[1] - zb[1]) * t.sign]);
+        acTxt = phasor(d[0], d[1], t.v ? 'V' : 'A');
+      }
+      return [t.name, si(dc, t.v ? 'V' : 'A'), ...(ac ? [acTxt] : [])];
+    });
     const cards = [['Nodes', String(nodes.length - 1)], ['Components', String(eparts.length)], ['Power supplied', si(pSup, 'W')], ['Power absorbed', si(pAbs, 'W')]];
     if (ac) cards.push(['AC frequency', si(acFreq, 'Hz')], ['ω', si(2 * Math.PI * acFreq, 'rad/s')]);
     blocks.push({ t: 'cards', items: cards });
+    if (varRows.length) blocks.push({ t: 'table', title: 'Variables', head: ['Variable', 'DC', ...(ac ? ['AC phasor'] : [])], rows: varRows });
     if (probeRows.length) blocks.push({ t: 'table', title: 'Probe voltages', head: ['Probe', 'V+ at', 'V− at', 'DC', ...(ac ? ['AC phasor'] : [])], rows: probeRows });
     if (meterRows.length) blocks.push({ t: 'table', title: 'Meter readings', head: ['Meter', 'Reads', 'Value'], rows: meterRows });
     blocks.push({ t: 'table', title: 'Node voltages', head: ['Node', 'DC', ...(ac ? ['AC phasor'] : [])], rows: nodeRows });

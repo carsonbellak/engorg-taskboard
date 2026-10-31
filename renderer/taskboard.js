@@ -99,6 +99,7 @@ class ViewRenderer {
 
     notes.sort((a, b) => {
       if (a.completed !== b.completed) return a.completed ? 1 : -1;
+      if (examRank(a) !== examRank(b)) return examRank(a) - examRank(b);
       let primary = 0;
       switch (sortMode) {
         case 'created':
@@ -507,6 +508,13 @@ class ViewRenderer {
       }
     }
 
+    // Upcoming exams get their own pinned group at the very top, whatever the sort mode.
+    const pinned = active.filter(n => examRank(n) === 0);
+    if (pinned.length) {
+      groups.forEach(g => { g.notes = g.notes.filter(n => examRank(n) !== 0); });
+      groups.unshift({ key: 'exams', label: '★ Exams', color: EXAM_CATEGORY.color, notes: pinned });
+    }
+
     // Remove empty groups, add completed group
     groups = groups.filter(g => g.notes.length > 0);
     if (completed.length > 0) {
@@ -876,7 +884,7 @@ class ViewRenderer {
     const notes = this.data.tasks.filter(note => {
       return note.dueDate === dateStr &&
         (this.selectedProject === 'all' || note.projectId === this.selectedProject);
-    });
+    }).sort((a, b) => (examRank(a) - examRank(b)) || noteStart(a).localeCompare(noteStart(b)));
 
     const workBlocks = this._getWorkBlocks(dayName, dateStr);
 
@@ -896,6 +904,7 @@ class ViewRenderer {
       if (this.selectedProject !== 'all' && proj.id !== this.selectedProject) return;
       (proj.workSchedule || []).forEach((wb, i) => {
         if (!wb || wb.day !== dayName || !wb.start) return;
+        if ((wb.skip || []).includes(dateStr)) return; // one occurrence skipped (e.g. a missed lab)
         const endDT = new Date(dateStr + 'T00:00:00');
         const [eh, em] = (wb.end || wb.start).split(':').map(Number);
         endDT.setHours(eh, em || 0, 0, 0);   // 24:00 rolls to next-day midnight
@@ -977,7 +986,7 @@ class ViewRenderer {
       if (this.calendarView === 'day') {
         stepDay(-1);
       } else if (this.calendarView === 'week') {
-        this.calendarWeekStart = new Date(this.calendarWeekStart.getTime() - 7 * 86400000);
+        this.calendarWeekStart = this._getWeekStart(new Date(this.calendarWeekStart.getFullYear(), this.calendarWeekStart.getMonth(), this.calendarWeekStart.getDate() - 7));
       } else {
         this.calendarMonth--;
         if (this.calendarMonth < 0) { this.calendarMonth = 11; this.calendarYear--; }
@@ -989,7 +998,7 @@ class ViewRenderer {
       if (this.calendarView === 'day') {
         stepDay(1);
       } else if (this.calendarView === 'week') {
-        this.calendarWeekStart = new Date(this.calendarWeekStart.getTime() + 7 * 86400000);
+        this.calendarWeekStart = this._getWeekStart(new Date(this.calendarWeekStart.getFullYear(), this.calendarWeekStart.getMonth(), this.calendarWeekStart.getDate() + 7));
       } else {
         this.calendarMonth++;
         if (this.calendarMonth > 11) { this.calendarMonth = 0; this.calendarYear++; }
@@ -1070,7 +1079,8 @@ class ViewRenderer {
         completionClass = 'cal-day-all-done';
       }
 
-      html += `<div class="cal-day-cell ${isToday ? 'cal-today' : ''} ${completionClass}" data-date="${dateStr}" data-day-name="${dayName}">
+      const examDay = dayNotes.some(isExamNote) ? ' cal-day-exam' : '';
+      html += `<div class="cal-day-cell ${isToday ? 'cal-today' : ''} ${completionClass}${examDay}" data-date="${dateStr}" data-day-name="${dayName}">
         <div class="cal-day-number">${day}</div>
         <div class="cal-day-events" data-total="${allItems.length}">`;
 
@@ -1083,7 +1093,7 @@ class ViewRenderer {
         ...dayEvents.map(x => ({ item: x, kind: 'event' })),
         ...dayNotes.map(x => ({ item: x, kind: 'note' })),
         ...dayWork.map(x => ({ item: x, kind: 'work' })),
-      ].sort((a, b) => (a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0));
+      ].sort((a, b) => ((a.item.completed ? 1 : 0) - (b.item.completed ? 1 : 0)) || (examRank(a.item) - examRank(b.item)));
 
       dayItems.slice(0, CAP).forEach(({ item, kind }) => {
         const proj = this.getProject(item.projectId);
@@ -1159,9 +1169,10 @@ class ViewRenderer {
   // live in one place.
   _renderWeekView(container) {
     const weekStart = this.calendarWeekStart;
+    // Step by calendar days, not 24 h — a DST change would otherwise shift every column.
     const days = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(weekStart.getTime() + i * 86400000);
-      return { date: d, dateStr: this._dateStr(d), dayName: DAYS[i] };
+      const d = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i);
+      return { date: d, dateStr: this._dateStr(d), dayName: DAYS[(d.getDay() + 6) % 7] };
     });
     const weekEnd = days[6].date;
     const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -1192,7 +1203,8 @@ class ViewRenderer {
     // Collect all-day items and timed items per day
     const dayData = weekDays.map(({ dateStr, dayName }) => this._getDayItems(dateStr, dayName));
 
-    let html = `<div class="calendar-container cal-week-container">`;
+    // Day view (one column) gets cal-day-mode — no column hover highlight there.
+    let html = `<div class="calendar-container cal-week-container${weekDays.length === 1 ? ' cal-day-mode' : ''}">`;
     html += this._buildCalHeader(rangeTitle);
 
     // Column headers
@@ -1207,18 +1219,21 @@ class ViewRenderer {
     });
     html += `</div>`;
 
-    // Deadlines strip — ALL note deadlines live here (as chips), not in the timed grid.
+    // Deadlines strip — note deadlines live here (as chips), not in the timed grid.
     // Notes are due-by markers, not durations; most are due 11:59 PM, so placing them in
     // the hour grid just piled them at the bottom. Surfacing them at the top keeps every
-    // deadline visible and the grid reserved for real time blocks.
-    const hasDeadlines = dayData.some(d => d.notes.length > 0);
+    // deadline visible and the grid reserved for real time blocks. The exception is a note
+    // with a start AND end time (e.g. a study block): it is a duration, so it draws in the grid.
+    // Upcoming exams show in both places — pinned first in this strip and as a block in the grid.
+    const inDueStrip = (n) => !isTimedNote(n) || examRank(n) === 0;
+    const hasDeadlines = dayData.some(d => d.notes.some(inDueStrip));
     if (hasDeadlines) {
       html += `<div class="cal-week-allday-row" style="grid-template-columns:${gridCols}">
         <div class="cal-week-gutter cal-week-allday-label">Due</div>`;
       dayData.forEach(({ notes }, i) => {
         const { dateStr } = weekDays[i];
         html += `<div class="cal-week-allday-cell" data-date="${dateStr}">`;
-        notes.slice().sort((a, b) => (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
+        notes.filter(inDueStrip).sort((a, b) => (examRank(a) - examRank(b)) || (a.dueTime || '').localeCompare(b.dueTime || '')).forEach(note => {
           const t = note.dueTime ? formatTime12(note.dueTime) + ' ' : '';
           // Due chips follow the calendar's color-mode selector, like the day panel.
           const nc = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)].border;
@@ -1247,7 +1262,7 @@ class ViewRenderer {
     // Day columns
     weekDays.forEach(({ date, dateStr, dayName }, ci) => {
       const isToday = date.toDateString() === today.toDateString();
-      const { events, workBlocks } = dayData[ci];
+      const { events, workBlocks, notes } = dayData[ci];
 
       html += `<div class="cal-week-day-col ${isToday ? 'cal-week-col-today' : ''}" data-date="${dateStr}" data-day-name="${dayName}" style="height:${HOURS * HOUR_H}px">`;
 
@@ -1302,6 +1317,28 @@ class ViewRenderer {
         </div>`;
       });
 
+      // Timed notes (start + end) — drawn like events, tinted like the note, click opens the note.
+      notes.filter(isTimedNote).forEach(note => {
+        const [sh, sm] = noteStart(note).split(':').map(Number);
+        const [eh, em] = noteEnd(note).split(':').map(Number);
+        const topMins  = (sh - START_HOUR) * 60 + sm;
+        const durMins  = Math.max(30, (eh * 60 + em) - (sh * 60 + sm));
+        if (topMins < 0 || topMins > HOURS * 60) return;
+        const top  = (topMins / 60) * HOUR_H;
+        const height = Math.min((durMins / 60) * HOUR_H, (HOURS * 60 - topMins) / 60 * HOUR_H);
+        const nc = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)].border;
+        const cl = note.checklist || [];
+        const meta = [
+          (note.attachments || []).length ? '&#128206;' : '',
+          cl.length ? `&#9745; ${cl.filter(c => c.done).length}/${cl.length}` : '',
+        ].filter(Boolean).join(' ');
+        html += `<div class="cal-week-event cal-week-note-block${note.completed ? ' cal-week-note-done' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"
+          style="top:${top}px;height:${height-2}px;--nb-color:${nc}" title="${escapeHtml(note.title)}">
+          <div class="cal-week-event-title">&#128204; ${escapeHtml(note.title)}</div>
+          <div class="cal-week-event-time">${formatTime12(noteStart(note))}–${formatTime12(noteEnd(note))}${meta ? ' · ' + meta : ''}</div>
+        </div>`;
+      });
+
       html += `</div>`; // day col
     });
 
@@ -1328,8 +1365,8 @@ class ViewRenderer {
       });
     });
 
-    // Click a deadline chip → open the note editor.
-    container.querySelectorAll('.cal-week-note-chip').forEach(el => {
+    // Click a deadline chip or a timed note block → open the note editor.
+    container.querySelectorAll('.cal-week-note-chip, .cal-week-note-block').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
         const note = this.data.tasks.find(t => t.id === el.dataset.noteId);
@@ -1504,7 +1541,7 @@ class ViewRenderer {
     // Reuse the same source the grid uses (project-filtered); sort for tidy display.
     const { events, notes, workBlocks } = this._getDayItems(dateStr, dayName);
     events.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-    notes.sort((a, b) => (a.dueTime || '~').localeCompare(b.dueTime || '~'));
+    notes.sort((a, b) => (examRank(a) - examRank(b)) || (noteStart(a) || '~').localeCompare(noteStart(b) || '~'));
 
     const isToday = dateObj.toDateString() === new Date().toDateString();
     const formattedDate = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -1548,27 +1585,64 @@ class ViewRenderer {
         <button class="schedule-close" data-id="${item.id}" title="Delete event">&times;</button>
       </div>`;
     };
+    // Note cards: the completion circle, priority and time stack on the left; "Show checklist" /
+    // "Show attachments" sit side by side in a full-width row and expand full-width below. Open state survives
+    // re-renders (ticking an item re-renders the panel).
+    if (!this.calOpenChecklists) this.calOpenChecklists = new Set();
+    if (!this.calOpenAttachments) this.calOpenAttachments = new Set();
+    const noteToggles = (note) => {
+      const cl = note.checklist || [], att = note.attachments || [];
+      const btns = [];
+      if (cl.length) {
+        const open = this.calOpenChecklists.has(note.id);
+        btns.push(`<button class="cal-side-toggle cal-side-cl-toggle${open ? ' open' : ''}" data-id="${note.id}">&#9745; ${cl.filter(c => c.done).length}/${cl.length} &middot; ${open ? 'Hide' : 'Show'} checklist</button>`);
+      }
+      if (att.length) {
+        const open = this.calOpenAttachments.has(note.id);
+        btns.push(`<button class="cal-side-toggle cal-side-att-toggle${open ? ' open' : ''}" data-id="${note.id}">&#128206; ${att.length} &middot; ${open ? 'Hide' : 'Show'} attachments</button>`);
+      }
+      return btns.length ? `<div class="cal-side-toggles">${btns.join('')}</div>` : '';
+    };
+    const notePanels = (note) => {
+      let html = '';
+      if (this.calOpenChecklists.has(note.id) && (note.checklist || []).length) {
+        html += `<div class="cal-side-cl">${note.checklist.map(c =>
+          `<label class="cal-side-cl-item${c.done ? ' done' : ''}"><input type="checkbox" data-note-id="${note.id}" data-cl-id="${c.id}" ${c.done ? 'checked' : ''}><span>${escapeHtml(c.text)}</span></label>`
+        ).join('')}</div>`;
+      }
+      if (this.calOpenAttachments.has(note.id) && (note.attachments || []).length) {
+        html += `<div class="cal-side-att">${note.attachments.map(a =>
+          `<button class="cal-side-att-item" data-path="${escapeHtml(a.path)}" title="${escapeHtml(a.path)}">&#128206; ${escapeHtml(a.name)}</button>`
+        ).join('')}</div>`;
+      }
+      return html;
+    };
     const noteCard = (note) => {
       const proj = this.getProject(note.projectId);
       // Color the whole tile like a sticky note in the notes board — same
       // resolveAutoColor + getStickyColors path — so the color-mode selector drives it
-      // consistently across the app. Priority stays as a small footer dot, exactly as
-      // the sticky notes render it.
+      // consistently across the app.
       const c = getStickyColors()[resolveAutoColor(note, this.colorMode || 'category', this.data.projects)];
       // Synced notes carry a source link → the card launches that source and a ✎ button
       // still opens the editor. Plain notes keep the old behavior (card → editor).
       const link = launchLink(note);
       const launches = !!link;
       return `<div class="schedule-card cal-side-note sticky-tint ${note.completed ? 'done' : ''}${launches ? ' launches-src' : ''}${isExamNote(note) ? ' cal-exam' : ''}" data-note-id="${note.id}"${launches ? ` data-launch-url="${escapeHtml(link.url)}"` : ''} style="background:${c.bg}; border-color:${c.border}; border-left-color:${c.border}" title="${launches ? escapeHtml(link.label || 'Open source') : 'Open note'}">
-        <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
-        ${note.dueTime ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(note.dueTime)}</div></div>` : ''}
-        <div class="schedule-info">
-          <div class="schedule-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
-          ${note.description ? `<div class="schedule-desc">${escapeHtml(note.description)}</div>` : ''}
-          <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
+        <div class="cal-side-note-row">
+          <div class="cal-side-note-left">
+            <button class="schedule-check ${note.completed ? 'checked' : ''}" data-id="${note.id}" data-type="note">${note.completed ? '&#10003;' : ''}</button>
+            <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
+            ${noteStart(note) ? `<div class="schedule-time"><div class="schedule-time-start">${formatTime12(noteStart(note))}</div>${noteEnd(note) ? `<div class="schedule-time-end">&rarr; ${formatTime12(noteEnd(note))}</div>` : ''}</div>` : ''}
+          </div>
+          <div class="schedule-info">
+            <div class="schedule-title">${srcLaunch(note)}&#128204; ${escapeHtml(note.title)}</div>
+            ${note.description ? `<div class="schedule-desc">${escapeHtml(note.description)}</div>` : ''}
+            <div class="schedule-project-name" style="color: ${proj?.color || '#64748B'}">${proj ? escapeHtml(proj.name) : ''}</div>
+          </div>
+          ${launches ? `<button class="cal-side-edit" data-id="${note.id}" title="Edit note">&#9998;</button>` : ''}
         </div>
-        <span class="note-priority-dot" style="color: ${PRIORITY_COLORS[note.priority] || '#F97316'}">&#9679; ${note.priority || 'Medium'}</span>
-        ${launches ? `<button class="cal-side-edit" data-id="${note.id}" title="Edit note">&#9998;</button>` : ''}
+        ${noteToggles(note)}
+        ${notePanels(note)}
       </div>`;
     };
     // Schedule blocks — recurring; auto-complete once their time has passed (then they
@@ -1587,12 +1661,26 @@ class ViewRenderer {
       </div>`;
     };
 
+    // Three sections: Schedule = anything with a time span (weekly blocks, events, notes with a
+    // start + end), in time order with upcoming exams pinned first; Assignments = notes due at a
+    // time (or tagged assignment); Notes = plain notes on the day with no time.
     const isDone = (x) => !!x.completed;
-    const activeEvents = events.filter(e => !isDone(e)), doneEvents = events.filter(isDone);
-    const activeNotes  = notes.filter(n => !isDone(n)),  doneNotes  = notes.filter(isDone);
-    const activeWork   = (workBlocks || []).filter(w => !isDone(w)), doneWork = (workBlocks || []).filter(isDone);
-    const doneCount = doneEvents.length + doneNotes.length + doneWork.length;
-    const hasActive = activeEvents.length + activeNotes.length + activeWork.length > 0;
+    const schedule = [
+      ...(workBlocks || []).map(x => ({ x, card: workCard, start: x.startTime || '' })),
+      ...events.map(x => ({ x, card: eventCard, start: x.startTime || '' })),
+      ...notes.filter(isTimedNote).map(x => ({ x, card: noteCard, start: noteStart(x) })),
+    ].sort((a, b) => (examRank(a.x) - examRank(b.x)) || (a.start || '~').localeCompare(b.start || '~'));
+    const assignments = notes.filter(n => !isTimedNote(n) && (n.dueTime || n.category === 'assignment'));
+    const plainNotes  = notes.filter(n => !isTimedNote(n) && !n.dueTime && n.category !== 'assignment');
+    const sections = [
+      { label: 'Schedule',    items: schedule },
+      { label: 'Assignments', items: assignments.map(x => ({ x, card: noteCard })) },
+      { label: 'Notes',       items: plainNotes.map(x => ({ x, card: noteCard })) },
+    ];
+    const render = (items) => items.map(({ x, card }) => card(x)).join('');
+    const doneItems = sections.flatMap(sec => sec.items.filter(i => isDone(i.x)));
+    const doneCount = doneItems.length;
+    const hasActive = sections.some(sec => sec.items.some(i => !isDone(i.x)));
 
     let html = `<div class="cal-side-header">
       <div class="cal-side-date">${formattedDate}<span class="cal-side-year">${dateObj.getFullYear()}</span>${isToday ? '<span class="cal-side-today">Today</span>' : ''}</div>
@@ -1605,24 +1693,14 @@ class ViewRenderer {
         <div class="cal-side-empty-hint">Pick another day to see what&rsquo;s on it.</div>
       </div>`;
     } else {
-      // Recurring project schedule blocks (active occurrences).
-      if (activeWork.length > 0) {
-        html += `<div class="cal-detail-section-label">Schedule</div><div class="schedule-list">`;
-        html += activeWork.map(workCard).join('');
-        html += `</div>`;
-      }
       // Active (incomplete) items — the default view.
-      if (activeEvents.length > 0) {
-        if (activeWork.length > 0) html += `<div style="height:14px"></div>`;
-        html += `<div class="cal-detail-section-label">Events</div><div class="schedule-list">`;
-        html += activeEvents.map(eventCard).join('');
-        html += `</div>`;
-      }
-      if (activeNotes.length > 0) {
-        html += `<div class="cal-detail-section-label" style="margin-top:14px">Notes</div><div class="schedule-list">`;
-        html += activeNotes.map(noteCard).join('');
-        html += `</div>`;
-      }
+      let first = true;
+      sections.forEach(sec => {
+        const active = sec.items.filter(i => !isDone(i.x));
+        if (!active.length) return;
+        html += `<div class="cal-detail-section-label"${first ? '' : ' style="margin-top:14px"'}>${sec.label}</div><div class="schedule-list">${render(active)}</div>`;
+        first = false;
+      });
       // Everything on this day is done → celebrate instead of a blank panel.
       if (!hasActive && doneCount > 0) {
         html += `<div class="cal-side-alldone">&#127881; All done for this day</div>`;
@@ -1636,7 +1714,7 @@ class ViewRenderer {
         </button>`;
         if (this.calShowCompleted) {
           html += `<div class="cal-side-completed-list schedule-list">`;
-          html += doneWork.map(workCard).join('') + doneEvents.map(eventCard).join('') + doneNotes.map(noteCard).join('');
+          html += render(doneItems);
           html += `</div>`;
         }
       }
@@ -1693,11 +1771,44 @@ class ViewRenderer {
     // button still opens the editor. Plain notes open the editor on card click.
     side.querySelectorAll('.cal-side-note').forEach(card => {
       card.addEventListener('click', (e) => {
-        if (e.target.closest('.schedule-check') || e.target.closest('.cal-side-edit') || e.target.closest('[data-open-url]')) return;
+        if (e.target.closest('.schedule-check') || e.target.closest('.cal-side-edit') || e.target.closest('[data-open-url]') ||
+            e.target.closest('.cal-side-toggle') || e.target.closest('.cal-side-cl') || e.target.closest('.cal-side-att')) return;
         const url = card.dataset.launchUrl;
         if (url) { window.api.openExternal(url); return; }
         const note = this.data.tasks.find(t => t.id === card.dataset.noteId);
         if (note) window.dispatchEvent(new CustomEvent('edit-note', { detail: note }));
+      });
+    });
+    // Show / hide a note's checklist in place.
+    side.querySelectorAll('.cal-side-cl-toggle').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (this.calOpenChecklists.has(id)) this.calOpenChecklists.delete(id); else this.calOpenChecklists.add(id);
+        this._renderDaySide();
+      });
+    });
+    side.querySelectorAll('.cal-side-att-toggle').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.id;
+        if (this.calOpenAttachments.has(id)) this.calOpenAttachments.delete(id); else this.calOpenAttachments.add(id);
+        this._renderDaySide();
+      });
+    });
+    // Open an attachment.
+    side.querySelectorAll('.cal-side-att-item').forEach(btn => {
+      btn.addEventListener('click', (e) => { e.stopPropagation(); window.api.openPath(btn.dataset.path); });
+    });
+    // Tick a checklist item straight from the panel.
+    side.querySelectorAll('.cal-side-cl input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('click', (e) => e.stopPropagation());
+      cb.addEventListener('change', async () => {
+        const note = this.data.tasks.find(t => t.id === cb.dataset.noteId);
+        if (!note) return;
+        const checklist = (note.checklist || []).map(c => c.id === cb.dataset.clId ? { ...c, done: cb.checked } : c);
+        await this.data.updateTask(note.id, { checklist });
+        window.dispatchEvent(new CustomEvent('tasks-changed'));
       });
     });
     // The ✎ on a synced note card opens the full editor.
