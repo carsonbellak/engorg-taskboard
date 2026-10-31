@@ -18,6 +18,15 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.7': {
+      title: "What's new",
+      intro: 'EngInk circuits: wire currents, correct polarity, tidy labels.',
+      slides: [
+        { emoji: '➡️', title: 'Name the current in a wire', body: 'With the select tool, tap a wire in a circuit to name its current and pick the arrow\'s direction. The arrow and name draw on the page, the result is signed along the arrow, and a dependent source can use it, like 2ix.' },
+        { emoji: '➕', title: 'Polarity you can trust', body: 'A voltage named on a source now reads from the source\'s own + mark, however it\'s turned or flipped, and real + and − marks sit around the label. Voltage variables already named on a source may change sign, because the old reading was wrong.' },
+        { emoji: '🏷️', title: 'Labels stay put', body: 'Value labels sit above a horizontal part and right of a vertical one, moving only when something is in the way. They follow a part when you move or turn it, even with the Analyze panel closed.' },
+      ],
+    },
     '1.6.6': {
       title: "What's new",
       intro: 'Add Claude workbooks to EngInk with one tap.',

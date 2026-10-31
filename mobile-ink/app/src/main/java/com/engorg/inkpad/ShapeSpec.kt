@@ -244,7 +244,7 @@ class ShapeSpec(var type: ShapeType, val verts: ArrayList<PointF>, var dashed: B
             listOf(Part(seg(PointF(l, t), PointF(r, t)).dropLast(1) + seg(PointF(r, t), PointF(r, bt)).dropLast(1) +
                 seg(PointF(r, bt), PointF(l, bt)).dropLast(1) + seg(PointF(l, bt), PointF(l, t))))
         }
-        ShapeType.SYMBOL -> symbol?.let { Symbols.parts(it, verts, symScale, rot) } ?: emptyList()
+        ShapeType.SYMBOL -> symbol?.let { Symbols.parts(it, verts, symScale, rot, props?.optString("rev") == "1") } ?: emptyList()
         // A solid always carries [solid]; legacy types are converted as they load.
         ShapeType.SOLID, ShapeType.BOX, ShapeType.CYLINDER, ShapeType.CONE, ShapeType.SPHERE, ShapeType.PYRAMID -> emptyList()
     }

@@ -36,12 +36,14 @@ enum class SymGroup(val label: String, val courses: String) {
  * along the wire). [anchor] is the local point a tap lands on and that snaps to the dot grid — a
  * terminal or a support's pin — so wires and beams meet it on the dots.
  * WIRE, MEMBER and FORCE are "bare" inline symbols ([bare]): no body, just their terminal-to-terminal line.
+ * CURRENT is bare too: it lies along a wire, its terminals on the wire, and draws only a short arrow beside it.
  * A STRIP's [w]×[h] is its standard box, its long side running along the line, and [ax]/[ay] put
  * the line in that box (a wall's face, the tips of a load's arrows) — that's what you draw.
  */
 enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w: Float, val h: Float, val ax: Float = 0f, val ay: Float = 0f) {
     // Circuits
     WIRE("Wire", SymGroup.ECE, SymKind.INLINE, 1f, 1f),
+    CURRENT("Current arrow", SymGroup.ECE, SymKind.INLINE, 1f, 1f),
     RESISTOR("Resistor", SymGroup.ECE, SymKind.INLINE, 44f, 16f),
     RESISTOR_BOX("Resistor (box)", SymGroup.ECE, SymKind.INLINE, 44f, 16f),
     CAPACITOR("Capacitor", SymGroup.ECE, SymKind.INLINE, 8f, 28f),
@@ -108,7 +110,7 @@ enum class Sym(val label: String, val group: SymGroup, val kind: SymKind, val w:
     GAIN("Gain", SymGroup.SYSTEMS, SymKind.BOX, 64f, 40f, -32f, 0f);
 
     /** An inline symbol with no body or leads: drawn straight between its terminals (wire, truss member, force). */
-    val bare: Boolean get() = this == WIRE || this == MEMBER || this == FORCE
+    val bare: Boolean get() = this == WIRE || this == MEMBER || this == FORCE || this == CURRENT
 
     /** A STRIP whose line runs along local y (a wall) rather than local x (the ground). */
     val alongY: Boolean get() = h > w
@@ -202,10 +204,11 @@ object Symbols {
      * The parts of [sym] placed by [verts]. INLINE: terminals verts[0]→verts[1], body at [k]× its
      * standard size (shrunk to fit a short span). BOX: fills the box verts[0]–verts[1]. STRIP: along
      * the line verts[0]→verts[1]. [rot] is the shape's rotation, so the upright glyphs can be counter-turned.
+     * [reversed] turns a CURRENT arrow to point at the first terminal.
      */
-    fun parts(sym: Sym, verts: List<PointF>, k: Float, rot: Float): List<ShapeSpec.Part> {
+    fun parts(sym: Sym, verts: List<PointF>, k: Float, rot: Float, reversed: Boolean = false): List<ShapeSpec.Part> {
         val a = verts[0]; val b = verts[1]
-        if (sym.bare) return bareParts(sym, a, b, k)
+        if (sym.bare) return bareParts(sym, a, b, k, reversed)
         if (sym.kind == SymKind.STRIP) {
             val f = StripFrame(sym, a, b, k)
             val bl = Builder({ x, y -> f.map(x, y) }, f.kk, 0f)
@@ -270,7 +273,7 @@ object Symbols {
      * A member adds small open pin circles at both joints; a force an arrowhead at [b]. Their size
      * follows [k] (symScale) a little, clamped so a resize never makes them huge.
      */
-    private fun bareParts(sym: Sym, a: PointF, b: PointF, k: Float): List<ShapeSpec.Part> {
+    private fun bareParts(sym: Sym, a: PointF, b: PointF, k: Float, reversed: Boolean): List<ShapeSpec.Part> {
         val bl = Builder({ x, y -> PointF(x, y) }, 1f, 0f)
         val ks = k.coerceIn(0.5f, 2f)
         val len = hypot(b.x - a.x, b.y - a.y)
@@ -285,6 +288,16 @@ object Symbols {
             Sym.FORCE -> {
                 bl.out.add(ShapeSpec.Part(seg(a, b)))
                 bl.head(b.x, b.y, ux, uy, min(9f * ks, max(len * 0.5f, 2f)))
+            }
+            // Beside the wire on the label's side (above it, or to its right), as a textbook draws i_x.
+            Sym.CURRENT -> {
+                var nx = -uy; var ny = ux
+                if (!(ny < -0.3f || (abs(ny) <= 0.3f && nx > 0f))) { nx = -nx; ny = -ny }
+                val sg = if (reversed) -1f else 1f
+                val mx = (a.x + b.x) / 2f + nx * 9f; val my = (a.y + b.y) / 2f + ny * 9f
+                val tip = PointF(mx + ux * sg * 14f, my + uy * sg * 14f)
+                bl.out.add(ShapeSpec.Part(seg(PointF(mx - ux * sg * 14f, my - uy * sg * 14f), tip)))
+                bl.head(tip.x, tip.y, ux * sg, uy * sg, 7f)
             }
             else -> bl.out.add(ShapeSpec.Part(seg(a, b)))
         }
@@ -323,7 +336,7 @@ object Symbols {
     private fun draw(sym: Sym, g: Builder) {
         when (sym) {
             // Bare inline symbols are built straight from their terminals in [bareParts], strips in [drawStrip].
-            Sym.WIRE, Sym.MEMBER, Sym.FORCE -> {}
+            Sym.WIRE, Sym.CURRENT, Sym.MEMBER, Sym.FORCE -> {}
             Sym.FIXED_SUPPORT, Sym.COLLAR, Sym.SLIDER, Sym.GROUND_SURFACE, Sym.DIST_LOAD -> {}
             Sym.RESISTOR ->g.path(-22f, 0f, -18.33f, -7f, -11f, 7f, -3.67f, -7f, 3.67f, 7f, 11f, -7f, 18.33f, 7f, 22f, 0f)
             Sym.RESISTOR_BOX -> g.path(-22f, -8f, 22f, -8f, 22f, 8f, -22f, 8f, closed = true)
@@ -344,7 +357,7 @@ object Symbols {
             // Sources: + (or the arrow) points toward the second terminal — the end you drag to.
             Sym.VSOURCE -> { g.circle(0f, 0f, 18f); g.glyph(Glyph.PLUS, 8.5f, 0f, 4f); g.glyph(Glyph.MINUS, -8.5f, 0f, 4f) }
             Sym.ISOURCE -> { g.circle(0f, 0f, 18f); g.arrow(-10f, 0f, 10f, 0f, 6f) }
-            Sym.VSOURCE_AC -> { g.circle(0f, 0f, 18f); g.glyph(Glyph.SINE, 0f, 0f, 9f) }
+            Sym.VSOURCE_AC -> { g.circle(0f, 0f, 18f); g.glyph(Glyph.SINE, 0f, 0f, 8f); g.glyph(Glyph.PLUS, 13f, 0f, 2.6f); g.glyph(Glyph.MINUS, -13f, 0f, 2.6f) }
             Sym.ISOURCE_AC -> { g.circle(0f, 0f, 18f); g.arrow(-10f, -4f, 10f, -4f, 6f); g.glyph(Glyph.SINE, 0f, 7f, 5f) }
             Sym.VSOURCE_DEP -> { g.path(-20f, 0f, 0f, -20f, 20f, 0f, 0f, 20f, closed = true); g.glyph(Glyph.PLUS, 9f, 0f, 3.5f); g.glyph(Glyph.MINUS, -9f, 0f, 3.5f) }
             Sym.ISOURCE_DEP -> { g.path(-20f, 0f, 0f, -20f, 20f, 0f, 0f, 20f, closed = true); g.arrow(-10f, 0f, 10f, 0f, 6f) }

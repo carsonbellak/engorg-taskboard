@@ -13,7 +13,9 @@
 // plain crossings don't connect unless a Node dot sits on them. Freehand ink only counts as a wire
 // when it's long and nearly straight, so handwriting next to a part is ignored.
 //
-// WIRE symbols are turned into plain wires before anything runs.
+// WIRE symbols are turned into plain wires before anything runs. A CURRENT tag (the arrow you set on
+// a wire) cuts the wire it sits on and puts a 0 V branch across the cut, which is what reads the
+// wire's current; circuit() does that on its own copy of the wires.
 // Circuits → CircuitEngine (DC operating point + phasors at the AC source frequency; AC voltage and
 // current sources). Vn+ / Vn− probe symbols read Vn = V(+) − V(−) wherever their tips touch.
 // Thermo flow devices are walked inlet → outlet (flow runs left → right through each symbol, as
@@ -23,7 +25,8 @@
 // refrigerator symbols get the reservoir (second-law) analysis.
 // A last pass (placeAll) picks value-label spots and nudges result chips off wires, symbols and each other.
 //
-// Output: { analyses: [{ title, blocks }], annots: [...], comps: { [i]: { name, title, label, fields, anchor?, labelAt? } } }
+// Output: { analyses: [{ title, blocks }], annots: [...], wiring?: { wires: [i…], nextI },
+//           comps: { [i]: { name, title, label, pol?, fields, anchor?, labelAt?, marks? } } }
 // — blocks are rendered generically by AnalysisPanel; annots are drawn over the page by
 // FinishedStrokesView; comps drive the tap-to-edit value sheet (fields carry keypad + unit buttons).
 
@@ -228,6 +231,10 @@ const InkAnalysis = (() => {
     }).filter(Boolean);
   }
 
+  // Variables match however they're typed ("ix", "i_x", "Ix") and show as i_x (subscript on the page).
+  const varKey = (name) => String(name).toLowerCase().replace(/_/g, '');
+  const varShow = (name) => String(name).replace(/^([iIvV])([A-Za-z0-9]+)$/, '$1_$2');
+
   // ---- value fields (contract §3: keypad + unit buttons for every field) ------------------------------
   const UNIT_SPEC = {
     'Ω': ['si', ['Ω']], F: ['si', ['F']], H: ['si', ['H']], V: ['si', ['V']], A: ['si', ['A']], Hz: ['si', ['Hz']],
@@ -244,8 +251,10 @@ const InkAnalysis = (() => {
   const fld = (p) => (key, label, unit, ph, extra = {}) => ({ key, label, unit, ph, value: p[key] == null ? '' : String(p[key]), ...fieldSpec(unit, extra), ...extra });
 
   // ---- symbol catalogue ----------------------------------------------------------------------------
-  const ECE = new Set(['RESISTOR', 'RESISTOR_BOX', 'CAPACITOR', 'CAP_POLAR', 'INDUCTOR', 'VSOURCE', 'ISOURCE', 'VSOURCE_AC', 'ISOURCE_AC', 'VSOURCE_DEP', 'ISOURCE_DEP', 'BATTERY', 'DIODE', 'LED', 'SWITCH', 'AMMETER', 'VOLTMETER', 'GROUND', 'OPAMP', 'NODE', 'PROBE_POS', 'PROBE_NEG']);
+  const ECE = new Set(['RESISTOR', 'RESISTOR_BOX', 'CAPACITOR', 'CAP_POLAR', 'INDUCTOR', 'VSOURCE', 'ISOURCE', 'VSOURCE_AC', 'ISOURCE_AC', 'VSOURCE_DEP', 'ISOURCE_DEP', 'BATTERY', 'DIODE', 'LED', 'SWITCH', 'AMMETER', 'VOLTMETER', 'GROUND', 'OPAMP', 'NODE', 'PROBE_POS', 'PROBE_NEG', 'CURRENT']);
   const PROBES = new Set(['PROBE_POS', 'PROBE_NEG']);
+  // Sources wear their own + mark at the second terminal, so a voltage named on one reads from there.
+  const V_SOURCES = new Set(['VSOURCE', 'BATTERY', 'VSOURCE_AC', 'VSOURCE_DEP']);
   const FLOW = new Set(['COMPRESSOR', 'TURBINE', 'PUMP', 'HEAT_EXCHANGER', 'VALVE', 'NOZZLE', 'DIFFUSER']);
   const RES = new Set(['HEAT_ENGINE', 'REFRIGERATOR']);
   const HEATRES = new Set(['HOT_RESERVOIR', 'COLD_RESERVOIR']);
@@ -263,6 +272,7 @@ const InkAnalysis = (() => {
     ISOURCE: ['I', 'Current source'], ISOURCE_AC: ['I', 'AC current source'], DIODE: ['D', 'Diode'], LED: ['LED', 'LED'], SWITCH: ['S', 'Switch'],
     AMMETER: ['AM', 'Ammeter'], VOLTMETER: ['VM', 'Voltmeter'], OPAMP: ['U', 'Op-amp'],
     VSOURCE_DEP: ['E', 'Dependent voltage source'], ISOURCE_DEP: ['G', 'Dependent current source'],
+    CURRENT: ['W', 'Wire current'],
   };
   const probeNum = (s) => { const n = Math.round(num((s.props || {}).n)); return n > 0 ? n : 1; };
   const probeName = (s) => 'V' + probeNum(s) + (s.sym === 'PROBE_POS' ? '+' : '−');
@@ -273,7 +283,7 @@ const InkAnalysis = (() => {
     const f = fld(p);
     const nm = f('name', 'Name', '', '');
     // Names this part's voltage or current so a source elsewhere can depend on it.
-    const vr = f('vars', 'Variable here', '', 'ix or Vx', { keypad: 'text', hint: 'Vx: + at the first end. ix: first end → second. Use -ix for the other way.' });
+    const vr = f('vars', 'Variable here', '', 'ix or Vx', { keypad: 'text', hint: (V_SOURCES.has(s.sym) ? 'Vx reads from the source\'s + mark.' : 'Vx: the + and − show on the page.') + ' A minus sign swaps it: -Vx, -ix.' });
     const src = (hint) => ({ vars: PAGE_VARS.slice(), hint });
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg, 1/2' }), vr, nm];
@@ -292,25 +302,44 @@ const InkAnalysis = (() => {
       case 'OPAMP': return [f('vsat', 'Output limit ±', 'V', '15'), f('gain', 'Open-loop gain', '', '100k', { keypad: 'si' }), nm];
       case 'PROBE_POS': case 'PROBE_NEG': return [f('n', 'Probe number', '', '1', { keypad: 'num', hint: `V${probeNum(s)}+ pairs with V${probeNum(s)}− — reads V(+) − V(−), and 2V${probeNum(s)} works as a source value` })];
       case 'AMMETER': case 'VOLTMETER': return [vr, nm];
+      case 'CURRENT': return currentFields(s, f);
       default: return [nm];
     }
   }
-  // A part's named variables as drawn beside it, showing their sense: "+Vx−", "ix→".
+  // A wire current's sheet: its name and which way the arrow points, in page terms.
+  function currentFields(s, f) {
+    const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
+    const pair = flat ? (dx >= 0 ? ['→', '←'] : ['←', '→']) : (dy >= 0 ? ['↓', '↑'] : ['↑', '↓']);
+    return [f('vars', 'Current name', '', 'ix', { keypad: 'text', hint: 'A source can use it: 2ix' }), f('rev', 'Arrow points', '', '', { options: pair, optValues: ['', '1'] })];
+  }
+  // A part's named variables as drawn beside it. A current shows its sense with an arrow ("ix→"); a
+  // voltage just its name, because its + and − are real marks placed around the label (see pol).
   function varLabel(s) {
     if (!s.inline) return '';
+    if (s.sym === 'CURRENT') return partVars(s.props).map(v => varShow(v.name)).join(' ');
     const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
     return partVars(s.props).map(({ name, sign }) => {
-      const fwd = (flat ? dx > 0 : dy > 0) === (sign > 0);
-      if (/^v/i.test(name)) return fwd ? `+${name}−` : `−${name}+`;
-      return flat ? (fwd ? `${name}→` : `←${name}`) : `${name}${fwd ? '↓' : '↑'}`;
+      if (/^v/i.test(name)) return varShow(name);
+      const fwd = (flat ? dx > 0 : dy > 0) === (sign > 0), shown = varShow(name);
+      return flat ? (fwd ? `${shown}→` : `←${shown}`) : `${shown}${fwd ? '↓' : '↑'}`;
     }).join(' ');
+  }
+  // Is a voltage named on this part positive at its second terminal? (-Vx swaps it.)
+  const plusAtSecond = (s, sign) => V_SOURCES.has(s.sym) === (sign > 0);
+  // Unit vector from the part's middle toward the + of the first voltage named on it, or null.
+  function varPolarity(s) {
+    if (!s.inline || s.sym === 'CURRENT') return null;
+    const v = partVars(s.props).find(x => /^v/i.test(x.name));
+    if (!v) return null;
+    const [a, b] = s.terms, L = dist(a, b) || 1, k = plusAtSecond(s, v.sign) ? 1 : -1;
+    return [k * (b[0] - a[0]) / L, k * (b[1] - a[1]) / L];
   }
   function circuitLabel(s) {
     const p = s.props || {}, v = (k, d) => (blank(p[k]) ? d : p[k]);
     const val = (k, u) => {
       if (blank(p[k])) return '';
       const typed = String(p[k]).trim();
-      if (varExpr(typed)) return typed;
+      if (varExpr(typed)) return typed.replace(/([iIvV])([A-Za-z0-9]+)/g, '$1_$2');
       const n = siVal(p[k], u);
       // A fraction stays a fraction on the page, as it's written in the problem.
       if (isFinite(n) && typed.includes('/')) return typed.replace(new RegExp('\\s*' + u + '$'), '') + ' ' + u;
@@ -333,16 +362,56 @@ const InkAnalysis = (() => {
     }
   }
 
-  function circuit(syms, wires, out) {
+  // Cut each wire a CURRENT tag sits on: the tag's middle, projected onto the nearest wire, gets a
+  // gap too wide for the two pieces to rejoin (> TOL). s.cut = the gap's ends, first terminal first
+  // (the tag's own t0 → t1 sense); no s.cut means the tag isn't on a wire. Returns a new wire list.
+  function cutWires(tags, wires) {
+    const GAP = 8;
+    const list = wires.slice();
+    for (const s of tags) {
+      const m = centerOf(s);
+      let at = -1, best = TOL + 4;
+      list.forEach((w, n) => { const d = polyDist(m, w.pts); if (d <= best) { best = d; at = n; } });
+      if (at < 0) continue;
+      const pts = list[at].pts, L = polyLen(pts);
+      if (L < 2 * GAP + 2) continue;
+      // Arc length to the projection, kept far enough from the ends to leave a piece either side.
+      let run = 0, along = 0, near = Infinity;
+      for (let k = 1; k < pts.length; k++) {
+        const a = pts[k - 1], b = pts[k], d = dist(a, b), t = d ? Math.max(0, Math.min(1, ((m[0] - a[0]) * (b[0] - a[0]) + (m[1] - a[1]) * (b[1] - a[1])) / (d * d))) : 0;
+        const q = segDist(m, a, b);
+        if (q < near) { near = q; along = run + t * d; }
+        run += d;
+      }
+      along = Math.max(GAP + 1, Math.min(L - GAP - 1, along));
+      const pointAt = (u) => {
+        let acc = 0;
+        for (let k = 1; k < pts.length; k++) {
+          const d = dist(pts[k - 1], pts[k]);
+          if (acc + d >= u) { const t = (u - acc) / (d || 1); return { k, p: [pts[k - 1][0] + t * (pts[k][0] - pts[k - 1][0]), pts[k - 1][1] + t * (pts[k][1] - pts[k - 1][1])] }; }
+          acc += d;
+        }
+        return { k: pts.length - 1, p: pts[pts.length - 1] };
+      };
+      const A = pointAt(along - GAP), B = pointAt(along + GAP);
+      const fwd = (B.p[0] - A.p[0]) * (s.terms[1][0] - s.terms[0][0]) + (B.p[1] - A.p[1]) * (s.terms[1][1] - s.terms[0][1]) >= 0;
+      s.cut = fwd ? [A.p, B.p] : [B.p, A.p];
+      list.splice(at, 1, { ...list[at], pts: [...pts.slice(0, A.k), A.p] }, { ...list[at], pts: [B.p, ...pts.slice(B.k)] });
+    }
+    return list;
+  }
+
+  function circuit(syms, drawnWires, out) {
     const parts = syms.filter(s => ECE.has(s.sym));
     if (!parts.length) return;
     PAGE_VARS = [...new Set(parts.flatMap(s => (PROBES.has(s.sym) ? (s.sym === 'PROBE_POS' ? ['V' + probeNum(s)] : []) : partVars(s.props).map(v => v.name))))];
-    const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE' && !PROBES.has(s.sym));
+    const wires = cutWires(parts.filter(s => s.sym === 'CURRENT'), drawnWires);
+    const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE' && !PROBES.has(s.sym) && (s.sym !== 'CURRENT' || s.cut));
     const probes = parts.filter(s => PROBES.has(s.sym));
     // Terminals (a probe's contact point joins nets like a terminal but carries no current)
     const terms = [];
     for (const s of parts) {
-      const pts = s.inline ? s.terms : BOX_PINS[s.sym] ? BOX_PINS[s.sym].map(boxMap(s).toPage) : [];
+      const pts = s.sym === 'CURRENT' ? s.cut || [] : s.inline ? s.terms : BOX_PINS[s.sym] ? BOX_PINS[s.sym].map(boxMap(s).toPage) : [];
       pts.forEach((pt, k) => terms.push({ s, k, pt, node: s.sym === 'NODE', probe: PROBES.has(s.sym) }));
     }
     const uf = UF();
@@ -368,14 +437,19 @@ const InkAnalysis = (() => {
     const rootOf = (n) => uf.find(tk(n));
     const ground = new Set(terms.map((t, n) => (t.s.sym === 'GROUND' ? rootOf(n) : null)).filter(Boolean));
     const warns = [];
+    const tagName = (s) => { const v = partVars(s.props)[0]; return v ? varShow(v.name) : 'Wire current'; };
+    for (const s of parts) if (s.sym === 'CURRENT' && !s.cut) warns.push(`${tagName(s)} isn't on a wire — drag it onto the wire it measures.`);
     // Names, ordered top-left → bottom-right so they read like a schematic.
     const order = real.slice().sort((a, b) => { const ca = centerOf(a), cb = centerOf(b); return Math.abs(ca[1] - cb[1]) > 24 ? ca[1] - cb[1] : ca[0] - cb[0]; });
     const counters = {}, names = new Map();
     for (const s of order) {
       const [pre] = CIRCUIT_INFO[s.sym] || ['X'];
       counters[pre] = (counters[pre] || 0) + 1;
-      names.set(s, !blank(s.props && s.props.name) ? String(s.props.name) : pre + counters[pre]);
+      names.set(s, s.sym === 'CURRENT' ? tagName(s) : !blank(s.props && s.props.name) ? String(s.props.name) : pre + counters[pre]);
     }
+    // What the notebook needs to offer a current on a tapped wire: which wires are in the circuit, and a free name.
+    const taken = new Set(PAGE_VARS.map(varKey));
+    out.wiring = { wires: [...new Set(drawnWires.map(w => w.i))], nextI: ['ix', 'iy', 'iz', 'ia', 'ib', 'i1', 'i2', 'i3', 'i4'].find(n => !taken.has(n)) || '' };
     const termIdx = (s, k) => terms.findIndex(t => t.s === s && t.k === k);
     // Reference node: drawn ground, else the − end of the first voltage source, else any net.
     let refRoot = ground.size ? [...ground][0] : null;
@@ -434,6 +508,10 @@ const InkAnalysis = (() => {
         case 'LED': ep = { type: 'LED', n: pins, p: { color: p.color || 'red' } }; break;
         case 'SWITCH': if (p.state !== 'open') ep = { type: 'R', n: pins, p: { value: '1m' } }; break;
         case 'AMMETER': ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } }; break;
+        case 'CURRENT':
+          if (pins[0] !== pins[1]) ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } };
+          else warns.push(`${name} is on a wire with no current: both sides of it are the same node.`);
+          break;
         case 'VOLTMETER': break;
         case 'OPAMP': ep = { type: 'OA', n: pins, p: { gain: blank(p.gain) ? 1e5 : siVal(p.gain) || 1e5, vsat: blank(p.vsat) ? 15 : siVal(p.vsat, 'V') || 15, gbw: '1meg' } }; break;
       }
@@ -450,7 +528,7 @@ const InkAnalysis = (() => {
     }
     for (const s of parts) {
       if (PROBES.has(s.sym)) { out.comps[s.i] = { name: probeName(s), title: s.sym === 'PROBE_POS' ? 'V+ probe' : 'V− probe', label: probeName(s), fields: circuitFields(s) }; continue; }
-      out.comps[s.i] = { name: names.get(s) || (s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: [circuitLabel(s), varLabel(s)].filter(Boolean).join('  '), fields: circuitFields(s) };
+      out.comps[s.i] = { name: names.get(s) || (s.sym === 'CURRENT' ? tagName(s) : s.sym === 'GROUND' ? 'Ground' : 'Node'), title: (CIRCUIT_INFO[s.sym] || [, s.sym === 'GROUND' ? 'Ground' : 'Node'])[1], label: [circuitLabel(s), varLabel(s)].filter(Boolean).join('  '), pol: varPolarity(s), fields: circuitFields(s) };
     }
     if (missing.length) warns.push('No value yet for ' + missing.join(', ') + ' — tap the part to set it. Using a placeholder for now.');
     if (unreadable.length) warns.push('Couldn\'t read the value of ' + unreadable.join(', ') + ' — use a number with an optional SI prefix (e.g. 4.7k, 100n). Using a placeholder for now.');
@@ -471,22 +549,29 @@ const InkAnalysis = (() => {
       }
     }
 
-    // Circuit variables: named on a part (its voltage t0 − t1, its current t0 → t1) or a probe pair's Vn.
+    // Circuit variables: named on a part or a wire, or a probe pair's Vn. A voltage reads from the end
+    // its + mark is drawn at (a source's own + mark, else t0); a current runs t0 → t1, or along a wire's arrow.
     const varTab = new Map();
     for (const s of order) {
       const c = comp.get(s), flipped = c.ep && c.ep.n[0] !== c.pins[0];   // voltage sources are stamped + at t1
+      if (s.sym === 'CURRENT') {
+        const v = partVars(s.props)[0];
+        if (!v) warns.push('A wire current has no name — tap its arrow to name it.');
+        if (v && c.ep) varTab.set(varKey(v.name), { name: varShow(v.name), i: c.id, sign: s.props.rev === '1' ? -1 : 1 });
+        continue;
+      }
       for (const { name, sign } of partVars(s.props)) {
-        if (/^v/i.test(name)) varTab.set(name.toLowerCase(), { name, v: [c.pins[0], c.pins[1]], sign });
-        else if (c.ep && (c.ep.type === 'R' || c.ep.type === 'C' || c.ep.type === 'L' || c.ep.type === 'V' || (c.ep.type === 'DS' && c.ep.p.out === 'V'))) varTab.set(name.toLowerCase(), { name, i: c.id, sign: flipped ? -sign : sign });
-        else warns.push(`${name} can't be read on ${c.name} — put an ammeter in series and name it there.`);
+        if (/^v/i.test(name)) varTab.set(varKey(name), { name: varShow(name), v: plusAtSecond(s, sign) ? [c.pins[1], c.pins[0]] : [c.pins[0], c.pins[1]], sign: 1 });
+        else if (c.ep && (c.ep.type === 'R' || c.ep.type === 'C' || c.ep.type === 'L' || c.ep.type === 'V' || (c.ep.type === 'DS' && c.ep.p.out === 'V'))) varTab.set(varKey(name), { name: varShow(name), i: c.id, sign: flipped ? -sign : sign });
+        else warns.push(`${name} can't be read on ${c.name} — tap the wire next to it and name the current there.`);
       }
     }
     for (const pr of probePairs) if (!varTab.has('v' + pr.n)) varTab.set('v' + pr.n, { name: 'V' + pr.n, v: [pr.a, pr.b], sign: 1 });
     for (const c of comp.values()) {
       if (!c.ep || c.ep.type !== 'DS') continue;
       for (const { k, name } of c.ep.p.expr) {
-        const t = varTab.get(name.toLowerCase());
-        if (!t) warns.push(`${c.name} depends on ${name}, but no part is named ${name} — enter it under Variable here on the part it belongs to.`);
+        const t = varTab.get(varKey(name));
+        if (!t) warns.push(`${c.name} depends on ${name}, but nothing is named ${name} — tap a wire to name a current, or use Variable here on a part.`);
         else if (t.v) c.ep.p.ctrl.push({ k: k * t.sign, v: t.v });
         else c.ep.p.ctrl.push({ k: k * t.sign, i: t.i });
       }
@@ -513,6 +598,7 @@ const InkAnalysis = (() => {
     });
     terms.forEach((t, n) => { const r = rootOf(n); if (!netSpot.has(r) && t.s.sym !== 'GROUND' && !t.probe) netSpot.set(r, { L: 0, pt: t.pt }); });
     const nodeRows = [];
+    const tagFar = new Set(order.filter(s => s.sym === 'CURRENT' && comp.get(s).ep).map(s => comp.get(s).pins[1]));
     const seenIdx = new Set();
     for (const [r, spot] of netSpot) {
       const k = idx.get(r);
@@ -523,7 +609,8 @@ const InkAnalysis = (() => {
       let txt = si(vdc, 'V');
       let acTxt = '';
       if (ac) { acTxt = phasor(ac.mag[name][0], ac.phase[name][0], 'V'); txt = Math.abs(vdc) > 1e-9 ? txt + ' + ' + acTxt : acTxt; }
-      out.annots.push({ x: spot.pt[0], y: spot.pt[1] - 13, text: txt, kind: 'chip', tone: 'v' });
+      // Across a wire current it's the same wire, so only one side gets a chip.
+      if (!tagFar.has(k)) out.annots.push({ x: spot.pt[0], y: spot.pt[1] - 13, text: txt, kind: 'chip', tone: 'v' });
       nodeRows.push([name, si(vdc, 'V'), ...(ac ? [acTxt] : [])]);
     }
     // Per-part results
@@ -548,6 +635,12 @@ const InkAnalysis = (() => {
       if (ac && ac.cur && ac.cur[0][c.id]) { const z = cplx(ac.cur[0][c.id]); acI = phasor(z[0], z[1], 'A'); }
       const dcI = si(Math.abs(r.i), 'A');
       const iTxt = ac ? (Math.abs(r.i) > 1e-12 ? dcI + ' + ' + acI : acI) : dcI;
+      // A wire current keeps its sign: positive along the arrow.
+      if (s.sym === 'CURRENT') {
+        const sg = s.props.rev === '1' ? -1 : 1, signed = si(r.i * sg, 'A');
+        out.annots.push({ x: chipSpot(s, true)[0], y: chipSpot(s, true)[1], text: `${c.name} = ${ac ? (Math.abs(r.i) > 1e-12 ? signed + ' + ' + acI : acI) : signed}`, kind: 'chip', tone: 'i' });
+        continue;
+      }
       if (s.sym === 'AMMETER') {
         out.annots.push({ x: chipSpot(s, true)[0], y: chipSpot(s, true)[1], text: iTxt, kind: 'chip', tone: 'meter' });
         meterRows.push([c.name, 'Current', iTxt]);
@@ -581,7 +674,7 @@ const InkAnalysis = (() => {
       }
       return [t.name, si(dc, t.v ? 'V' : 'A'), ...(ac ? [acTxt] : [])];
     });
-    const cards = [['Nodes', String(nodes.length - 1)], ['Components', String(eparts.length)], ['Power supplied', si(pSup, 'W')], ['Power absorbed', si(pAbs, 'W')]];
+    const cards = [['Nodes', String(nodes.length - 1)], ['Components', String(order.filter(s => s.sym !== 'CURRENT' && comp.get(s).ep).length)], ['Power supplied', si(pSup, 'W')], ['Power absorbed', si(pAbs, 'W')]];
     if (ac) cards.push(['AC frequency', si(acFreq, 'Hz')], ['ω', si(2 * Math.PI * acFreq, 'rad/s')]);
     blocks.push({ t: 'cards', items: cards });
     if (varRows.length) blocks.push({ t: 'table', title: 'Variables', head: ['Variable', 'DC', ...(ac ? ['AC phasor'] : [])], rows: varRows });
@@ -589,7 +682,7 @@ const InkAnalysis = (() => {
     if (meterRows.length) blocks.push({ t: 'table', title: 'Meter readings', head: ['Meter', 'Reads', 'Value'], rows: meterRows });
     blocks.push({ t: 'table', title: 'Node voltages', head: ['Node', 'DC', ...(ac ? ['AC phasor'] : [])], rows: nodeRows });
     blocks.push({ t: 'table', title: 'Components', head: ['Part', 'Value', 'V', 'I', 'P', ...(ac ? ['AC current'] : [])], rows: compRows });
-    blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + '; the DC part is shown separately. ' : '') + 'Current is positive from a part\'s first terminal to its second; P < 0 means the part delivers power. Ideal op-amps saturate at ±V_sat.' });
+    blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + '; the DC part is shown separately. ' : '') + 'In the Components table V is measured from the + end and I runs + to − through the part (the first terminal counts as + on parts with no mark), so P < 0 means the part delivers power. Variables follow their own arrows and + marks. Ideal op-amps saturate at ±V_sat.' });
     out.analyses.push({ title: ac ? 'Circuit — DC + AC phasor analysis' : 'Circuit — DC analysis', blocks });
   }
 
@@ -1157,6 +1250,8 @@ const InkAnalysis = (() => {
   function analyze(page) {
     const out = { analyses: [], annots: [], comps: {} };
     const all = (page.symbols || []).map(s => ({ ...s, props: s.props || {} }));
+    // A wire-current arrow is drawn beside its wire (Symbols.kt), so it's as wide as that for placement.
+    for (const s of all) if (s.sym === 'CURRENT') s.half = 13;
     const wires = [];
     // WIRE symbols are just straight wires t0 → t1, so every analyser (circuit nets, thermo pipes,
     // mechanics ropes) sees them as lines.
@@ -1189,9 +1284,12 @@ const InkAnalysis = (() => {
   // =========================================================================================
   // SMART PLACEMENT (contract §4)
   // =========================================================================================
-  // Every value label (comps[i].labelAt) and result chip is moved to the nearby spot that clashes
-  // least with wires, symbol bodies and the labels/chips already placed. Candidates are scored, and
-  // since every penalty is ≥ 0 the scan stops once a candidate's own distance cost can't win.
+  // A value label has a home: above a horizontal part, right of a vertical one, above a box symbol.
+  // It stays there unless a wire, a part or another label is in the way, then steps out a little or
+  // takes the part's other side. It's worked out from the drawing alone, top-left part first, so
+  // the same drawing always gets the same spots and results never push a label around (chips
+  // come afterwards and move off the labels). Candidates are scored, and since every penalty is
+  // ≥ 0 the scan stops once a candidate's own distance cost can't win.
   const PAGE_W = 816, PAGE_H = 1056;
   const textLen = (t) => [...String(t).replace(/_/g, '').replace(/[̀-ͯ]/g, '')].length;
   const labelW = (t) => 6.3 * textLen(t);
@@ -1207,16 +1305,15 @@ const InkAnalysis = (() => {
     if (Math.abs(dy) < 0.38) return { x: p[0], y: p[1] + 3.5, align };
     return { x: p[0], y: dy < 0 ? p[1] - 2 : p[1] + 9, align };
   }
-  const DISTS = [3, 8, 14, 22, 32, 44];
+  const DISTS = [3, 8, 14, 22, 32];
   function labelCands(s) {
     const c = [];
     if (s.inline) {
       const [a, b] = s.terms, L = dist(a, b) || 1, u = [(b[0] - a[0]) / L, (b[1] - a[1]) / L], [nx, ny] = labelSide(s);
       const h = Math.max(s.half || 8, 4), m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-      for (const side of [1, -1]) for (const d of DISTS) for (const sh of [0, 0.25, -0.25, 0.45, -0.45]) {
-        c.push({ p: [m[0] + side * nx * (h + d) + u[0] * sh * L, m[1] + side * ny * (h + d) + u[1] * sh * L], dir: [side * nx, side * ny], cost: d * 0.5 + Math.abs(sh) * L * 0.2 + (side < 0 ? 3 : 0) });
-      }
-      for (const [e, sg] of [[b, 1], [a, -1]]) for (const d of [4, 12, 22]) c.push({ p: [e[0] + sg * u[0] * d, e[1] + sg * u[1] * d], dir: [sg * u[0], sg * u[1]], cost: 14 + d * 0.5 });
+      for (const side of [1, -1]) for (const d of DISTS) c.push({ p: [m[0] + side * nx * (h + d), m[1] + side * ny * (h + d)], dir: [side * nx, side * ny], cost: d * 0.5 + (side < 0 ? 6 : 0) });
+      // Only when both sides are full: slid along the part.
+      for (const sh of [0.3, -0.3]) for (const side of [1, -1]) c.push({ p: [m[0] + side * nx * (h + 8) + u[0] * sh * L, m[1] + side * ny * (h + 8) + u[1] * sh * L], dir: [side * nx, side * ny], cost: 24 + (side < 0 ? 3 : 0) });
     } else {
       // Local half-size (boxMap falls back to page units when w/h are missing).
       const m = boxMap(s), ctr = m.toPage([0, 0]), hw = (s.w || Math.abs(s.box[2] - s.box[0])) / 2, hh = (s.h || Math.abs(s.box[3] - s.box[1])) / 2;
@@ -1251,7 +1348,7 @@ const InkAnalysis = (() => {
       return { s, o, l: o.c[0] - ex, r: o.c[0] + ex, t: o.c[1] - ey, b: o.c[1] + ey };
     });
     const placed = [];
-    const clash = (R, skip, soft) => {
+    const clash = (R, skip) => {
       const E = { l: R.l - M, t: R.t - M, r: R.r + M, b: R.b + M };
       const eo = { c: [(E.l + E.r) / 2, (E.t + E.b) / 2], u: [1, 0], v: [0, 1], hu: (E.r - E.l) / 2, hv: (E.b - E.t) / 2 };
       let pen = 0;
@@ -1269,10 +1366,6 @@ const InkAnalysis = (() => {
         const ox = Math.min(E.r, Q.r) - Math.max(E.l, Q.l), oy = Math.min(E.b, Q.b) - Math.max(E.t, Q.t);
         if (ox > 0 && oy > 0) pen += 150 + ox * oy;
       }
-      if (soft) for (const Q of soft) {
-        const ox = Math.min(E.r, Q.r) - Math.max(E.l, Q.l), oy = Math.min(E.b, Q.b) - Math.max(E.t, Q.t);
-        if (ox > 0 && oy > 0) pen += 40 + 0.5 * ox * oy;
-      }
       return pen;
     };
     // Badges (state numbers on pipes) and other fixed annotations stay put but are obstacles.
@@ -1281,22 +1374,31 @@ const InkAnalysis = (() => {
       if (a.kind === 'badge') placed.push({ l: a.x - 9, r: a.x + 9, t: a.y - 9, b: a.y + 9 });
       else if (a.text) placed.push(chipRect(a.x, a.y, chipW(a.text)));
     }
-    // 1. Value labels. Chips haven't moved yet, so their intended spots are soft obstacles — a label
-    // shouldn't grab the place a result was meant to go.
-    const chipSpots = out.annots.filter(a => a.kind === 'chip' && isFinite(a.x) && isFinite(a.y)).map(a => chipRect(a.x, a.y, chipW(a.text || '')));
-    for (const s of syms) {
+    // 1. Value labels, top-left part first so an edit elsewhere can't reshuffle them.
+    const byPlace = syms.slice().sort((a, b) => { const A = (a.inline ? a.terms : a.box) ? centerOf(a) : [0, 0], B = (b.inline ? b.terms : b.box) ? centerOf(b) : [0, 0]; return Math.abs(A[1] - B[1]) > 24 ? A[1] - B[1] : A[0] - B[0]; });
+    for (const s of byPlace) {
       const c = out.comps[s.i];
       if (!c || blank(c.label) || !(s.inline ? s.terms : s.box)) continue;
-      const w = labelW(c.label);
+      // A voltage's + and − sit either side of the label, along the part, so they need room too.
+      const pol = c.pol, tall = pol && Math.abs(pol[1]) > Math.abs(pol[0]), w0 = labelW(c.label), w = w0 + (pol && !tall ? 24 : 0);
       let best = null;
       for (const cand of labelCands(s)) {
         if (best && cand.cost >= best.score) break;
-        const A = anchorAt(cand.p, cand.dir), R = labelRect(A.x, A.y, A.align, w), score = cand.cost + clash(R, null, chipSpots);
+        const A = anchorAt(cand.p, cand.dir), R = labelRect(A.x, A.y, A.align, w);
+        if (tall) { R.t -= 12; R.b += 12; }
+        const score = cand.cost + clash(R);
         if (!best || score < best.score) best = { A, R, score };
       }
       if (!best) continue;
-      c.anchor = centerOf(s).map(v => +v.toFixed(1));
+      const anchor = centerOf(s);
+      c.anchor = anchor.map(v => +v.toFixed(1));
       c.labelAt = { x: +best.A.x.toFixed(1), y: +best.A.y.toFixed(1), align: best.A.align };
+      if (pol) {
+        // Text centred in its box; marks either side of it, the + toward the part's + end.
+        const x = (best.R.l + best.R.r) / 2, y = best.A.y - 3.5, off = tall ? 14 : w0 / 2 + 8;
+        c.labelAt = { x: +x.toFixed(1), y: c.labelAt.y, align: 'center' };
+        c.marks = [x + pol[0] * off - anchor[0], y + pol[1] * off - anchor[1], x - pol[0] * off - anchor[0], y - pol[1] * off - anchor[1]].map(v => +v.toFixed(1));
+      }
       placed.push(best.R);
     }
     // 2. Result chips: nudge each off wires / symbols / labels / earlier chips, staying close to its point.

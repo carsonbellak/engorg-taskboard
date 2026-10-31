@@ -169,7 +169,7 @@ class AnalysisPanel(
         val live = ArrayList(recs)
         editor.reconcile(p, pg, live, map)
         comps = map; compRecs = live
-        editor.remember(p, pg, live, map)   // so a tap on the page opens its sheet straight away
+        editor.remember(p, pg, live, map, res)   // so a tap on the page opens its sheet straight away
         render(res, pg)
     }
 

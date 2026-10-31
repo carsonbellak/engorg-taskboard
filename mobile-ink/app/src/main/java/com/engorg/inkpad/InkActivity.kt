@@ -269,8 +269,9 @@ class InkActivity : ComponentActivity() {
     // ---------- dynamic split panes (add/close/swap from within a notebook) ----------
     private fun makePane(id: String?): PageCanvas {
         val pane = PageCanvas(this, store, hostImpl)
-        // A select-tool tap on a class symbol opens its values (panel open or not).
-        pane.symbolTap = { pg, rec -> analysisEditor().onSymbolTap(pane, pg, rec) }
+        // A select-tool tap on a class symbol opens its values (panel open or not); on a circuit's wire, its current.
+        pane.symbolTap = { pg, rec, x, y -> analysisEditor().onSymbolTap(pane, pg, rec, x, y) }
+        pane.symbolsEdited = { pg -> valueEditor?.onPageEdited(pane, pg) }
         // So does the Values button on a lassoed part or a whole lassoed circuit.
         pane.selectionValues = { pg, recs, x -> analysisEditor().editAll(pane, pg, recs, x) }
         // Open (which sets pane.notebook) BEFORE building the chip — the chip reads

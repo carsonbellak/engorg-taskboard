@@ -93,11 +93,13 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Called (UI thread) whenever a page's content is about to be saved — i.e. after any edit. */
     var onEdited: ((page: Int) -> Unit)? = null
+    /** Also fired on every page edit; keeps drawn symbol labels in step while the Analyze panel is shut. */
+    var symbolsEdited: ((page: Int) -> Unit)? = null
     /**
      * A select-tool tap on a class symbol goes here first (InkActivity routes it to the value sheet);
      * return true to consume it, false to select the symbol as usual.
      */
-    var symbolTap: ((page: Int, rec: FinishedStrokesView.Rec) -> Boolean)? = null
+    var symbolTap: ((page: Int, rec: FinishedStrokesView.Rec, x: Float, y: Float) -> Boolean)? = null
     /** The selection's "Values" button: enter the values of the symbols among [recs]; [x] = the selection's center, pane-local. */
     var selectionValues: ((page: Int, recs: List<FinishedStrokesView.Rec>, x: Float) -> Unit)? = null
 
@@ -1125,7 +1127,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             if (!preLassoHadUi && clipboard.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y)
             return
         }
-        if (picked.shape?.type == ShapeType.SYMBOL && symbolTap?.invoke(h.page, picked) == true) { clearSelection(); return }
+        val shape = picked.shape
+        val tappable = if (shape != null) shape.type == ShapeType.SYMBOL || shape.type == ShapeType.LINE || shape.type == ShapeType.ARROW else !picked.highlighter
+        if (tappable && symbolTap?.invoke(h.page, picked, h.x, h.y) == true) { clearSelection(); return }
         selRecs.clear(); selRecs.add(picked); selPage = h.page; selBox = recBounds(selRecs); refreshSelectionOverlay()
     }
 
@@ -1147,6 +1151,31 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         selRecs.indexOf(rec).let { if (it >= 0) selRecs[it] = fresh }
         finishedView.invalidate()
         savePage(page)
+        mirror?.pageEdited(this, page)
+        return fresh
+    }
+
+    /**
+     * Put a wire-current arrow on [page] with [props], lying along the unit direction ([ux],[uy]) at
+     * (cx,cy), styled like the wire [like]. On an axis-aligned wire its middle sits between two dots,
+     * so its terminals land on the dots and it never covers a junction. Its own undo step.
+     */
+    fun addCurrentTag(page: Int, like: FinishedStrokesView.Rec, cx: Float, cy: Float, ux: Float, uy: Float, props: org.json.JSONObject): FinishedStrokesView.Rec? {
+        val recs = finishedView.pages.getOrNull(page)?.recs ?: return null
+        var mx = cx; var my = cy
+        if (finishedView.paperStyle != FinishedStrokesView.PaperStyle.PLAIN) {
+            val h = Symbols.GRID / 2f
+            if (abs(uy) < 1e-3f) mx = Symbols.snap(mx - h) + h else if (abs(ux) < 1e-3f) my = Symbols.snap(my - h) + h
+        }
+        val half = Symbols.SPAN / 2f
+        val spec = ShapeSpec.symbolAt(Sym.CURRENT, mx, my).also {
+            it.verts[0].set(mx - ux * half, my - uy * half); it.verts[1].set(mx + ux * half, my + uy * half)
+            it.props = props
+        }
+        undoPushedThisGesture = false; pushUndo(); undoPushedThisGesture = false   // a sheet tap is its own gesture
+        val fresh = buildShapeRec(spec, like.color, like.widthPx, false)
+        recs.add(fresh)
+        finishedView.invalidate(); savePage(page)
         mirror?.pageEdited(this, page)
         return fresh
     }
@@ -1669,6 +1698,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun savePage(index: Int) {
         if (index < 0 || index >= notebook.pageIds.size) return
         onEdited?.invoke(index)
+        symbolsEdited?.invoke(index)
         val pageId = notebook.pageIds[index]
         // Snapshot the rec list on the UI thread (a reference copy — recs are immutable once made),
         // so the writer thread never reads a list that a later stroke is mutating.

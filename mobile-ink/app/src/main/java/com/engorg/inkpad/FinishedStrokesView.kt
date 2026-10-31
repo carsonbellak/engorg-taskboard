@@ -561,6 +561,7 @@ class FinishedStrokesView(context: Context) : View(context) {
     private val annotText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 10f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
     private val annotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val annotRect = RectF()
+    private val SUBSCRIPT = Regex("_([A-Za-z0-9]+)")
 
     /**
      * A symbol's value label ("10 kΩ", "8 MPa") in its own ink color: above a horizontal inline part,
@@ -580,8 +581,14 @@ class FinishedStrokesView(context: Context) : View(context) {
         if (props.has("_lx") && props.has("_ly")) {
             val c = symbolCentre(sp, sym)
             if (c != null) {
-                labelPaint.textAlign = when (props.optString("_la")) { "left" -> Paint.Align.LEFT; "right" -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
-                canvas.drawText(label, c.x + props.optDouble("_lx", 0.0).toFloat(), c.y + props.optDouble("_ly", 0.0).toFloat(), labelPaint)
+                drawLabelText(canvas, label, c.x + props.optDouble("_lx", 0.0).toFloat(), c.y + props.optDouble("_ly", 0.0).toFloat(), props.optString("_la"))
+                // A named voltage's + and −, either side of the label along the part.
+                val mk = props.optString("_mk").split(',').mapNotNull { it.toFloatOrNull() }
+                if (mk.size == 4) {
+                    labelPaint.textAlign = Paint.Align.CENTER
+                    canvas.drawText("+", c.x + mk[0], c.y + mk[1] + 4f, labelPaint)
+                    canvas.drawText("−", c.x + mk[2], c.y + mk[3] + 4f, labelPaint)
+                }
                 return
             }
         }
@@ -595,15 +602,39 @@ class FinishedStrokesView(context: Context) : View(context) {
             val kk = kotlin.math.min(sp.symScale, len / sym.w).coerceAtLeast(0.05f)
             val off = sym.h * kk / 2f + 8f
             val cx = (a.x + b.x) / 2f + nx * off; val cy = (a.y + b.y) / 2f + ny * off
-            if (kotlin.math.abs(nx) > 0.7f) { labelPaint.textAlign = Paint.Align.LEFT; canvas.drawText(label, cx, cy + 4f, labelPaint) }
-            else { labelPaint.textAlign = Paint.Align.CENTER; canvas.drawText(label, cx, cy + (if (ny < 0f) 0f else 9f), labelPaint) }
+            if (kotlin.math.abs(nx) > 0.7f) drawLabelText(canvas, label, cx, cy + 4f, "left")
+            else drawLabelText(canvas, label, cx, cy + (if (ny < 0f) 0f else 9f), "center")
         } else {
             var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
             for (p in rec.points) { if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y }
             if (minX > maxX) return
-            labelPaint.textAlign = Paint.Align.CENTER
-            canvas.drawText(label, (minX + maxX) / 2f, maxY + 13f, labelPaint)
+            drawLabelText(canvas, label, (minX + maxX) / 2f, maxY + 13f, "center")
         }
+    }
+
+    /** [label] at baseline (x,y), aligned "left", "right" or centered, with "i_x" written as a subscript. */
+    private fun drawLabelText(canvas: Canvas, label: String, x: Float, y: Float, align: String) {
+        val base = labelPaint.textSize
+        // Runs of (text, subscript?), splitting "2i_x" into "2i" and a lowered "x".
+        val runs = ArrayList<Pair<String, Boolean>>()
+        var at = 0
+        for (m in SUBSCRIPT.findAll(label)) {
+            if (m.range.first > at) runs.add(label.substring(at, m.range.first) to false)
+            runs.add(m.groupValues[1] to true)
+            at = m.range.last + 1
+        }
+        if (at < label.length) runs.add(label.substring(at) to false)
+        val small = base * 0.74f
+        var width = 0f
+        for ((t, sub) in runs) { labelPaint.textSize = if (sub) small else base; width += labelPaint.measureText(t) }
+        var pen = when (align) { "left" -> x; "right" -> x - width; else -> x - width / 2f }
+        labelPaint.textAlign = Paint.Align.LEFT
+        for ((t, sub) in runs) {
+            labelPaint.textSize = if (sub) small else base
+            canvas.drawText(t, pen, if (sub) y + 3f else y, labelPaint)
+            pen += labelPaint.measureText(t)
+        }
+        labelPaint.textSize = base
     }
 
     /**

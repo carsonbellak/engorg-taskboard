@@ -40,7 +40,7 @@ internal fun analysisRich(s: String): CharSequence {
  * The value sheet for one analysed symbol: a card over the notebook listing its fields (from
  * ink-analysis.js `comps[i].fields`) as tappable value boxes, with an on-screen keypad docked at the
  * bottom so numbers never need the system keyboard. Per field (see the analysis contract §3):
- * `options` → chips; `keypad: 'si'` → digits + SI-prefix keys (p n µ m k M G); `'num'` → digits only;
+ * `options` → chips (`optValues` = what each stores, if not its own text); `keypad: 'si'` → digits + SI-prefix keys (p n µ m k M G); `'num'` → digits only;
  * `units` → unit-suffix buttons (the first is the implied default); `'text'` (or no unit) → a normal
  * text box with the system keyboard. Stored values are the typed strings ("4.7k", "8 MPa", "85 %").
  *
@@ -65,6 +65,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         val key: String = f.optString("key")
         val unit: String = f.optString("unit")
         val options: JSONArray? = f.optJSONArray("options")
+        private val optValues: JSONArray? = f.optJSONArray("optValues")
         val units: List<String> = f.optJSONArray("units")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
         /** Circuit variables a source's value can use: keys that put "ix" after the number ("2 ix"). */
         val vars: List<String> = f.optJSONArray("vars")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
@@ -88,6 +89,19 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
 
         init { if (keypad) parse(raw) }
 
+        /** The chip a stored value shows as, with the field's default when nothing is stored. */
+        fun chipFor(stored: String): String {
+            val o = options; val v = optValues
+            if (o != null && v != null) { for (k in 0 until v.length()) if (v.optString(k) == stored) return o.optString(k); return o.optString(0) }
+            return stored.ifEmpty { f.optString("value") }.ifEmpty { f.optString("ph") }
+        }
+
+        private fun storedFor(chip: String): String {
+            val o = options; val v = optValues
+            if (o != null && v != null) for (k in 0 until o.length()) if (o.optString(k) == chip) return v.optString(k)
+            return chip.trim()
+        }
+
         private fun parse(s: String) {
             val m = NUM_RE.matchEntire(s.trim()) ?: run { suffix = s.trim(); return }
             num = m.groupValues[1]
@@ -103,7 +117,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         /** What gets stored ("" = cleared, so the script falls back to its default). */
         fun value(): String {
             if (mode == "text") return (edit?.text?.toString() ?: text).trim()
-            if (mode == "opt") return if (dirty) text.trim() else raw.trim()   // an untouched default stays implied
+            if (mode == "opt") return if (dirty) storedFor(text) else raw.trim()   // an untouched default stays implied
             if (!dirty) return raw.trim()
             val n = num.replace(Regex("[eE][-+]?$"), "").trimEnd('/')
             if (n.none { it.isDigit() }) return if (suffix in vars) (if (n == "-") "-" else "") + suffix else ""   // a bare Vx
@@ -164,7 +178,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         entries = (0 until fields.length()).map { k ->
             val f = fields.getJSONObject(k)
             val raw = props?.optString(f.optString("key")).orEmpty()
-            Entry(f, raw).also { e -> if (e.mode == "opt") e.text = raw.ifEmpty { f.optString("value") }.ifEmpty { f.optString("ph") } }
+            Entry(f, raw).also { e -> if (e.mode == "opt") e.text = e.chipFor(raw) }
         }
         focus = -1
 
@@ -219,7 +233,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             val fields = part.comp.optJSONArray("fields") ?: JSONArray()
             (0 until fields.length()).map { fields.getJSONObject(it) }.filter { it.optString("key") != "name" }.map { f ->
                 val raw = part.props?.optString(f.optString("key")).orEmpty()
-                Entry(f, raw, k).also { e -> if (e.mode == "opt") e.text = raw.ifEmpty { f.optString("value") }.ifEmpty { f.optString("ph") } }
+                Entry(f, raw, k).also { e -> if (e.mode == "opt") e.text = e.chipFor(raw) }
             }
         }
         focus = -1
