@@ -163,14 +163,16 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
      */
     fun editAll(pane: PageCanvas, page: Int, recs: List<FinishedStrokesView.Rec>, x: Float) {
         val syms = recs.filter { it.shape?.type == ShapeType.SYMBOL }
-        if (cacheValid(pane, page)) { showAll(pane, page, syms, cRecs, cComps, x); return }
+        if (cacheValid(pane, page)) { showAll(pane, page, recs, syms, cRecs, cComps, x); return }
         val seq = ++tapSeq
         analyse(pane, page) { seen, comps ->
-            if (seq == tapSeq) showAll(pane, page, syms, seen, comps ?: emptyMap(), x)
+            if (seq == tapSeq) showAll(pane, page, recs, syms, seen, comps ?: emptyMap(), x)
         }
     }
 
-    private fun showAll(pane: PageCanvas, page: Int, syms: List<FinishedStrokesView.Rec>, seen: List<FinishedStrokesView.Rec>, comps: Map<Int, JSONObject>, x: Float) {
+    private fun showAll(pane: PageCanvas, page: Int, recs: List<FinishedStrokesView.Rec>, syms: List<FinishedStrokesView.Rec>, seen: List<FinishedStrokesView.Rec>, comps: Map<Int, JSONObject>, x: Float) {
+        // Wires have no values of their own: a lone selected one offers its current, as a tap does.
+        val wires = recs.filter { seen.indexOf(it).let { i -> i >= 0 && i in cWires } }
         val all = syms.mapNotNull { rec -> comps[seen.indexOf(rec)]?.takeIf { hasFields(it) }?.let { rec to it } }
         // Parts with something to enter, by name (R1, R2, V1); meters and grounds only have a name to set.
         val valued = all.filter { (_, comp) -> (0 until comp.getJSONArray("fields").length()).any { comp.getJSONArray("fields").getJSONObject(it).optString("key") != "name" } }
@@ -187,9 +189,17 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
                     onSave = { values -> saveAll(pane, page, valued.map { it.first }, values) })
             }
             valued.size == 1 -> showSheet(pane, page, valued[0].first, valued[0].second)
+            wires.size == 1 -> wireMiddle(wires[0])?.let { showWireSheet(pane, page, wires[0], it.x, it.y) }
             all.size == 1 -> showSheet(pane, page, all[0].first, all[0].second)
+            wires.size > 1 -> Toast.makeText(act, "Select one wire to name its current", Toast.LENGTH_SHORT).show()
             else -> Toast.makeText(act, "No values to enter here", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun wireMiddle(rec: FinishedStrokesView.Rec): PointF? {
+        val h = rec.shape?.handles.orEmpty()
+        if (h.size >= 2) return PointF((h[0].x + h[1].x) / 2f, (h[0].y + h[1].y) / 2f)
+        return rec.points.getOrNull(rec.points.size / 2)
     }
 
     private fun open(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, selectIfNone: Boolean): Boolean {

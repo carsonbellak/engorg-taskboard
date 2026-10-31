@@ -841,10 +841,18 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             FinishedStrokesView.MenuAction.GRAPH_EDIT,
         ) else if (selectedFillable() != null) listOf(
             FinishedStrokesView.MenuAction.FILL,
-        ) else if (selRecs.any { it.shape?.type == ShapeType.SYMBOL }) listOf(
+        ) else if (selRecs.any { it.shape?.type == ShapeType.SYMBOL } || selectedCircuitWire()) listOf(
             FinishedStrokesView.MenuAction.VALUES,
         ) else emptyList()
         finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
+    }
+
+    /** A lone line or pen stroke on a page with circuit parts: its Values button names the wire's current. */
+    private fun selectedCircuitWire(): Boolean {
+        val rec = selRecs.singleOrNull() ?: return false
+        val type = rec.shape?.type
+        if (if (rec.shape == null) rec.highlighter else type != ShapeType.LINE && type != ShapeType.ARROW) return false
+        return finishedView.pages.getOrNull(selPage)?.recs?.any { it.shape?.symbol?.let { s -> s.group == SymGroup.ECE && s != Sym.WIRE } == true } == true
     }
 
     /** Snapshot the selection so a move/resize/rotate/vertex drag can build from (and revert to) it. */
