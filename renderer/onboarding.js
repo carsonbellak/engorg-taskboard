@@ -18,6 +18,13 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.11': {
+      title: "What's new",
+      intro: 'Make the tablet app your home screen.',
+      slides: [
+        { emoji: '🏠', title: 'Your calendar, right on the home screen', body: 'In the EngInk library, open ⋯ and choose Use as home screen, then pick EngOrg. The Home button now lands on your calendar, and the tab on the right edge opens all your other apps.' },
+      ],
+    },
     '1.6.10': {
       title: "What's new",
       intro: 'EngInk circuits now work through time.',

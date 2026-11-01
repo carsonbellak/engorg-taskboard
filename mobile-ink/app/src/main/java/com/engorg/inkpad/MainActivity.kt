@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -37,9 +38,9 @@ import org.json.JSONObject
  *
  * Note: Google sign-in is blocked by Google inside raw WebViews, so sign in with email/password.
  */
-class MainActivity : ComponentActivity() {
+open class MainActivity : ComponentActivity() {
 
-    private lateinit var web: WebView
+    protected lateinit var web: WebView
     private lateinit var googleClient: GoogleSignInClient
     private lateinit var signInLauncher: ActivityResultLauncher<Intent>
     private lateinit var filePickerLauncher: ActivityResultLauncher<Intent>
@@ -50,7 +51,8 @@ class MainActivity : ComponentActivity() {
 
     // Whether the top-level page is the PWA. Links can navigate this WebView to other sites, which
     // must not reach FileSaveBridge. Read off the UI thread, so it's tracked rather than read from web.url.
-    @Volatile private var onPwa = false
+    @Volatile protected var onPwa = false
+        private set
 
     // Snapshot of the ink-app prefs we last synced with the profile. Stays null until the user has
     // opened Ink at least once (so we never push device defaults before reading the profile); after
@@ -159,6 +161,13 @@ class MainActivity : ComponentActivity() {
                     // Install an on-screen catcher so any JS error / rejection is visible
                     // (a blank screen otherwise hides the real cause).
                     view.evaluateJavascript(ERR_JS, null)
+                    if (onPwa) onPwaLoaded()
+                }
+
+                // By default a dead renderer takes the whole app down, open notebook included.
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    recreate()
+                    return true
                 }
             }
 
@@ -203,6 +212,9 @@ class MainActivity : ComponentActivity() {
             }
         })
     }
+
+    /** The PWA finished loading in this WebView. */
+    protected open fun onPwaLoaded() {}
 
     /** Ask what to do with a Claude artifact link: save it as an EngInk workbook, or just view it. */
     private fun offerArtifact(url: Uri) {
@@ -267,10 +279,10 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
-        private const val PWA_URL = "https://assistant-taskboard.web.app"
+        internal const val PWA_URL = "https://assistant-taskboard.web.app"
 
         // Resolves the PWA's live theme CSS variables to concrete rgb() colors.
-        private const val THEME_JS = """
+        internal const val THEME_JS = """
 (function(){
   function resolve(v){try{var e=document.createElement('span');e.style.color='var('+v+')';e.style.display='none';(document.body||document.documentElement).appendChild(e);var c=getComputedStyle(e).color;e.remove();return c;}catch(_){return '';}}
   return JSON.stringify({

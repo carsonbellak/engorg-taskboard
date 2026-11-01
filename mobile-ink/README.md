@@ -9,6 +9,12 @@ A thin native Android shell. It is **not** a second codebase:
   intercepts it and launches the native low-latency ink surface (`InkActivity`,
   `androidx.ink` front-buffered rendering + motion prediction).
 
+## Home screen
+The app can be Android's home screen: EngInk library → ⋯ → **Use as home screen**, then pick EngOrg.
+`HomeActivity` is `MainActivity` opened on the PWA's Calendar tab, and pressing Home returns to the
+calendar. The tab on the right edge opens a native drawer of installed apps (long-press an app for
+its App info page). Undo it from the same button or in Android's default-apps settings.
+
 ## Ink surface behavior
 - **Pen (stylus)** writes — pressure-driven width, front-buffered for minimal latency.
 - **Finger** drags the page (pan) instead of writing.

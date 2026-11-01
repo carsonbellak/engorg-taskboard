@@ -7,6 +7,14 @@
          hand it to the system package installer (see InkUpdater). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- The home screen's app drawer lists what's installed (HomeActivity). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <!-- Cleartext is allowed so the EngInk mirror can open its plain ws:// socket to the PC on the
          local network (MirrorManager). Android can't scope that to private IP ranges, but nothing else
          is downgraded: every other URL the app uses (PWA, Firebase, Anthropic, GitHub) is explicit https. -->
@@ -28,6 +36,24 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Optional Android home screen: the same shell, opened on the calendar, with an app drawer.
+             Its own task holding only this screen, so pressing Home never closes an open notebook. -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:clearTaskOnLaunch="true"
+            android:stateNotNeeded="true"
+            android:taskAffinity=""
+            android:screenOrientation="fullUser"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
 
