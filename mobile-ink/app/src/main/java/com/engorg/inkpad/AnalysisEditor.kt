@@ -85,18 +85,28 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
 
     private fun openWire(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, x: Float, y: Float): Boolean {
         val live = pane.finishedView.pages.getOrNull(page)?.recs ?: return false
-        if (live.none { it.shape?.symbol?.let { s -> s.group == SymGroup.ECE && s != Sym.WIRE } == true }) return false
+        if (rec.shape?.symbol != Sym.WIRE && !hasCircuit(pane, page)) return false
         if (cacheValid(pane, page)) {
-            if (cRecs.indexOf(rec) !in cWires) return false
+            if (!isWire(pane, page, rec, cRecs.indexOf(rec))) return false
             showWireSheet(pane, page, rec, x, y)
             return true
         }
         val seq = ++tapSeq
         analyse(pane, page) { recs, _ ->
             if (seq != tapSeq) return@analyse
-            if (recs.indexOf(rec) in cWires) showWireSheet(pane, page, rec, x, y) else pane.selectRec(page, rec)
+            if (isWire(pane, page, rec, recs.indexOf(rec))) showWireSheet(pane, page, rec, x, y) else pane.selectRec(page, rec)
         }
         return true
+    }
+
+    private fun hasCircuit(pane: PageCanvas, page: Int) =
+        pane.finishedView.pages.getOrNull(page)?.recs?.any { it.shape?.symbol?.let { s -> s.group == SymGroup.ECE && s != Sym.WIRE } == true } == true
+
+    /** Can [rec] (record [index] of the analysis) take a current? A Wire symbol always can, a line on a circuit page too; a pen stroke only if the analysis read it as a wire. */
+    private fun isWire(pane: PageCanvas, page: Int, rec: FinishedStrokesView.Rec, index: Int): Boolean {
+        val sp = rec.shape
+        if (sp?.symbol == Sym.WIRE || (index >= 0 && index in cWires)) return true
+        return (sp?.type == ShapeType.LINE || sp?.type == ShapeType.ARROW) && hasCircuit(pane, page)
     }
 
     /** Where the arrow goes on wire [rec] for a tap at ([x],[y]): a point on it and the unit direction there, right/down first. */
@@ -132,7 +142,7 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
             .put(JSONObject().put("key", "rev").put("label", "Arrow points")
                 .put("options", JSONArray().put(if (flat) "→" else "↓").put(if (flat) "←" else "↑")).put("optValues", JSONArray().put("").put("1"))))
         sheetPane = pane
-        sheet.show(comp, JSONObject().put("vars", cNextI), onSave = { values ->
+        sheet.show(comp, JSONObject().put("vars", cNextI.ifEmpty { "ix" }), onSave = { values ->
             val name = values["vars"].orEmpty()
             if (!name.startsWith("i", ignoreCase = true)) Toast.makeText(act, "A current's name starts with i: ix, i1", Toast.LENGTH_SHORT).show()
             else {
@@ -172,7 +182,7 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
 
     private fun showAll(pane: PageCanvas, page: Int, recs: List<FinishedStrokesView.Rec>, syms: List<FinishedStrokesView.Rec>, seen: List<FinishedStrokesView.Rec>, comps: Map<Int, JSONObject>, x: Float) {
         // Wires have no values of their own: a lone selected one offers its current, as a tap does.
-        val wires = recs.filter { seen.indexOf(it).let { i -> i >= 0 && i in cWires } }
+        val wires = recs.filter { isWire(pane, page, it, seen.indexOf(it)) }
         val all = syms.mapNotNull { rec -> comps[seen.indexOf(rec)]?.takeIf { hasFields(it) }?.let { rec to it } }
         // Parts with something to enter, by name (R1, R2, V1); meters and grounds only have a name to set.
         val valued = all.filter { (_, comp) -> (0 until comp.getJSONArray("fields").length()).any { comp.getJSONArray("fields").getJSONObject(it).optString("key") != "name" } }
