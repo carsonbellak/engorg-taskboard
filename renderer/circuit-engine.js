@@ -11,7 +11,8 @@
 // Netlist shape (built from the schematic by circuitLab, or by hand in tests):
 //   { nodes: ['0', 'in', 'out', …],           // index 0 is ground
 //     parts: [{ id, ref, type, n: [nodeIdx…], p: { …props } }] }
-// Types / pins: R C L D LED (a,b) · V I (+,−) · OA (in−, in+, out) · DS (+,−).
+// Types / pins: R C L D LED (a,b) · V I (+,−) · OA (in−, in+, out) · DS (+,−) · SW (a,b).
+// SW = timed switch: p.before 'closed' | 'open' until p.at seconds, the other way after (t = at still reads before).
 // DS = dependent source: p.out 'V' | 'I' (I flows + → − through it), its value the sum of p.ctrl
 // terms, each { k, v: [nodeA, nodeB] } (k·(V(a) − V(b))) or { k, i: partId } (k·that part's current,
 // which must be an R, C, L, V or voltage-output DS). Written for DC and AC; a C's current reads 0 in transient.
@@ -43,12 +44,19 @@ const CircuitEngine = (() => {
     return v.toExponential(2) + ' ' + unit;
   }
 
+  // Is t past the event at `at`? A time step landing on an event can overshoot it by rounding, and
+  // that landing has to read the moment before it, so the comparison allows for that.
+  const pastEvent = (t, at) => t > at + Math.abs(at) * 1e-11;
+
   // ---- source waveforms -----------------------------------------------------
-  // p.wave: 'dc' | 'sine' | 'pulse' | 'square' | 'tri'. DC op uses value(t = 0).
+  // p.wave: 'dc' | 'sine' | 'pulse' | 'square' | 'tri' | 'steps'. DC op uses value(t = 0).
+  // 'steps' = p.dc + each p.steps { k, at, rev }: k·u(t − at), or k·u(at − t) with rev. t = at reads
+  // the moment before the step, so a step at 0 is off at the operating point and on just after it.
   function sourceValue(p, t) {
     const dc = parseSI(p.dc != null ? p.dc : p.value) || 0;
     const amp = parseSI(p.amp) || 0, freq = parseSI(p.freq) || 0;
     switch (p.wave) {
+      case 'steps': return (p.steps || []).reduce((sum, q) => sum + (pastEvent(t, q.at) !== !!q.rev ? q.k : 0), dc);
       case 'sine': {
         const ph = (parseSI(p.phase) || 0) * Math.PI / 180;
         return dc + amp * Math.sin(2 * Math.PI * freq * t + ph);
@@ -79,6 +87,7 @@ const CircuitEngine = (() => {
   // Waveform edges, so the transient step lands on them instead of skipping over them.
   function breakpoints(p, tStop) {
     const out = [];
+    if (p.wave === 'steps') return (p.steps || []).map(q => q.at);
     if (p.wave !== 'pulse' && p.wave !== 'square') return out;
     const freq = parseSI(p.freq) || 0;
     const per = p.wave === 'square' ? (freq > 0 ? 1 / freq : 0) : (parseSI(p.period) || 0);
@@ -88,6 +97,11 @@ const CircuitEngine = (() => {
     for (let k = 0, t0 = delay; t0 <= tStop && k < 5000; k++, t0 += per) out.push(t0, t0 + tr, t0 + per * duty, t0 + per * duty + tr);
     return out;
   }
+
+  // ---- timed switches ---------------------------------------------------------
+  const SW_ON = 1e-6, SW_OFF = 1e12;
+  const switchClosed = (p, t) => pastEvent(t, p.at) !== (p.before === 'closed');
+  const switchG = (q, t) => 1 / (switchClosed(q.p, t) ? SW_ON : SW_OFF);
 
   // ---- part parameters ------------------------------------------------------
   const LED_COLORS = { red: [1e-18, 1.9], green: [1e-21, 2.0], blue: [1e-25, 3.5], yellow: [1e-19, 2.1], white: [1e-25, 3.3] };
@@ -276,6 +290,7 @@ const CircuitEngine = (() => {
         const [a, b] = q.n;
         switch (q.type) {
           case 'R': stampG(A, a, b, 1 / q.R); break;
+          case 'SW': stampG(A, a, b, switchG(q, ctx.t || 0)); break;
           case 'C':
             if (mode === 'tran') {
               const st = ctx.cap[q.id];
@@ -356,6 +371,7 @@ const CircuitEngine = (() => {
       let i = 0;
       switch (q.type) {
         case 'R': i = v / q.R; break;
+        case 'SW': i = v * switchG(q, ctx.t || 0); break;
         case 'C':
           if (mode === 'tran') {
             const st = ctx.cap[q.id];
@@ -446,7 +462,10 @@ const CircuitEngine = (() => {
       if (q.type === 'L') ctx.ind[q.id] = { i: opts.uic ? 0 : x[q.br], v: 0 };
     }
     const bps = [];
-    for (const q of sys.parts) if (q.type === 'V' || q.type === 'I') bps.push(...breakpoints(q.p, tStop));
+    for (const q of sys.parts) {
+      if (q.type === 'V' || q.type === 'I') bps.push(...breakpoints(q.p, tStop));
+      if (q.type === 'SW') bps.push(q.p.at);
+    }
     const bpSet = [...new Set(bps.filter(t => t > 0 && t < tStop).map(t => +t.toPrecision(12)))].sort((a, b) => a - b);
 
     const time = [0];
@@ -673,7 +692,7 @@ const CircuitEngine = (() => {
     return { lowDb: db[0], highDb: db[db.length - 1], peakDb: ref, peakF: freq[pk], fLow, fHigh, fUnity, phaseAtUnity };
   }
 
-  return { parseSI, fmtSI, sourceValue, operatingPoint, transient, acSweep, thevenin, measure, bodeSummary, LED_COLORS };
+  return { parseSI, fmtSI, sourceValue, switchClosed, SW_ON, SW_OFF, operatingPoint, transient, acSweep, thevenin, measure, bodeSummary, LED_COLORS };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = CircuitEngine;

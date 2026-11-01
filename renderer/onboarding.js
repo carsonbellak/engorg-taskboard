@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.10': {
+      title: "What's new",
+      intro: 'EngInk circuits now work through time.',
+      slides: [
+        { emoji: '🔀', title: 'Timed switches', body: 'Tap a switch and choose "opens at t" or "closes at t". It draws in textbook style, with a motion arrow showing which way the blade moves and t = 0 beside it.' },
+        { emoji: '📈', title: 'Unit steps and time response', body: 'Give a source a step like 10u(t − 1). The Analyze panel then shows each variable just before and after every event and where it settles, with τ, the x(t) formula when there is one capacitor or inductor, and plots.' },
+      ],
+    },
     '1.6.7': {
       title: "What's new",
       intro: 'EngInk circuits: wire currents, correct polarity, tidy labels.',

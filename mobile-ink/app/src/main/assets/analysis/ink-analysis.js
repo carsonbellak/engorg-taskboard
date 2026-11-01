@@ -18,6 +18,8 @@
 // wire's current; circuit() does that on its own copy of the wires.
 // Circuits → CircuitEngine (DC operating point + phasors at the AC source frequency; AC voltage and
 // current sources). Vn+ / Vn− probe symbols read Vn = V(+) − V(−) wherever their tips touch.
+// A timed switch or a u(t − a) source adds a time response: the steady state before the first event
+// is the DC analysis, then each event gets its a⁻ / a⁺ / final values, τ and x(t), and a transient run plots them.
 // Thermo flow devices are walked inlet → outlet (flow runs left → right through each symbol, as
 // drawn in Symbols.kt) to find the cycle, which is classified (Rankine ± reheat, Brayton, vapor-
 // compression) and solved with ThermoEngine, states numbered as in Moran & Shapiro. Hot / cold
@@ -238,7 +240,7 @@ const InkAnalysis = (() => {
   // ---- value fields (contract §3: keypad + unit buttons for every field) ------------------------------
   const UNIT_SPEC = {
     'Ω': ['si', ['Ω']], F: ['si', ['F']], H: ['si', ['H']], V: ['si', ['V']], A: ['si', ['A']], Hz: ['si', ['Hz']],
-    '°': ['num', ['°']], kPa: ['num', ['kPa', 'MPa', 'bar']], '°C': ['num', ['°C', 'K']], '%': ['num', ['%']],
+    s: ['si', ['s']], '°': ['num', ['°']], kPa: ['num', ['kPa', 'MPa', 'bar']], '°C': ['num', ['°C', 'K']], '%': ['num', ['%']],
     MW: ['num', ['MW', 'kW']], kW: ['num', ['kW', 'MW']], kJ: ['num', ['kJ', 'MJ']], 'kg/s': ['num', ['kg/s']], 'm/s': ['num', ['m/s']],
     kg: ['num', ['kg']], N: ['num', ['N', 'kN']], m: ['num', ['m']],
   };
@@ -289,16 +291,16 @@ const InkAnalysis = (() => {
       case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg, 1/2' }), vr, nm];
       case 'CAPACITOR': case 'CAP_POLAR': return [f('value', 'Capacitance', 'F', '1u', { hint: 'e.g. 100n, 10u, 1/4' }), vr, nm];
       case 'INDUCTOR': return [f('value', 'Inductance', 'H', '1m', { hint: 'e.g. 10m, 1/2' }), vr, nm];
-      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', src('+ is at the end you dragged to. A variable makes it dependent: 2ix')), vr, nm];
+      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', src('+ is at the end you dragged to. A variable makes it dependent: 2ix')), ...stepFields(f), vr, nm];
       case 'BATTERY': return [f('value', 'Voltage', 'V', '9', src('')), vr, nm];
       case 'VSOURCE_DEP': return [f('value', 'Value', 'V', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. + is at the end you dragged to') }), vr, nm];
       case 'ISOURCE_DEP': return [f('value', 'Value', 'A', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. Flows the way the arrow points') }), vr, nm];
       case 'VSOURCE_AC': return [f('amp', 'Amplitude (peak)', 'V', '10'), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
       case 'ISOURCE_AC': return [f('amp', 'Amplitude (peak)', 'A', '1m', { hint: 'flows the way the arrow points' }), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
-      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('flows the way the arrow points. A variable makes it dependent: 2Vx')), vr, nm];
+      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('flows the way the arrow points. A variable makes it dependent: 2Vx')), ...stepFields(f), vr, nm];
       case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), vr, nm];
       case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), vr, nm];
-      case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open'] }), vr, nm];
+      case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open', 'opens at t', 'closes at t'], optValues: ['closed', 'open', 'opens', 'closes'] }), f('t', 'Switches at t =', 's', '0', { hint: 'For a switch that opens or closes' }), vr, nm];
       case 'OPAMP': return [f('vsat', 'Output limit ±', 'V', '15'), f('gain', 'Open-loop gain', '', '100k', { keypad: 'si' }), nm];
       case 'PROBE_POS': case 'PROBE_NEG': return [f('n', 'Probe number', '', '1', { keypad: 'num', hint: `V${probeNum(s)}+ pairs with V${probeNum(s)}− — reads V(+) − V(−), and 2V${probeNum(s)} works as a source value` })];
       case 'AMMETER': case 'VOLTMETER': return [vr, nm];
@@ -306,6 +308,16 @@ const InkAnalysis = (() => {
       default: return [nm];
     }
   }
+  // A source's unit step: 10 with u(t − a) and a = 1 is 10u(t − 1).
+  const stepFields = (f) => [f('step', 'Unit step', '', '', { options: ['none', 'u(t − a)', 'u(a − t)'], optValues: ['', 'on', 'off'] }), f('a', 'Step time a', 's', '0')];
+  const stepTime = (p) => { const a = blank(p.a) ? 0 : siVal(p.a, 's'); return isFinite(a) ? a : 0; };
+  function stepText(p) {
+    const a = stepTime(p), n = +Math.abs(a).toPrecision(3);
+    if (p.step === 'off') return a ? `u(${+a.toPrecision(3)} − t)`.replace('(-', '(−') : 'u(−t)';
+    return a ? `u(t ${a > 0 ? '−' : '+'} ${n})` : 'u(t)';
+  }
+  const timedSwitch = (p) => p.state === 'opens' || p.state === 'closes';
+  const switchTime = (p) => { const t = blank(p.t) ? 0 : siVal(p.t, 's'); return isFinite(t) ? t : 0; };
   // A wire current's sheet: its name and which way the arrow points, in page terms.
   function currentFields(s, f) {
     const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
@@ -345,19 +357,23 @@ const InkAnalysis = (() => {
       if (isFinite(n) && typed.includes('/')) return typed.replace(new RegExp('\\s*' + u + '$'), '') + ' ' + u;
       return isFinite(n) ? si(n, u) : p[k] + ' ' + u;
     };
+    // "10 V" with a step reads 10u(t − 1) V.
+    const stepped = (txt) => { if (blank(p.step) || !txt || varExpr(p.value)) return txt; const k = txt.lastIndexOf(' '); return k < 0 ? txt + stepText(p) : txt.slice(0, k) + stepText(p) + txt.slice(k); };
     const acLabel = (u, defAmp) => (blank(p.amp) && blank(p.freq) ? '' : `${si(siVal(v('amp', defAmp), u), u)} ${si(siVal(v('freq', 60), 'Hz'), 'Hz')}` + (siVal(p.phase, '°') ? ` ∠${siVal(p.phase, '°')}°` : ''));
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return val('value', 'Ω');
       case 'CAPACITOR': case 'CAP_POLAR': return val('value', 'F');
       case 'INDUCTOR': return val('value', 'H');
-      case 'VSOURCE': case 'BATTERY': case 'VSOURCE_DEP': return val('value', 'V');
-      case 'ISOURCE': case 'ISOURCE_DEP': return val('value', 'A');
+      case 'VSOURCE': return stepped(val('value', 'V'));
+      case 'BATTERY': case 'VSOURCE_DEP': return val('value', 'V');
+      case 'ISOURCE': return stepped(val('value', 'A'));
+      case 'ISOURCE_DEP': return val('value', 'A');
       case 'VSOURCE_AC': return acLabel('V', 10);
       case 'ISOURCE_AC': return acLabel('A', '1m');
       case 'PROBE_POS': case 'PROBE_NEG': return probeName(s);
       case 'DIODE': return p.model || '';
       case 'LED': return p.color ? p.color + ' LED' : '';
-      case 'SWITCH': return p.state === 'open' ? 'open' : '';
+      case 'SWITCH': return timedSwitch(p) ? (switchTime(p) ? `t = ${si(switchTime(p), 's')}` : 't = 0') : p.state === 'open' ? 'open' : '';
       default: return '';
     }
   }
@@ -477,6 +493,8 @@ const InkAnalysis = (() => {
       };
       const id = 'p' + s.i;
       let ep = null;
+      // A plain source's waveform: its value, or that value times a unit step.
+      const wave = (v) => (blank(p.step) ? { wave: 'dc', dc: v } : { wave: 'steps', dc: 0, steps: [{ k: v, at: stepTime(p), rev: p.step === 'off' }] });
       // A source whose value is written in variables is a dependent source (pins as the plain one's: + at t1, I flows t0 → t1).
       const dep = (isV) => {
         const expr = varExpr(p.value);
@@ -487,7 +505,7 @@ const InkAnalysis = (() => {
         case 'RESISTOR': case 'RESISTOR_BOX': ep = { type: 'R', n: pins, p: { value: need('value', '1k', 'resistance', 'Ω') } }; break;
         case 'CAPACITOR': case 'CAP_POLAR': ep = { type: 'C', n: pins, p: { value: need('value', '1u', 'capacitance', 'F') } }; break;
         case 'INDUCTOR': ep = { type: 'L', n: pins, p: { value: need('value', '1m', 'inductance', 'H') } }; break;
-        case 'VSOURCE': case 'BATTERY': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', s.sym === 'BATTERY' ? '9' : '5', 'voltage', 'V') } }; break;
+        case 'VSOURCE': case 'BATTERY': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: s.sym === 'VSOURCE' ? wave(need('value', '5', 'voltage', 'V')) : { wave: 'dc', dc: need('value', '9', 'voltage', 'V') } }; break;
         case 'VSOURCE_DEP': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', '0', 'value', 'V') } }; break;
         case 'ISOURCE_DEP': ep = dep(false) || { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '0', 'value', 'A') } }; break;
         case 'VSOURCE_AC': case 'ISOURCE_AC': {
@@ -503,10 +521,13 @@ const InkAnalysis = (() => {
             : { type: 'I', n: pins, p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } };
           break;
         }
-        case 'ISOURCE': ep = dep(false) || { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '1m', 'current', 'A') } }; break;
+        case 'ISOURCE': ep = dep(false) || { type: 'I', n: pins, p: wave(need('value', '1m', 'current', 'A')) }; break;
         case 'DIODE': ep = { type: 'D', n: pins, p: { ...(DIODE_MODELS[p.model] || DIODE_MODELS['1N4148']) } }; break;
         case 'LED': ep = { type: 'LED', n: pins, p: { color: p.color || 'red' } }; break;
-        case 'SWITCH': if (p.state !== 'open') ep = { type: 'R', n: pins, p: { value: '1m' } }; break;
+        case 'SWITCH':
+          if (timedSwitch(p)) ep = { type: 'SW', n: pins, p: { at: switchTime(p), before: p.state === 'opens' ? 'closed' : 'open' } };
+          else if (p.state !== 'open') ep = { type: 'R', n: pins, p: { value: CE.SW_ON } };
+          break;
         case 'AMMETER': ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } }; break;
         case 'CURRENT':
           if (pins[0] !== pins[1]) ep = { type: 'V', n: pins, p: { wave: 'dc', dc: 0 } };
@@ -682,8 +703,93 @@ const InkAnalysis = (() => {
     if (meterRows.length) blocks.push({ t: 'table', title: 'Meter readings', head: ['Meter', 'Reads', 'Value'], rows: meterRows });
     blocks.push({ t: 'table', title: 'Node voltages', head: ['Node', 'DC', ...(ac ? ['AC phasor'] : [])], rows: nodeRows });
     blocks.push({ t: 'table', title: 'Components', head: ['Part', 'Value', 'V', 'I', 'P', ...(ac ? ['AC current'] : [])], rows: compRows });
+    const events = [...new Set(eparts.flatMap(ep => (ep.type === 'SW' ? [ep.p.at] : ep.p && ep.p.wave === 'steps' ? ep.p.steps.map(q => q.at) : [])))].filter(t => t >= 0).sort((a, b) => a - b);
+    if (events.length) blocks.push({ t: 'note', text: (ac ? 'Time responses aren\'t worked out alongside AC sources. ' : '') + `These DC values are the steady state before t = ${si(events[0], 's')}, as if it had been like this for a long time.` });
     blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + '; the DC part is shown separately. ' : '') + 'In the Components table V is measured from the + end and I runs + to − through the part (the first terminal counts as + on parts with no mark), so P < 0 means the part delivers power. Variables follow their own arrows and + marks. Ideal op-amps saturate at ±V_sat.' });
     out.analyses.push({ title: ac ? 'Circuit — DC + AC phasor analysis' : 'Circuit — DC analysis', blocks });
+    if (events.length && !ac) out.analyses.push({ title: 'Time response', blocks: timeResponse(nl, events, order, comp, varTab) });
+  }
+
+  // What a timed circuit does: at each switching or step time, every named variable (and each C's
+  // voltage and L's current) just before, just after and where it settles, with τ and x(t) when
+  // there's one energy-storing part, plus a transient plot.
+  function timeResponse(nl, events, order, comp, varTab) {
+    const { nodes, parts } = nl;
+    const reactive = parts.filter(ep => ep.type === 'C' || ep.type === 'L');
+    const linear = !parts.some(ep => ep.type === 'D' || ep.type === 'LED' || ep.type === 'OA');
+    // The circuit with time stopped just after t.
+    const frozen = (t) => parts.map(ep => {
+      if (ep.type === 'SW') return { ...ep, type: 'R', p: { value: CE.switchClosed(ep.p, t) ? CE.SW_ON : CE.SW_OFF } };
+      if (ep.p && ep.p.wave === 'steps') return { ...ep, p: { wave: 'dc', dc: CE.sourceValue(ep.p, t) } };
+      return ep;
+    });
+    const justAfter = (t) => t + Math.max(Math.abs(t), 1) * 1e-9;
+    const opSol = (o) => { const m = new Map(o.parts.map(r => [r.id, r])); return { v: (k) => (k ? o.nodes[nodes[k]] || 0 : 0), i: (id) => (m.get(id) || { i: 0 }).i }; };
+    // τ of one energy-storing part: R seen from it (sources off, dependents on) with a 1 A test current.
+    const tauOf = (frozenParts, r) => {
+      const test = frozenParts.map(ep => (ep.id === r.id ? { ...ep, type: 'I', p: { wave: 'dc', dc: 1 } } : (ep.type === 'V' || ep.type === 'I') ? { ...ep, p: { wave: 'dc', dc: 0 } } : ep));
+      const o = CE.operatingPoint({ nodes, parts: test });
+      if (o.error) return null;
+      const R = -o.parts.find(x => x.id === r.id).v;
+      if (!(Math.abs(R) < 1e9)) return null;
+      const tau = r.type === 'C' ? r.p.value * R : (R ? r.p.value / R : null);
+      return tau == null ? null : { tau, R };
+    };
+    const watch = [...varTab.values()].map(t => ({ ...t, unit: t.v ? 'V' : 'A' }));
+    for (const s of order) {
+      const c = comp.get(s);
+      if (!c.ep || (c.ep.type !== 'C' && c.ep.type !== 'L')) continue;
+      const wantV = c.ep.type === 'C';
+      if (partVars(s.props).some(v => /^v/i.test(v.name) === wantV)) continue;   // already on the list by its own name
+      watch.push(wantV ? { name: 'v_' + c.name, v: [c.pins[0], c.pins[1]], sign: 1, unit: 'V' } : { name: 'i_' + c.name, i: c.id, sign: 1, unit: 'A' });
+    }
+    const read = (w, sol) => (w.v ? sol.v(w.v[0]) - sol.v(w.v[1]) : sol.i(w.i)) * w.sign;
+    // Run long enough to see the last event settle (longest τ of any stage, a few times over).
+    const taus = events.map(e => reactive.reduce((sum, r) => { const k = tauOf(frozen(justAfter(e)), r); return sum + (k ? Math.abs(k.tau) : 0); }, 0));
+    const last = events[events.length - 1], settle = 6 * taus[taus.length - 1];
+    const tStop = last + (settle > 0 ? settle : Math.max(last * 0.5, 1));
+    const tr = CE.transient(nl, { tStop, points: 1500 });
+    if (tr.error) return [{ t: 'err', text: tr.error }];
+    const trSol = (j) => ({ v: (k) => (k ? tr.nodes[nodes[k]][j] : 0), i: (id) => tr.currents[id][j] });
+    const out = [];
+    events.forEach((e, n) => {
+      const j = tr.time.reduce((best, t, k) => (t <= e + tStop * 1e-9 ? k : best), 0);   // the last sample before it happens
+      const before = trSol(j), now = frozen(justAfter(e));
+      // Just after: capacitor voltages and inductor currents can't jump, so hold them and solve the rest.
+      const holdC = (ep) => ({ ...ep, type: 'V', p: { wave: 'dc', dc: before.v(ep.n[0]) - before.v(ep.n[1]) } });
+      const held = CE.operatingPoint({ nodes, parts: now.map(ep => (ep.type === 'C' ? holdC(ep) : ep.type === 'L' ? { ...ep, type: 'I', p: { wave: 'dc', dc: before.i(ep.id) } } : ep)) });
+      const after = held.error ? trSol(Math.min(j + 1, tr.time.length - 1)) : opSol(held);
+      // Where it settles. A capacitor with nowhere to discharge simply keeps its voltage.
+      const final = CE.operatingPoint({ nodes, parts: now.map(ep => (ep.type === 'C' && !tauOf(now, ep) ? holdC(ep) : ep)) });
+      const end = final.error ? null : opSol(final);
+      const simple = linear && reactive.length === 1, one = simple ? tauOf(now, reactive[0]) : null, holds = simple && !one && reactive[0].type === 'C';
+      const at = e ? si(e, 's') : '0', arg = e ? `(t − ${+e.toPrecision(4)})` : 't';
+      const form = (x0, xf, unit) => {
+        if (!end) return null;
+        if (!one || Math.abs(x0 - xf) < 1e-6 * (Math.abs(xf) + Math.abs(x0))) return si(xf, unit);
+        const K = x0 - xf, nf = +xf.toPrecision(4);
+        return `${nf ? nf + (K < 0 ? ' − ' : ' + ') : K < 0 ? '−' : ''}${+Math.abs(K).toPrecision(4)}e^(−${arg}/${+one.tau.toPrecision(3)}) ${unit}`;
+      };
+      const rows = watch.map(w => {
+        // An open switch leaks a few pA in the model; a value that small next to the rest of the row is zero.
+        const raw = [read(w, before), read(w, after), end ? read(w, end) : 0], big = Math.max(...raw.map(Math.abs));
+        const [a, b, f] = raw.map(v => (Math.abs(v) < 1e-6 * big ? 0 : v));
+        return [w.name, si(a, w.unit), si(b, w.unit), end ? si(f, w.unit) : '—', ...(one || holds ? [form(b, f, w.unit) || '—'] : [])];
+      });
+      if (one && one.tau > 0) out.push({ t: 'cards', items: [['τ after t = ' + at, si(one.tau, 's')], ['R seen by ' + (reactive[0].ref || 'the part'), si(one.R, 'Ω')]] });
+      else if (one) out.push({ t: 'warn', text: `After t = ${at} the circuit is unstable: its time constant comes out negative.` });
+      out.push({ t: 'table', title: `At t = ${at}`, head: ['Variable', `t = ${at}⁻`, `t = ${at}⁺`, n < events.length - 1 ? 'Heading to' : 't → ∞', ...(one || holds ? [`For t > ${at}`] : [])], rows });
+      if (holds) out.push({ t: 'note', text: `After t = ${at} the capacitor has nowhere to discharge, so it keeps its voltage.` });
+    });
+    if (reactive.length > 1) out.push({ t: 'note', text: 'With more than one capacitor or inductor there\'s no single τ, so the plots are the answer here.' });
+    if (!linear) out.push({ t: 'note', text: 'With a diode or op-amp in the circuit there\'s no single τ, so the plots are the answer here.' });
+    const stride = Math.max(1, Math.ceil(tr.time.length / 260));
+    for (const w of watch.slice(0, 4)) {
+      const pts = [[-0.08 * tStop, read(w, trSol(0))]];
+      for (let j = 0; j < tr.time.length; j += stride) pts.push([tr.time[j], read(w, trSol(j))]);
+      out.push({ t: 'plot', title: w.name.replace(/_/g, '') + '(t)', xLabel: 't (s)', yLabel: w.unit, polys: [{ pts, tone: 'cold' }] });
+    }
+    return out;
   }
 
   // =========================================================================================
@@ -1252,6 +1358,8 @@ const InkAnalysis = (() => {
     const all = (page.symbols || []).map(s => ({ ...s, props: s.props || {} }));
     // A wire-current arrow is drawn beside its wire (Symbols.kt), so it's as wide as that for placement.
     for (const s of all) if (s.sym === 'CURRENT') s.half = 13;
+    // A timed switch's motion arrow rises well above its body.
+    for (const s of all) if (s.sym === 'SWITCH' && timedSwitch(s.props)) s.half = 20;
     const wires = [];
     // WIRE symbols are just straight wires t0 → t1, so every analyser (circuit nets, thermo pipes,
     // mechanics ropes) sees them as lines.

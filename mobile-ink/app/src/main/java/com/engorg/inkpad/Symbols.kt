@@ -204,11 +204,13 @@ object Symbols {
      * The parts of [sym] placed by [verts]. INLINE: terminals verts[0]→verts[1], body at [k]× its
      * standard size (shrunk to fit a short span). BOX: fills the box verts[0]–verts[1]. STRIP: along
      * the line verts[0]→verts[1]. [rot] is the shape's rotation, so the upright glyphs can be counter-turned.
-     * [reversed] turns a CURRENT arrow to point at the first terminal.
+     * [props] are the symbol's values, for the few that change its drawing: a CURRENT arrow's
+     * `rev` (points at the first terminal) and a SWITCH's `state` ("opens" / "closes" draws its motion arrow).
      */
-    fun parts(sym: Sym, verts: List<PointF>, k: Float, rot: Float, reversed: Boolean = false): List<ShapeSpec.Part> {
+    fun parts(sym: Sym, verts: List<PointF>, k: Float, rot: Float, props: org.json.JSONObject? = null): List<ShapeSpec.Part> {
         val a = verts[0]; val b = verts[1]
-        if (sym.bare) return bareParts(sym, a, b, k, reversed)
+        val state = props?.optString("state").orEmpty()
+        if (sym.bare) return bareParts(sym, a, b, k, props?.optString("rev") == "1")
         if (sym.kind == SymKind.STRIP) {
             val f = StripFrame(sym, a, b, k)
             val bl = Builder({ x, y -> f.map(x, y) }, f.kk, 0f)
@@ -228,12 +230,12 @@ object Symbols {
                 bl.out.add(ShapeSpec.Part(seg(a, PointF(mx - ux * half, my - uy * half))))
                 bl.out.add(ShapeSpec.Part(seg(PointF(mx + ux * half, my + uy * half), b)))
             }
-            draw(sym, bl)
+            draw(sym, bl, state)
             bl.out
         } else {
             val f = BoxFrame(sym, a, b)
             val bl = Builder({ x, y -> f.map(x, y) }, min(f.sx, f.sy), -rot)
-            draw(sym, bl)
+            draw(sym, bl, state)
             bl.out
         }
     }
@@ -333,7 +335,7 @@ object Symbols {
     }
 
     /** Local coords: INLINE runs along +x (−w/2 at the first terminal's side), y is the wire's normal; BOX is centered. */
-    private fun draw(sym: Sym, g: Builder) {
+    private fun draw(sym: Sym, g: Builder, state: String) {
         when (sym) {
             // Bare inline symbols are built straight from their terminals in [bareParts], strips in [drawStrip].
             Sym.WIRE, Sym.CURRENT, Sym.MEMBER, Sym.FORCE -> {}
@@ -371,7 +373,19 @@ object Symbols {
                 g.line(12f, -11f, 12f, 11f)
                 if (sym == Sym.LED) { g.arrow(0f, -13f, 7f, -22f, 4f); g.arrow(6f, -11f, 13f, -20f, 4f) }
             }
-            Sym.SWITCH -> { g.circle(-15f, 0f, 3f); g.circle(15f, 0f, 3f); g.line(-12.5f, -1.5f, 13f, -14f) }
+            Sym.SWITCH -> {
+                g.circle(-15f, 0f, 3f); g.circle(15f, 0f, 3f)
+                if (state == "opens" || state == "closes") {
+                    // Textbook timed switch: the blade hinged at one contact, its motion arrow swinging
+                    // about that hinge, away from the other contact to open, down onto it to close.
+                    val opens = state == "opens"
+                    g.line(12.5f, -1.5f, -13f, -14f)
+                    val a0 = if (opens) 170f else 245f; val a1 = if (opens) 245f else 170f
+                    val e = g.arc(15f, 0f, 20f, 20f, a0, a1)
+                    val t = Math.toRadians(a1.toDouble()); val sg = if (opens) 1f else -1f
+                    g.head(e.x, e.y, -sin(t).toFloat() * sg, cos(t).toFloat() * sg, 5f)
+                } else g.line(-12.5f, -1.5f, 13f, -14f)
+            }
             Sym.AMMETER -> { g.circle(0f, 0f, 16f); g.glyph(Glyph.A, 0f, 0f, 8f) }
             Sym.VOLTMETER -> { g.circle(0f, 0f, 16f); g.glyph(Glyph.V, 0f, 0f, 8f) }
             // Voltmeter probes: the stem's tip (0,14) is the contact point.
