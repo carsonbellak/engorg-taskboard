@@ -1,16 +1,22 @@
 package com.engorg.inkpad
 
+import android.app.Activity
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Process
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
@@ -19,6 +25,7 @@ import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.inputmethod.InputMethodManager
+import android.webkit.JavascriptInterface
 import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -29,6 +36,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.annotation.RequiresApi
 import androidx.core.widget.addTextChangedListener
 
 /**
@@ -36,11 +44,17 @@ import androidx.core.widget.addTextChangedListener
  * plus the one thing a launcher needs that the PWA can't do, a drawer of the installed apps.
  *
  * The drawer is native so the way out of this screen still works when the page doesn't load.
- * Set or undo this from the EngInk library's ⋯ sheet (see [HomeScreen]).
+ * Set or undo this from the PWA's Settings → About (see [HomeBridge]).
  */
 class HomeActivity : MainActivity() {
 
-    private class App(val label: String, val component: ComponentName, val icon: Drawable)
+    private class App(val label: String, val icon: Drawable, val component: ComponentName? = null, val shortcut: ShortcutInfo? = null) {
+        val key = component?.flattenToString() ?: "${shortcut?.`package`}/${shortcut?.id}"
+        // Top of the drawer: added shortcuts, then Chrome, then everything else A–Z.
+        val rank = if (shortcut != null) 0 else if (component?.packageName == CHROME) 1 else 2
+    }
+
+    private val launcherApps by lazy { getSystemService(LauncherApps::class.java) }
 
     private lateinit var handle: ImageButton
     private lateinit var drawer: LinearLayout
@@ -124,7 +138,7 @@ class HomeActivity : MainActivity() {
             adapter = this@HomeActivity.adapter
             setOnItemClickListener { _, _, i, _ -> launch(shown[i]) }
             // Without the stock launcher, this is the quick way to an app's uninstall/settings page.
-            setOnItemLongClickListener { _, _, i, _ -> appInfo(shown[i]); true }
+            setOnItemLongClickListener { _, _, i, _ -> if (shown[i].shortcut != null) removeShortcut(shown[i]) else appInfo(shown[i]); true }
         }
         drawer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; visibility = View.GONE
@@ -174,15 +188,29 @@ class HomeActivity : MainActivity() {
     /** Off the UI thread: loading every icon takes a moment. Own package left out, this is it. */
     private fun loadApps() = Thread {
         val pm = packageManager
-        val list = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+        val installed = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
             .filter { it.activityInfo.packageName != packageName }
-            .map { App(it.loadLabel(pm).toString(), ComponentName(it.activityInfo.packageName, it.activityInfo.name), it.loadIcon(pm)) }
-            .sortedBy { it.label.lowercase() }
+            .map { App(it.loadLabel(pm).toString(), it.loadIcon(pm), component = ComponentName(it.activityInfo.packageName, it.activityInfo.name)) }
+        val list = (pinnedShortcuts() + installed).sortedWith(compareBy({ it.rank }, { it.label.lowercase() }))
         runOnUiThread {
             // An unchanged list keeps the drawer's scroll position.
-            if (!isDestroyed && list.map { it.component } != apps.map { it.component }) { apps = list; filter() }
+            if (!isDestroyed && list.map { it.key } != apps.map { it.key }) { apps = list; filter() }
         }
     }.start()
+
+    /** What's been added with "Add to Home screen". Android only shares these with the current home app. */
+    private fun pinnedShortcuts(): List<App> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !launcherApps.hasShortcutHostPermission()) return emptyList()
+        val query = LauncherApps.ShortcutQuery().setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+        return try {
+            launcherApps.getShortcuts(query, Process.myUserHandle()).orEmpty().map {
+                val icon = launcherApps.getShortcutIconDrawable(it, resources.displayMetrics.densityDpi) ?: packageManager.defaultActivityIcon
+                App((it.shortLabel ?: it.longLabel ?: "Shortcut").toString(), icon, shortcut = it)
+            }
+        } catch (e: IllegalStateException) { // the device is still locked
+            emptyList()
+        }
+    }
 
     private fun filter() {
         val q = search.text.toString().trim()
@@ -192,7 +220,8 @@ class HomeActivity : MainActivity() {
 
     private fun launch(app: App) {
         try {
-            startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            if (app.shortcut != null) launcherApps.startShortcut(app.shortcut, null, null)
+            else startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
                 .setComponent(app.component).addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
             closeDrawer()
         } catch (e: ActivityNotFoundException) {
@@ -200,11 +229,32 @@ class HomeActivity : MainActivity() {
             loadApps()
         } catch (e: SecurityException) {
             Toast.makeText(this, "${app.label} can't be opened.", Toast.LENGTH_SHORT).show()
+        } catch (e: IllegalStateException) { // a shortcut while the device is still locked
+            Toast.makeText(this, "${app.label} can't be opened.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun appInfo(app: App) {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.component.packageName, null)))
+        val pkg = app.component?.packageName ?: return
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null)))
+    }
+
+    /** Unpinning replaces the app's whole pinned list, so the others are passed back in. */
+    private fun removeShortcut(app: App) {
+        val target = app.shortcut ?: return
+        AlertDialog.Builder(this)
+            .setTitle("Remove ${app.label}?")
+            .setPositiveButton("Remove") { _, _ ->
+                val keep = apps.mapNotNull { it.shortcut }.filter { it.`package` == target.`package` && it.id != target.id }.map { it.id }
+                try {
+                    launcherApps.pinShortcuts(target.`package`, keep, Process.myUserHandle())
+                } catch (e: IllegalStateException) {
+                    Toast.makeText(this, "${app.label} can't be removed right now.", Toast.LENGTH_SHORT).show()
+                }
+                loadApps()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private inner class AppAdapter : BaseAdapter() {
@@ -233,6 +283,34 @@ class HomeActivity : MainActivity() {
     private companion object {
         // Taps the PWA's own Calendar tab, which also works when the hotbar has it hidden or under More.
         const val CALENDAR_JS = "document.querySelector('.nav-item[data-navid=\"calendar\"]')?.click()"
+        const val CHROME = "com.android.chrome"
+    }
+}
+
+/**
+ * Where "Add to Home screen" lands (Chrome's, for one) while EngOrg is the home app. Android refuses
+ * those requests if the home app has no such screen. The user already chose to add it, so nothing is asked.
+ */
+@RequiresApi(Build.VERSION_CODES.O)
+class PinShortcutActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val request = getSystemService(LauncherApps::class.java).getPinItemRequest(intent)
+        if (request?.requestType == LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT && request.isValid && request.accept()) {
+            Toast.makeText(this, "Added to your apps.", Toast.LENGTH_SHORT).show()
+        }
+        finish()
+    }
+}
+
+/** Exposed to the PWA as window.AndroidHome, for its Settings. [allowed] as in [FileSaveBridge]. */
+class HomeBridge(private val act: Activity, private val allowed: () -> Boolean) {
+    @JavascriptInterface
+    fun isDefault() = allowed() && HomeScreen.isDefault(act)
+
+    @JavascriptInterface
+    fun openSettings() {
+        if (allowed()) act.runOnUiThread { HomeScreen.openSettings(act) }
     }
 }
 

@@ -113,6 +113,8 @@ open class MainActivity : ComponentActivity() {
             addJavascriptInterface(AuthBridge(), "AndroidAuth")
             // window.AndroidFiles: the PWA's way to save a file to Downloads.
             addJavascriptInterface(FileSaveBridge(applicationContext) { onPwa }, "AndroidFiles")
+            // window.AndroidHome: the PWA's Settings button for using this app as the home screen.
+            addJavascriptInterface(HomeBridge(this@MainActivity) { onPwa }, "AndroidHome")
 
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {

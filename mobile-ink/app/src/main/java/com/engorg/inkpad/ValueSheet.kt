@@ -41,8 +41,9 @@ internal fun analysisRich(s: String): CharSequence {
  * ink-analysis.js `comps[i].fields`) as tappable value boxes, with an on-screen keypad docked at the
  * bottom so numbers never need the system keyboard. Per field (see the analysis contract §3):
  * `options` → chips (`optValues` = what each stores, if not its own text); `keypad: 'si'` → digits + SI-prefix keys (p n µ m k M G); `'num'` → digits only;
- * `units` → unit-suffix buttons (the first is the implied default); `'text'` (or no unit) → a normal
- * text box with the system keyboard. Stored values are the typed strings ("4.7k", "8 MPa", "85 %").
+ * `units` → unit-suffix buttons (the first is the implied default); `pi` → a π key ("2π", "π/4");
+ * `unitOf` on chips → the unit each chip gives another, still empty, field; `'text'` (or no unit) → a
+ * normal text box with the system keyboard. Stored values are the typed strings ("4.7k", "8 MPa", "85 %").
  *
  * [showParts] lists several symbols on one sheet (a lassoed circuit): their value fields under a
  * heading each, with Next running on through all of them and the page left in view beside it.
@@ -78,9 +79,12 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             }
         }
         val keypad: Boolean get() = mode == "si" || mode == "num"
+        val piKey: Boolean = f.optBoolean("pi")
         /** The unit an empty suffix means (shown greyed after the number). */
         val defaultUnit: String = units.firstOrNull() ?: unit.takeIf { u -> u.none { it.isDigit() } }.orEmpty()
         var num = ""; var prefix = ""; var suffix = ""
+        /** The unit a chip gave this field (see [linkUnits]): erasing goes back to it, not to the default. */
+        var baseSuffix = ""
         var text = raw              // chosen option / typed text
         var dirty = false           // untouched values are saved back verbatim
         var edit: EditText? = null
@@ -120,23 +124,29 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             if (mode == "opt") return if (dirty) storedFor(text) else raw.trim()   // an untouched default stays implied
             if (!dirty) return raw.trim()
             val n = num.replace(Regex("[eE][-+]?$"), "").trimEnd('/')
-            if (n.none { it.isDigit() }) return if (suffix in vars) (if (n == "-") "-" else "") + suffix else ""   // a bare Vx
+            if (n.none { it.isDigit() || it == PI }) return if (suffix in vars) (if (n == "-") "-" else "") + suffix else ""   // a bare Vx
             return n + prefix + if (suffix.isNotEmpty()) " $suffix" else ""
         }
 
         // ---- keypad edits ----
         fun digit(d: Char) {
-            if (num.length >= 18) return
+            if (num.length >= 18 || num.endsWith(PI)) return
             num = if (num == "0") "$d" else if (num == "-0") "-$d" else num + d
         }
         fun dot() {
             val tail = num.substringAfter('/')   // the denominator takes its own point
-            if (tail.contains('.') || num.contains('e', ignoreCase = true)) return
+            if (tail.contains('.') || num.endsWith(PI) || num.contains('e', ignoreCase = true)) return
             num += if (tail.none { it.isDigit() }) "0." else "."
         }
-        fun exp() { if (num.any { it.isDigit() } && !num.contains('e', ignoreCase = true) && !num.contains('/')) num += "E" }
-        /** Start the denominator of a fraction: 1/2. */
-        fun frac() { if (num.any { it.isDigit() } && !num.contains('/') && num.last().let { it.isDigit() || it == '.' }) num += "/" }
+        fun exp() { if (num.any { it.isDigit() } && !num.contains('e', ignoreCase = true) && !num.contains('/') && !num.contains(PI)) num += "E" }
+        /** Start the denominator of a fraction: 1/2, π/4. */
+        fun frac() { if (num.any { it.isDigit() || it == PI } && !num.contains('/') && num.last().let { it.isDigit() || it == '.' || it == PI }) num += "/" }
+        /** π after the number: 2π, then / for 2π/3. On a field that takes radians it means radians. */
+        fun pi() {
+            if (num.contains(PI) || num.contains('/') || num.contains('e', ignoreCase = true)) return
+            num = when (num) { "0" -> "$PI"; "-0" -> "-$PI"; else -> num + PI }
+            if ("rad" in units) suffix = "rad"
+        }
         fun minus() {
             num = when {
                 num.endsWith("E") || num.endsWith("e") -> "$num-"
@@ -145,8 +155,8 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
                 else -> "-$num"
             }
         }
-        fun back() { when { suffix.isNotEmpty() -> suffix = ""; prefix.isNotEmpty() -> prefix = ""; else -> num = num.dropLast(1) } }
-        fun clear() { num = ""; prefix = ""; suffix = "" }
+        fun back() { when { suffix.isNotEmpty() && suffix != baseSuffix -> suffix = baseSuffix; prefix.isNotEmpty() -> prefix = ""; else -> num = num.dropLast(1) } }
+        fun clear() { num = ""; prefix = ""; suffix = baseSuffix }
     }
 
     private var scrim: View? = null
@@ -181,6 +191,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             Entry(f, raw).also { e -> if (e.mode == "opt") e.text = e.chipFor(raw) }
         }
         focus = -1
+        entries.forEach { linkUnits(it) }
 
         val c = newCard()
         c.addView(TextView(act).apply { text = analysisRich(comp.optString("title").ifEmpty { comp.optString("name") }); textSize = 17f; setTypeface(null, Typeface.BOLD); setTextColor(onSurface) })
@@ -237,6 +248,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
             }
         }
         focus = -1
+        entries.forEach { linkUnits(it) }
         this.onPart = onPart; this.onClosed = onClosed
 
         val c = newCard()
@@ -357,7 +369,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
                     chips.add(TextView(act).apply {
                         text = v; tag = v; textSize = 14f; gravity = Gravity.CENTER; setPadding(dp(16), 0, dp(16), 0)
                         layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, dp(42)).apply { rightMargin = dp(6) }
-                        setOnClickListener { e.text = v; e.dirty = true; paint(); onPart?.invoke(e.part) }
+                        setOnClickListener { e.text = v; e.dirty = true; paint(); linkUnits(e); onPart?.invoke(e.part) }
                     })
                 }
                 chips.forEach { row.addView(it) }; paint()
@@ -390,6 +402,17 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         return col
     }
 
+    /** Chip field [e] gives another field of its part a unit (`unitOf`). A number already there keeps the unit it was typed in. */
+    private fun linkUnits(e: Entry) {
+        val link = e.f.optJSONObject("unitOf") ?: return
+        val to = entries.firstOrNull { it.part == e.part && it.key == link.optString("key") } ?: return
+        val chip = (0 until (e.options?.length() ?: 0)).firstOrNull { e.options?.optString(it) == e.text } ?: return
+        to.baseSuffix = link.optJSONArray("units")?.optString(chip).orEmpty()
+        if (to.num.isNotEmpty()) return
+        to.suffix = to.baseSuffix
+        if (entries.getOrNull(focus) === to) changed(to) else paintBox(to, false)
+    }
+
     /** A keypad field's box: the number + prefix, a caret while focused, then the unit (greyed if implied). */
     private fun paintBox(e: Entry, focused: Boolean) {
         val box = e.box ?: return
@@ -400,7 +423,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         val sb = SpannableStringBuilder()
         fun span(s: String, color: Int) { val st = sb.length; sb.append(s); sb.setSpan(ForegroundColorSpan(color), st, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
         val untouched = !e.dirty && e.num.isEmpty() && e.prefix.isEmpty()
-        if (untouched && e.suffix.isNotEmpty()) {
+        if (untouched && e.suffix.isNotEmpty() && e.raw.isNotBlank()) {
             span(e.raw, onSurface)          // a value the keypad can't take apart: show it as stored
         } else if (e.num.isEmpty() && e.prefix.isEmpty() && e.suffix.isEmpty()) {
             if (focused) span("▏", AppTheme.accent)
@@ -512,7 +535,10 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         for (d in "123") add(key("$d", K.NUM) { tap { e.digit(d) } })
         add(key("E", K.ACT) { tap { e.exp() } })
         add(key(".", K.NUM) { tap { e.dot() } })
-        add(key("0", K.NUM) { tap { e.digit('0') } }, 3)
+        if (e.piKey) {
+            add(key("0", K.NUM) { tap { e.digit('0') } }, 2)
+            add(key("$PI", K.NUM) { tap { e.pi() } })
+        } else add(key("0", K.NUM) { tap { e.digit('0') } }, 3)
         add(key("Next", K.NEXT) {
             val n = nextKeypadAfter(focus)
             if (n >= 0) setFocus(n) else saveNow?.invoke()
@@ -543,8 +569,9 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         private const val PREFIX_CHARS = "fpnuµμmkKMGT"
         // Units whose values are usually written with SI prefixes (4.7k, 100n, 1m), when a field doesn't say.
         private val SI_UNITS = setOf("Ω", "F", "H", "V", "A", "Hz", "S")
-        // A number as typed (sign, digits, point, exponent or fraction — possibly unfinished), then the rest.
-        private val NUM_RE = Regex("""\s*([-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]*)?(?:(?<=[0-9.])[eE][-+]?[0-9]*)?(?:(?<=[0-9.])/[0-9]*\.?[0-9]*)?)\s*(.*?)\s*""")
+        private const val PI = 'π'
+        // A number as typed (sign, digits, point, exponent, π or fraction — possibly unfinished), then the rest.
+        private val NUM_RE = Regex("""\s*([-+]?(?:[0-9]+\.?[0-9]*|\.[0-9]*)?(?:(?<=[0-9.])[eE][-+]?[0-9]*)?π?(?:(?<=[0-9.π])/[0-9]*\.?[0-9]*)?)\s*(.*?)\s*""")
 
         private fun normPrefix(c: Char): String = when (c) { 'u', 'μ' -> "µ"; 'K' -> "k"; else -> c.toString() }
     }

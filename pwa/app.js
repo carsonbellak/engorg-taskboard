@@ -3494,10 +3494,17 @@ async function copyAsync(btn, label, getText) {
 
 function psetAbout() {
   const email = auth.currentUser?.email || '';
+  // Android app only: window.AndroidHome is mobile-ink's HomeBridge.
+  const home = window.AndroidHome ? `<div class="pset-section">
+    <h3 class="pset-h3">Home screen</h3>
+    <p class="pset-hint">Opens on your calendar, with the tab on the right edge for your other apps. To add a site, use Add to Home screen in Chrome and it shows at the top of that list.</p>
+    <button class="btn-secondary-full" id="pset-home">${window.AndroidHome.isDefault() ? 'Change home screen' : 'Use as home screen'}</button>
+  </div>` : '';
   return `<div class="pset-section">
     <h3 class="pset-h3">About these settings</h3>
     <p class="pset-hint">These preferences apply only to the EngOrg web app and are kept separate from the desktop app. Your theme, hotbar and note defaults sync across your own phones, tablets and browsers &mdash; but never change the desktop.</p>
   </div>
+  ${home}
   <div class="pset-section">
     <h3 class="pset-h3">Account</h3>
     ${email ? `<div class="pset-acct">${escapeHtml(email)}</div>` : ''}
@@ -3550,6 +3557,10 @@ function bindPsetEvents() {
     }));
   const reset = body.querySelector('#pset-hb-reset');
   if (reset) reset.addEventListener('click', () => { savePwaSettings({ navOrder: [], navHidden: [] }); renderPwaSettings(); });
+
+  // Android app: the system screen that picks the home app
+  const homeBtn = body.querySelector('#pset-home');
+  if (homeBtn) homeBtn.addEventListener('click', () => window.AndroidHome.openSettings());
 
   // Note defaults
   const sortSel = body.querySelector('#pset-sort');

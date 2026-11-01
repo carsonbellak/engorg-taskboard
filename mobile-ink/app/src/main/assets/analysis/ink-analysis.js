@@ -198,6 +198,12 @@ const InkAnalysis = (() => {
     let s = String(v == null ? '' : v).trim();
     if (u) s = s.replace(new RegExp('\\s*' + u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), '');
     s = s.replace(/\s*(ohms?|Ω)$/i, '');
+    // π: "2π", "120π", "π/4", "-π/2", "2πk"; below a fraction bar it divides ("1/2π" = 1/(2π)).
+    const at = s.indexOf('π');
+    if (at >= 0) {
+      const n = siVal(s.replace('π', '').trim().replace(/^([-+]?)(?=$|[^\d.])/, (_, sign) => sign + '1'));
+      return s.lastIndexOf('/', at) >= 0 ? n / Math.PI : n * Math.PI;
+    }
     // A fraction: "1/2" = 0.5; a prefix after it scales the whole thing ("1/2k" = 500).
     const fr = s.match(/^([-+]?[\d.]+(?:e[-+]?\d+)?)\s*\/\s*([\d.]+(?:e[-+]?\d+)?)\s*(.*)$/i);
     if (fr) return parseFloat(fr[1]) / parseFloat(fr[2]) * CE.parseSI('1' + fr[3]);
@@ -295,8 +301,8 @@ const InkAnalysis = (() => {
       case 'BATTERY': return [f('value', 'Voltage', 'V', '9', src('')), vr, nm];
       case 'VSOURCE_DEP': return [f('value', 'Value', 'V', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. + is at the end you dragged to') }), vr, nm];
       case 'ISOURCE_DEP': return [f('value', 'Value', 'A', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. Flows the way the arrow points') }), vr, nm];
-      case 'VSOURCE_AC': return [f('amp', 'Amplitude (peak)', 'V', '10'), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
-      case 'ISOURCE_AC': return [f('amp', 'Amplitude (peak)', 'A', '1m', { hint: 'flows the way the arrow points' }), f('freq', 'Frequency', 'Hz', '60'), f('phase', 'Phase', '°', '0'), vr, nm];
+      case 'VSOURCE_AC': return [...acFields(f, f('amp', 'Amplitude A (peak)', 'V', '10')), vr, nm];
+      case 'ISOURCE_AC': return [...acFields(f, f('amp', 'Amplitude A (peak)', 'A', '1m', { hint: 'flows the way the arrow points' })), vr, nm];
       case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('flows the way the arrow points. A variable makes it dependent: 2Vx')), ...stepFields(f), vr, nm];
       case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), vr, nm];
       case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), vr, nm];
@@ -315,6 +321,40 @@ const InkAnalysis = (() => {
     const a = stepTime(p), n = +Math.abs(a).toPrecision(3);
     if (p.step === 'off') return a ? `u(${+a.toPrecision(3)} − t)`.replace('(-', '(−') : 'u(−t)';
     return a ? `u(t ${a > 0 ? '−' : '+'} ${n})` : 'u(t)';
+  }
+  // An AC source's fields: 10 with cos, 2π rad/s and 30° is 10cos(2πt + 30°). Cos and sin forms take
+  // ω unless Hz is tapped, the A∠φ form f (`unitOf` is the unit each chip gives an empty frequency).
+  // Stored strings say "rad/s" or "rad" when they mean it, so a bare number stays Hz or ° as it always was.
+  const acFields = (f, amp) => [
+    f('form', 'Written as', '', '', { options: ['A ∠φ', 'A cos(ωt + φ)', 'A sin(ωt + φ)'], optValues: ['', 'cos', 'sin'], unitOf: { key: 'freq', units: ['', 'rad/s', 'rad/s'] }, hint: 'Results use cos(ωt) as 0°, so sin(ωt + φ) solves as cos(ωt + φ − 90°)' }),
+    amp,
+    f('freq', 'Frequency: ω or f', '', '60', { keypad: 'si', units: ['Hz', 'rad/s'], pi: true, hint: 'Tap the unit. π works here: 2π, 120π, π/4' }),
+    f('phase', 'Phase φ', '', '0', { keypad: 'num', units: ['°', 'rad'], pi: true, hint: 'π makes it radians: π/4' }),
+  ];
+  const acPerSec = (s) => /rad\/s$/.test(s);
+  const acHz = (v) => { const s = String(v).trim(); return acPerSec(s) ? siVal(s, 'rad/s') / (2 * Math.PI) : siVal(s, 'Hz'); };
+  const acInRad = (s) => /rad$/.test(s) || (s.includes('π') && !s.endsWith('°'));
+  const acDeg = (v) => { const s = String(v == null ? '' : v).trim(); return acInRad(s) ? siVal(s, 'rad') * 180 / Math.PI : siVal(s, '°'); };
+  // A value as the problem writes it: π and fractions stay as typed, a prefix is worked out ("2k" → 2000).
+  function acTyped(s, u) {
+    const t = s.endsWith(u) ? s.slice(0, -u.length).trim() : s;
+    if (/^-?[\d.]*π?(\/[\d.]+)?$/.test(t)) return t;
+    const n = siVal(t);
+    if (!isFinite(n)) return t;
+    return t.includes('π') ? +(n / Math.PI).toPrecision(4) + 'π' : String(+n.toPrecision(4));
+  }
+  // The ωt inside the cos: 2πt, 377t, (π/4)t, or 2π·60t when the frequency is in Hz.
+  function acOmegaT(p) {
+    const s = blank(p.freq) ? '60' : String(p.freq).trim(), perSec = acPerSec(s);
+    const k = acTyped(s, perSec ? 'rad/s' : 'Hz'), term = k.includes('/') ? `(${k})` : k;
+    return perSec ? (k === '1' ? 't' : term + 't') : `2π·${term}t`;
+  }
+  // The phase as written, sign apart ({ neg, txt }), or null for 0.
+  function acPhaseText(p) {
+    const s = String(p.phase == null ? '' : p.phase).trim(), deg = acDeg(s);
+    if (!deg) return null;
+    const rad = acInRad(s), k = acTyped(s, rad ? 'rad' : '°').replace(/^[-+]/, '');
+    return { neg: deg < 0, txt: !rad ? k + '°' : k.includes('π') ? k : k + ' rad' };
   }
   const timedSwitch = (p) => p.state === 'opens' || p.state === 'closes';
   const switchTime = (p) => { const t = blank(p.t) ? 0 : siVal(p.t, 's'); return isFinite(t) ? t : 0; };
@@ -359,7 +399,17 @@ const InkAnalysis = (() => {
     };
     // "10 V" with a step reads 10u(t − 1) V.
     const stepped = (txt) => { if (blank(p.step) || !txt || varExpr(p.value)) return txt; const k = txt.lastIndexOf(' '); return k < 0 ? txt + stepText(p) : txt.slice(0, k) + stepText(p) + txt.slice(k); };
-    const acLabel = (u, defAmp) => (blank(p.amp) && blank(p.freq) ? '' : `${si(siVal(v('amp', defAmp), u), u)} ${si(siVal(v('freq', 60), 'Hz'), 'Hz')}` + (siVal(p.phase, '°') ? ` ∠${siVal(p.phase, '°')}°` : ''));
+    // The form it was entered in: 10cos(2πt + 30°) V, or 10 V 60 Hz ∠30°.
+    const acLabel = (u, defAmp) => {
+      const ph = acPhaseText(p), amp = blank(p.amp) ? si(siVal(defAmp, u), u) : val('amp', u);
+      if (p.form === 'cos' || p.form === 'sin') {
+        const k = amp.lastIndexOf(' '), wave = `${p.form}(${acOmegaT(p)}${ph ? ` ${ph.neg ? '−' : '+'} ${ph.txt}` : ''})`;
+        return k < 0 ? amp + wave : amp.slice(0, k) + wave + amp.slice(k);
+      }
+      if (blank(p.amp) && blank(p.freq)) return '';
+      const fs = String(v('freq', 60)).trim(), freq = /π|rad\/s$/.test(fs) ? fs : si(acHz(fs), 'Hz');
+      return `${amp} ${freq}` + (ph ? ` ∠${ph.neg ? '−' : ''}${ph.txt}` : '');
+    };
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return val('value', 'Ω');
       case 'CAPACITOR': case 'CAP_POLAR': return val('value', 'F');
@@ -509,16 +559,20 @@ const InkAnalysis = (() => {
         case 'VSOURCE_DEP': ep = dep(true) || { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: need('value', '0', 'value', 'V') } }; break;
         case 'ISOURCE_DEP': ep = dep(false) || { type: 'I', n: pins, p: { wave: 'dc', dc: need('value', '0', 'value', 'A') } }; break;
         case 'VSOURCE_AC': case 'ISOURCE_AC': {
-          // AC sources: DC part 0, phasor amplitude/phase at the page's AC frequency.
+          // AC sources: DC part 0, phasor amplitude/phase at the page's AC frequency. Every source goes
+          // in on the cosine reference, so a sine is 90° behind its φ and sines and cosines can mix.
           const isV = s.sym === 'VSOURCE_AC';
           const amp = need('amp', isV ? '10' : '1m', 'amplitude', isV ? 'V' : 'A');
-          let f = blank(p.freq) ? 60 : siVal(p.freq, 'Hz');
+          let f = blank(p.freq) ? 60 : acHz(p.freq);
           if (!(f > 0)) { warns.push(`${name}: frequency “${p.freq}” isn't a positive number — using 60 Hz.`); f = 60; }
           if (acFreq == null) acFreq = f; else if (Math.abs(f - acFreq) > 1e-9 * acFreq) warns.push(`${name} runs at a different frequency — phasors are only computed at ${si(acFreq, 'Hz')}.`);
-          const ph = siVal(p.phase, '°') || 0;
+          const deg = blank(p.phase) ? 0 : acDeg(p.phase);
+          if (!isFinite(deg)) unreadable.push(`${name} (“${p.phase}”)`);
+          // The engine only drives a positive `ac`: −5 is 5 at 180°.
+          const ph = (deg || 0) - (p.form === 'sin' ? 90 : 0) + (amp < 0 ? 180 : 0), peak = Math.abs(amp);
           // V: pins swapped so + is t1 (as the DC source); I: current flows t0 → t1, toward the arrow tip.
-          ep = isV ? { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } }
-            : { type: 'I', n: pins, p: { wave: 'dc', dc: 0, ac: amp, acPhase: ph, freq: f } };
+          ep = isV ? { type: 'V', n: [pins[1], pins[0]], p: { wave: 'dc', dc: 0, ac: peak, acPhase: ph, freq: f } }
+            : { type: 'I', n: pins, p: { wave: 'dc', dc: 0, ac: peak, acPhase: ph, freq: f } };
           break;
         }
         case 'ISOURCE': ep = dep(false) || { type: 'I', n: pins, p: wave(need('value', '1m', 'current', 'A')) }; break;
@@ -705,7 +759,8 @@ const InkAnalysis = (() => {
     blocks.push({ t: 'table', title: 'Components', head: ['Part', 'Value', 'V', 'I', 'P', ...(ac ? ['AC current'] : [])], rows: compRows });
     const events = [...new Set(eparts.flatMap(ep => (ep.type === 'SW' ? [ep.p.at] : ep.p && ep.p.wave === 'steps' ? ep.p.steps.map(q => q.at) : [])))].filter(t => t >= 0).sort((a, b) => a - b);
     if (events.length) blocks.push({ t: 'note', text: (ac ? 'Time responses aren\'t worked out alongside AC sources. ' : '') + `These DC values are the steady state before t = ${si(events[0], 's')}, as if it had been like this for a long time.` });
-    blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + '; the DC part is shown separately. ' : '') + 'In the Components table V is measured from the + end and I runs + to − through the part (the first terminal counts as + on parts with no mark), so P < 0 means the part delivers power. Variables follow their own arrows and + marks. Ideal op-amps saturate at ±V_sat.' });
+    const sines = order.some(s => (s.sym === 'VSOURCE_AC' || s.sym === 'ISOURCE_AC') && (s.props || {}).form === 'sin');
+    blocks.push({ t: 'note', text: (ac ? 'Phasors are peak amplitudes at ' + si(acFreq, 'Hz') + ' with cos(ωt) as 0°, so 5 ∠−30° means 5cos(ωt − 30°)' + (sines ? '; a sin source is 90° behind its φ' : '') + '. The DC part is shown separately. ' : '') + 'In the Components table V is measured from the + end and I runs + to − through the part (the first terminal counts as + on parts with no mark), so P < 0 means the part delivers power. Variables follow their own arrows and + marks. Ideal op-amps saturate at ±V_sat.' });
     out.analyses.push({ title: ac ? 'Circuit — DC + AC phasor analysis' : 'Circuit — DC analysis', blocks });
     if (events.length && !ac) out.analyses.push({ title: 'Time response', blocks: timeResponse(nl, events, order, comp, varTab) });
   }

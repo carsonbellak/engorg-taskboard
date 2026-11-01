@@ -10,10 +10,14 @@ A thin native Android shell. It is **not** a second codebase:
   `androidx.ink` front-buffered rendering + motion prediction).
 
 ## Home screen
-The app can be Android's home screen: EngInk library → ⋯ → **Use as home screen**, then pick EngOrg.
+The app can be Android's home screen: Settings → About → **Use as home screen**, then pick EngOrg.
 `HomeActivity` is `MainActivity` opened on the PWA's Calendar tab, and pressing Home returns to the
 calendar. The tab on the right edge opens a native drawer of installed apps (long-press an app for
 its App info page). Undo it from the same button or in Android's default-apps settings.
+
+"Add to Home screen" (from Chrome, say) lands in `PinShortcutActivity`. Those shortcuts sit at the top
+of the drawer, then Chrome. Long-press a shortcut to remove it. Shortcuts added under another home app
+stay with that app and have to be added again.
 
 ## Ink surface behavior
 - **Pen (stylus)** writes — pressure-driven width, front-buffered for minimal latency.
@@ -33,6 +37,9 @@ incline, block and tackle), masses and buoyancy in a water tank. V1+/V1− probe
 across any part. Tap a symbol (select tool) any time to enter its values on the keypad
 (`ValueSheet.kt`, driven by `AnalysisEditor.kt`); values are saved with the symbol as `pr` in the
 page JSON, and the label is placed by the analysis to avoid wires and other labels (`_lx/_ly/_la`).
+AC sources are written as A∠φ, A cos(ωt + φ) or A sin(ωt + φ) (`form`), with the frequency as ω in
+rad/s or f in Hz and a π key for it and the phase (`2π rad/s`, `π/4 rad`); a bare number stays Hz or
+°. All are solved on the cosine reference, so a sine goes in 90° behind its φ.
 - Mechanics: `assets/analysis/ink-mechanics.js` (called from `ink-analysis.js`).
 - Logic: `app/src/main/assets/analysis/ink-analysis.js`, run in a headless WebView (`AnalysisHost.kt`).
 - Solvers: the desktop's `renderer/circuit-engine.js` + `renderer/thermo-engine.js`, copied into the

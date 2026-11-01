@@ -616,18 +616,6 @@ class LibraryActivity : ComponentActivity() {
             })
             setOnClickListener { dialog.dismiss(); InkUpdater.checkNow(this@LibraryActivity) }
         })
-        box.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = pill(AppTheme.elevated)
-            setPadding(dp(16), dp(11), dp(16), dp(11))
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply { topMargin = dp(10) }
-            addView(iconView(Icons.HOME, 20, AppTheme.text).apply { (layoutParams as LinearLayout.LayoutParams).rightMargin = dp(12) })
-            addView(TextView(this@LibraryActivity).apply {
-                text = if (HomeScreen.isDefault(this@LibraryActivity)) "Change home screen" else "Use as home screen"
-                setTextColor(AppTheme.text); textSize = 15f; setTypeface(null, Typeface.BOLD)
-            })
-            setOnClickListener { dialog.dismiss(); HomeScreen.openSettings(this@LibraryActivity) }
-        })
     }
 
     private fun createFolderDialog() = sheet { box, dialog ->

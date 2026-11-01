@@ -18,11 +18,20 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.12': {
+      title: "What's new",
+      intro: 'EngInk AC sources, written the textbook way.',
+      slides: [
+        { emoji: '〰️', title: 'AC sources the way the textbook writes them', body: 'Tap an AC source in EngInk and choose cos or sin, then enter ω with the new π key: 2π, 120π, π/4. It reads 10cos(2πt + 30°) on the page, and sines and cosines solve together on one reference.' },
+        { emoji: '📌', title: 'Add sites to your tablet home screen', body: 'With EngOrg as your home screen, Add to Home screen in Chrome now works. Your shortcuts sit at the top of the app list, with Chrome right after them. Long-press a shortcut to remove it.' },
+        { emoji: '⚙️', title: 'Home screen moved to Settings', body: 'Use as home screen now lives in the app’s Settings, under About, instead of the EngInk library.' },
+      ],
+    },
     '1.6.11': {
       title: "What's new",
       intro: 'Make the tablet app your home screen.',
       slides: [
-        { emoji: '🏠', title: 'Your calendar, right on the home screen', body: 'In the EngInk library, open ⋯ and choose Use as home screen, then pick EngOrg. The Home button now lands on your calendar, and the tab on the right edge opens all your other apps.' },
+        { emoji: '🏠', title: 'Your calendar, right on the home screen', body: 'In Settings, under About, choose Use as home screen, then pick EngOrg. The Home button now lands on your calendar, and the tab on the right edge opens all your other apps.' },
       ],
     },
     '1.6.10': {

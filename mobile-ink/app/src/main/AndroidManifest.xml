@@ -57,6 +57,18 @@
             </intent-filter>
         </activity>
 
+        <!-- Takes "Add to Home screen" requests (Chrome's, for one) while this is the home app. -->
+        <activity
+            android:name=".PinShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.content.pm.action.CONFIRM_PIN_SHORTCUT" />
+            </intent-filter>
+        </activity>
+
         <!-- Notebook browser (launched from the PWA's Ink tab). -->
         <activity
             android:name=".LibraryActivity"
