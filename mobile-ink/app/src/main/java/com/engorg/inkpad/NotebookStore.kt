@@ -34,6 +34,8 @@ class NotebookStore(private val dir: File) {
     fun pageFile(pageId: String) = File(pagesDir(), "page_$pageId.json")
     /** Optional baked background image for a page (e.g. an imported Noteshelf page). */
     fun pageBgFile(pageId: String) = File(pagesDir(), "page_$pageId.bg.png")
+    /** The ink clipboard, kept on disk so a cut survives the app being closed before it's pasted. */
+    fun clipboardFile() = File(dir, "ink_clipboard.json")
 
     init { load() }
 

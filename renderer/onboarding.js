@@ -18,6 +18,14 @@ const onboarding = (() => {
 
   // ---- Curated release highlights (newest entries win in replay) -------------
   const WHATS_NEW = {
+    '1.6.13': {
+      title: "What's new",
+      intro: 'Move ink between EngInk notebooks.',
+      slides: [
+        { emoji: '📑', title: 'Select across pages', body: 'In EngInk, lasso something and tap Select more, then scroll and lasso on any other page, or tap All on page. Zoomed out, one lasso can also take in several pages. Tap empty paper with the lasso to start from a whole page.' },
+        { emoji: '📋', title: 'Cut, copy and paste between notebooks', body: 'Open the right notebook, tap empty paper with the lasso and choose Paste. Ink from several pages goes onto blank pages in the same order, never on top of what is already there, and new pages are added if needed. Cut ink is kept even if you close the app first.' },
+      ],
+    },
     '1.6.12': {
       title: "What's new",
       intro: 'EngInk AC sources, written the textbook way.',

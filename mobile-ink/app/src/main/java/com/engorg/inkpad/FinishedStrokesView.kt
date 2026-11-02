@@ -82,6 +82,8 @@ class FinishedStrokesView(context: Context) : View(context) {
         FILL("Fill"),
         // Second row, shown when the selection holds class symbols: enter their values.
         VALUES("Values"),
+        // Building a selection across pages (see setMultiSelection).
+        SELECT_MORE("Select more"), ALL_ON_PAGE("All on page"), SEL_CLEAR("Clear"),
     }
 
     companion object {
@@ -367,6 +369,9 @@ class FinishedStrokesView(context: Context) : View(context) {
     private val ringBox = RectF()
     private var pasteMenuPage = -1
     private val pasteMenuAt = PointF()
+    private var pasteMenu: List<MenuAction> = emptyList()
+    private var multiBoxes: List<Pair<Int, RectF>> = emptyList()   // a selection across pages: one page-local box per page
+    private var multiMenu: List<MenuAction> = emptyList()
     private val menuHits = ArrayList<Pair<MenuAction, RectF>>()   // screen-space, rebuilt every draw
 
     private val density = resources.displayMetrics.density
@@ -399,16 +404,22 @@ class FinishedStrokesView(context: Context) : View(context) {
     fun contentHeight(): Float = docHeight() + if (showAddPage) GAP + ADD_TILE_H else 0f
 
     fun setSelection(page: Int, box: RectF?, handles: List<PointF>?, menu: List<MenuAction>, tableMenu: List<MenuAction> = emptyList(), orbit: Boolean = false) {
-        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; this.tableMenu = tableMenu; this.orbit = orbit; invalidate()
+        selPage = page; selBox = box; vertexHandles = handles; selMenu = menu; this.tableMenu = tableMenu; this.orbit = orbit
+        multiBoxes = emptyList(); multiMenu = emptyList(); invalidate()
     }
-    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); orbit = false; pasteMenuPage = -1; menuHits.clear(); invalidate() }
+    /** A selection across pages: a plain box per page ([boxes] = page to page-local box), and a menu pinned to the pane so it stays in reach while you scroll. */
+    fun setMultiSelection(boxes: List<Pair<Int, RectF>>, menu: List<MenuAction>) {
+        selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); orbit = false
+        multiBoxes = boxes; multiMenu = menu; invalidate()
+    }
+    fun clearSelection() { selPage = -1; selBox = null; vertexHandles = null; selMenu = emptyList(); tableMenu = emptyList(); orbit = false; multiBoxes = emptyList(); multiMenu = emptyList(); pasteMenuPage = -1; menuHits.clear(); invalidate() }
     fun setLasso(pts: List<PointF>?) { lasso = pts; invalidate() }
 
     /** Ring the page-local [box] on [page], or nothing when it's null (which part a multi-part value sheet is on). */
     fun setRing(page: Int, box: RectF?) { ringPage = if (box != null) page else -1; box?.let { ringBox.set(it) }; invalidate() }
 
-    /** Show a lone "Paste" pill anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
-    fun showPasteMenu(page: Int, x: Float, y: Float) { pasteMenuPage = page; pasteMenuAt.set(x, y); invalidate() }
+    /** Show the empty-paper pill ([actions]: Paste, All on page) anchored at page-local ([x],[y]) on [page] (follows pan/zoom). */
+    fun showPasteMenu(page: Int, x: Float, y: Float, actions: List<MenuAction>) { pasteMenuPage = page; pasteMenuAt.set(x, y); pasteMenu = actions; invalidate() }
     fun pasteMenuShowing() = pasteMenuPage >= 0
     fun pasteMenuAnchor(): Pair<Int, PointF>? = if (pasteMenuPage >= 0) pasteMenuPage to PointF(pasteMenuAt.x, pasteMenuAt.y) else null
 
@@ -772,7 +783,17 @@ class FinishedStrokesView(context: Context) : View(context) {
         menuHits.clear()
         if (pasteMenuPage >= 0) {
             val px = sx(pasteMenuPage, pasteMenuAt.x); val py = sy(pasteMenuPage, pasteMenuAt.y)
-            drawMenu(canvas, listOf(MenuAction.PASTE), px, py - dpf(14f), py + dpf(14f))
+            drawMenu(canvas, pasteMenu, px, py - dpf(14f), py + dpf(14f))
+        }
+        if (multiBoxes.isNotEmpty()) {
+            selPaint.color = accent
+            selFill.color = Color.argb(0x1A, Color.red(accent), Color.green(accent), Color.blue(accent))
+            for ((p, b) in multiBoxes) {
+                val r = RectF(sx(p, b.left), sy(p, b.top), sx(p, b.right), sy(p, b.bottom))
+                r.inset(-dpf(6f), -dpf(6f))
+                canvas.drawRect(r, selFill); canvas.drawRect(r, selPaint)
+            }
+            drawMenu(canvas, multiMenu, width / 2f, height - dpf(56f), height - dpf(56f))
         }
         val rect = selectionScreenRect() ?: return
         selPaint.color = accent; handleStroke.color = accent

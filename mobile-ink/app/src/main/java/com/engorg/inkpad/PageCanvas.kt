@@ -184,6 +184,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private val dragStartLocal = PointF()
     private val dragStartBox = RectF()
     private var dragStartRecs = ArrayList<FinishedStrokesView.Rec>()
+    // A selection across pages (page -> its recs, in page order). While it's active selRecs is empty:
+    // it can't be dragged, new lassos and tapped strokes add to it, and only Clear or a tool change drops it.
+    private val multiSel = java.util.TreeMap<Int, ArrayList<FinishedStrokesView.Rec>>()
     private val lassoScreen = ArrayList<PointF>()
     // What was selected before a lasso began — restored if that "lasso" turns out to be the first
     // finger of a pinch, so zooming never drops the selection.
@@ -200,9 +203,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         private set
 
     companion object {
-        /** In-app ink clipboard (page-local recs), shared by every pane so you can copy in one
-         *  notebook and paste into the split-view one. Recs are immutable, so sharing is safe. */
-        private val clipboard = ArrayList<FinishedStrokesView.Rec>()
+        /** In-app ink clipboard: page-local recs, one list per source page. Shared by every pane so
+         *  you can copy in one notebook and paste into another. Recs are immutable, so sharing is
+         *  safe. Mirrored to disk so cut ink isn't lost if the app closes before the paste. */
+        private val clipboard = ArrayList<List<FinishedStrokesView.Rec>>()
+        private var clipboardLoaded = false
     }
 
     init {
@@ -246,6 +251,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     /** Point this pane at a notebook (null = the first/quick-notes notebook) and fit it to view. */
     fun open(notebookId: String?) {
         closeGraph()
+        loadClipboard()
         if (::notebook.isInitialized) { syncLastPage(); flushSaves() }   // persist the outgoing notebook before switching
         notebook = (notebookId?.let { store.notebook(it) }) ?: store.notebooks.firstOrNull()
             ?: store.createNotebook("Quick notes", null, AppTheme.accent)
@@ -792,8 +798,48 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     // ---------- selection / editing ----------
     private fun clearSelection() {
-        selRecs.clear(); selPage = -1; selBox = null; grab = Grab.NONE
+        selRecs.clear(); multiSel.clear(); selPage = -1; selBox = null; grab = Grab.NONE
         finishedView.clearSelection(); finishedView.setLasso(null)
+    }
+
+    /** Add [recs] to the selection across pages, keeping that page's drawing order. */
+    private fun addToMulti(page: Int, recs: Collection<FinishedStrokesView.Rec>) {
+        val all = HashSet(recs); multiSel[page]?.let { all.addAll(it) }
+        val kept = ArrayList(finishedView.pages[page].recs.filter { it in all })
+        if (kept.isEmpty()) multiSel.remove(page) else multiSel[page] = kept
+    }
+
+    /** "Select more": the current selection becomes the start of one that can span pages. */
+    private fun startMultiSelect() {
+        if (selRecs.isEmpty() || selPage < 0) return
+        val page = selPage; val recs = ArrayList(selRecs)
+        clearSelection()
+        addToMulti(page, recs); refreshSelectionOverlay()
+        Toast.makeText(context, "Scroll to any page and lasso more", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Select everything on [page]: added to a selection across pages, or as a plain selection otherwise. */
+    private fun selectAllOn(page: Int) {
+        val recs = finishedView.pages.getOrNull(page)?.recs ?: return
+        if (recs.isEmpty()) { Toast.makeText(context, "Nothing on this page", Toast.LENGTH_SHORT).show(); return }
+        if (multiSel.isNotEmpty()) { addToMulti(page, recs); refreshSelectionOverlay(); return }
+        clearSelection()
+        selRecs.addAll(recs); selPage = page; selBox = recBounds(selRecs); refreshSelectionOverlay()
+    }
+
+    /** The selection as [page, its recs] pairs, one per page, leaving out anything no longer on its page. */
+    private fun selectedByPage(): List<Pair<Int, List<FinishedStrokesView.Rec>>> {
+        if (multiSel.isEmpty()) return if (selPage >= 0 && selRecs.isNotEmpty()) listOf(selPage to ArrayList(selRecs)) else emptyList()
+        return multiSel.entries.mapNotNull { (page, recs) ->
+            val live = finishedView.pages.getOrNull(page)?.recs?.toHashSet() ?: return@mapNotNull null
+            recs.filter { it in live }.takeIf { it.isNotEmpty() }?.let { page to it }
+        }
+    }
+
+    /** What the pill on empty paper offers: Paste with ink on the clipboard, All on page with ink on the page. */
+    private fun emptyPaperMenu(page: Int): List<FinishedStrokesView.MenuAction> = buildList {
+        if (clipboard.isNotEmpty()) add(FinishedStrokesView.MenuAction.PASTE)
+        if (finishedView.pages[page].recs.isNotEmpty()) add(FinishedStrokesView.MenuAction.ALL_ON_PAGE)
     }
 
     private fun recBounds(recs: List<FinishedStrokesView.Rec>): RectF? {
@@ -821,6 +867,13 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         selRecs.singleOrNull()?.takeIf { it.shape?.solid != null }
 
     private fun refreshSelectionOverlay() {
+        if (multiSel.isNotEmpty()) {
+            finishedView.setMultiSelection(multiSel.entries.mapNotNull { (p, recs) -> recBounds(recs)?.let { p to it } }, listOf(
+                FinishedStrokesView.MenuAction.CUT, FinishedStrokesView.MenuAction.COPY, FinishedStrokesView.MenuAction.COLOR,
+                FinishedStrokesView.MenuAction.DELETE, FinishedStrokesView.MenuAction.ALL_ON_PAGE, FinishedStrokesView.MenuAction.SEL_CLEAR,
+            ))
+            return
+        }
         val box = selBox
         if (box == null || selRecs.isEmpty()) { finishedView.clearSelection(); return }
         val handles = if (selRecs.size == 1 && selRecs[0].shape != null) selRecs[0].shape!!.handles else null
@@ -844,7 +897,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         ) else if (selRecs.any { it.shape?.type == ShapeType.SYMBOL } || selectedCircuitWire()) listOf(
             FinishedStrokesView.MenuAction.VALUES,
         ) else emptyList()
-        finishedView.setSelection(selPage, box, handles, menu, tableMenu, orbit = selectedSolid() != null)
+        // A shape just drawn with the pen is selected too; only the lasso builds a bigger selection.
+        val secondRow = if (host.tool == Tool.SELECT) tableMenu + FinishedStrokesView.MenuAction.SELECT_MORE else tableMenu
+        finishedView.setSelection(selPage, box, handles, menu, secondRow, orbit = selectedSolid() != null)
     }
 
     /** A lone line or pen stroke on a page with circuit parts: its Values button names the wire's current. */
@@ -863,6 +918,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     private fun beginSelect(sx: Float, sy: Float) {
+        if (multiSel.isNotEmpty()) {
+            preLassoPage = -1; preLassoRecs.clear()
+            grab = Grab.LASSO
+            lassoScreen.clear(); lassoScreen.add(PointF(sx, sy)); finishedView.setLasso(lassoScreen)
+            return
+        }
         val rect = finishedView.selectionScreenRect()
         if (rect != null && selRecs.isNotEmpty()) {
             // Touch targets are in dp so they stay finger-sized on a high-density tablet.
@@ -1061,7 +1122,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
      * it just cancels the (motionless) drag and leaves the selection's menu up.
      */
     private fun onSelectLongPress() {
-        if (mode != Mode.SELECT) return
+        if (mode != Mode.SELECT || multiSel.isNotEmpty()) return
         when (grab) {
             Grab.MOVE -> { revertGrab(); grab = Grab.NONE; moveStartPage = -1 }
             Grab.LASSO -> {
@@ -1070,8 +1131,11 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (!h.onPage) return
                 val picked = nearestRecAt(h)
                 if (picked != null) { selRecs.clear(); selRecs.add(picked); selPage = h.page; selBox = recBounds(selRecs); refreshSelectionOverlay() }
-                else if (clipboard.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y)
-                else { Toast.makeText(context, "Nothing to paste", Toast.LENGTH_SHORT).show(); return }
+                else {
+                    val acts = emptyPaperMenu(h.page)
+                    if (acts.isEmpty()) { Toast.makeText(context, "Nothing to paste", Toast.LENGTH_SHORT).show(); return }
+                    finishedView.showPasteMenu(h.page, h.x, h.y, acts)
+                }
             }
             else -> return
         }
@@ -1081,13 +1145,25 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun finishLasso() {
         finishedView.setLasso(null)
         if (lassoScreen.size < 3) { tapSelectAt(lassoScreen.firstOrNull()); return }
-        val page = hitTest(lassoScreen[0].x, lassoScreen[0].y).page
-        val poly = ArrayList(lassoScreen.map { toLocalOn(it.x, it.y, page) })
-        poly.add(PointF(poly[0].x, poly[0].y))   // close the loop so the ray-cast is watertight
-        selRecs.clear()
-        for (rec in finishedView.pages[page].recs) if (recInLasso(rec, poly)) selRecs.add(rec)
-        if (selRecs.isEmpty()) { clearSelection(); return }
+        val picked = lassoPicks()
+        if (multiSel.isNotEmpty() || picked.size > 1) {
+            for ((page, recs) in picked) addToMulti(page, recs)
+            refreshSelectionOverlay(); return
+        }
+        val (page, recs) = picked.firstOrNull() ?: run { clearSelection(); return }
+        selRecs.clear(); selRecs.addAll(recs)
         selPage = page; selBox = recBounds(selRecs); refreshSelectionOverlay()
+    }
+
+    /** What the finished lasso caught on every page it crosses (zoomed out, one loop can take in several). */
+    private fun lassoPicks(): List<Pair<Int, List<FinishedStrokesView.Rec>>> {
+        val first = hitTest(0f, lassoScreen.minOf { it.y }).page
+        val last = hitTest(0f, lassoScreen.maxOf { it.y }).page
+        return (first..last).mapNotNull { page ->
+            val poly = ArrayList(lassoScreen.map { toLocalOn(it.x, it.y, page) })
+            poly.add(PointF(poly[0].x, poly[0].y))   // close the loop so the ray-cast is watertight
+            finishedView.pages[page].recs.filter { recInLasso(it, poly) }.takeIf { it.isNotEmpty() }?.let { page to it }
+        }
     }
 
     /**
@@ -1124,15 +1200,26 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     /**
      * A tap (not a drag) with the select tool grabs the single nearest stroke under the finger.
      * Tapping empty paper first dismisses whatever was showing; a tap on empty paper with nothing
-     * showing offers a Paste pill there when the clipboard has ink.
+     * showing offers a pill there (Paste, All on page). While a selection spans pages a tap adds or
+     * drops one stroke instead, and a stray tap on paper leaves everything picked so far alone.
      */
     private fun tapSelectAt(pt: PointF?) {
+        if (multiSel.isNotEmpty()) {
+            val h = pt?.let { hitTest(it.x, it.y) }?.takeIf { it.onPage } ?: return
+            val picked = nearestRecAt(h) ?: return
+            val onPage = multiSel[h.page]
+            if (onPage != null && onPage.remove(picked)) { if (onPage.isEmpty()) multiSel.remove(h.page) }
+            else addToMulti(h.page, listOf(picked))
+            if (multiSel.isEmpty()) clearSelection() else refreshSelectionOverlay()
+            return
+        }
         if (pt == null) { clearSelection(); return }
         val h = hitTest(pt.x, pt.y)
         if (!h.onPage) { clearSelection(); return }
         val picked = nearestRecAt(h) ?: run {
             clearSelection()
-            if (!preLassoHadUi && clipboard.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y)
+            val acts = emptyPaperMenu(h.page)
+            if (!preLassoHadUi && acts.isNotEmpty()) finishedView.showPasteMenu(h.page, h.x, h.y, acts)
             return
         }
         val shape = picked.shape
@@ -1157,6 +1244,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         recs[i] = fresh
         // A selected symbol stays selected (a stale record here would come back as a duplicate on its next drag).
         selRecs.indexOf(rec).let { if (it >= 0) selRecs[it] = fresh }
+        multiSel[page]?.let { l -> l.indexOf(rec).let { if (it >= 0) l[it] = fresh } }
         finishedView.invalidate()
         savePage(page)
         mirror?.pageEdited(this, page)
@@ -1198,6 +1286,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     fun selectRec(page: Int, rec: FinishedStrokesView.Rec): Boolean {
         val recs = finishedView.pages.getOrNull(page)?.recs ?: return false
         if (!recs.contains(rec)) return false
+        multiSel.clear()
         selRecs.clear(); selRecs.add(rec); selPage = page; selBox = recBounds(selRecs); refreshSelectionOverlay()
         return true
     }
@@ -1302,8 +1391,12 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 else finishedView.pasteMenuAnchor()?.let { (p, pt) -> pasteAt(p, pt.x, pt.y) }
             }
             FinishedStrokesView.MenuAction.DUPLICATE -> duplicateSelection()
-            FinishedStrokesView.MenuAction.COLOR -> host.pickColor(this, x, y + dp(26)) { c -> recolorSelection(c) }
+            // The menu of a selection across pages sits at the bottom of the pane, so its palette opens higher up.
+            FinishedStrokesView.MenuAction.COLOR -> host.pickColor(this, x, if (multiSel.isNotEmpty()) height / 3f else y + dp(26)) { c -> recolorSelection(c) }
             FinishedStrokesView.MenuAction.DELETE -> deleteSelection()
+            FinishedStrokesView.MenuAction.SELECT_MORE -> startMultiSelect()
+            FinishedStrokesView.MenuAction.ALL_ON_PAGE -> selectAllOn(finishedView.pasteMenuAnchor()?.first ?: currentPage())
+            FinishedStrokesView.MenuAction.SEL_CLEAR -> clearSelection()
             FinishedStrokesView.MenuAction.VALUES -> selectionValues?.invoke(selPage, ArrayList(selRecs), x)
             FinishedStrokesView.MenuAction.ROW_ADD, FinishedStrokesView.MenuAction.ROW_DEL,
             FinishedStrokesView.MenuAction.COL_ADD, FinishedStrokesView.MenuAction.COL_DEL,
@@ -1503,6 +1596,20 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Repaint every selected stroke/shape in [color] (keeps it selected). */
     private fun recolorSelection(color: Int) {
+        if (multiSel.isNotEmpty()) {
+            undoPushedThisGesture = false; pushUndo()
+            for ((page, recs) in multiSel) {
+                val live = finishedView.pages[page].recs
+                for (k in recs.indices) {
+                    val n = recolored(recs[k], color)
+                    val i = live.indexOf(recs[k]); if (i >= 0) live[i] = n
+                    recs[k] = n
+                }
+            }
+            finishedView.invalidate(); refreshSelectionOverlay()
+            for (page in multiSel.keys.toList()) { savePage(page); mirror?.pageEdited(this, page) }
+            return
+        }
         if (selRecs.isEmpty() || selPage < 0) return
         undoPushedThisGesture = false; pushUndo()   // the palette tap is its own gesture
         for (k in selRecs.indices) { val n = recolored(selRecs[k], color); replaceRec(selRecs[k], n); selRecs[k] = n }
@@ -1543,10 +1650,44 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     }
 
     private fun copySelection(verb: String) {
-        if (selRecs.isEmpty()) return
-        clipboard.clear(); clipboard.addAll(selRecs)
-        val n = selRecs.size
-        Toast.makeText(context, if (n == 1) verb else "$verb $n items", Toast.LENGTH_SHORT).show()
+        val groups = selectedByPage().map { it.second }
+        if (groups.isEmpty()) return
+        clipboard.clear(); clipboard.addAll(groups)
+        saveClipboard()
+        val n = groups.sumOf { it.size }
+        val from = if (groups.size > 1) " from ${groups.size} pages" else ""
+        Toast.makeText(context, if (n == 1) verb else "$verb $n items$from", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Queued on the page writer ahead of a cut's page saves, so the ink is on disk before it leaves its page. */
+    private fun saveClipboard() {
+        val groups = ArrayList(clipboard)
+        try {
+            ioExecutor.execute {
+                try {
+                    val out = JSONArray(); for (g in groups) out.put(recsToJson(g))
+                    val f = store.clipboardFile(); val tmp = File(f.path + ".tmp")
+                    tmp.writeText(out.toString())
+                    if (!tmp.renameTo(f)) Log.e("Ink", "clipboard save failed")
+                } catch (e: Exception) { Log.e("Ink", "clipboard save failed", e) }
+            }
+        } catch (_: Exception) { }   // writer already stopped; the clipboard still lives in memory
+    }
+
+    /** Bring back what was copied before the app last closed (once per process). */
+    private fun loadClipboard() {
+        if (clipboardLoaded) return
+        clipboardLoaded = true
+        try {
+            val f = store.clipboardFile()
+            if (!f.exists()) return
+            val arr = JSONArray(f.readText())
+            for (k in 0 until arr.length()) {
+                val recs = ArrayList<FinishedStrokesView.Rec>()
+                parseRecs(arr.getJSONObject(k).optJSONArray("strokes") ?: continue, recs)
+                if (recs.isNotEmpty()) clipboard.add(recs)
+            }
+        } catch (e: Exception) { Log.e("Ink", "clipboard load failed", e) }
     }
 
     /** Clone of [base] shifted by ([dx],[dy]) page units. */
@@ -1564,6 +1705,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun placeAndSelect(page: Int, copies: List<FinishedStrokesView.Rec>) {
         finishedView.pages[page].recs.addAll(copies)
         finishedView.clearSelection()
+        multiSel.clear()
         selPage = page; selRecs.clear(); selRecs.addAll(copies)
         selBox = recBounds(selRecs); refreshSelectionOverlay()
         finishedView.invalidate(); savePage(page)
@@ -1612,16 +1754,54 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Paste the clipboard centered on page-local ([cx],[cy]), nudged so it stays on the page. */
     private fun pasteAt(page: Int, cx: Float, cy: Float) {
-        val b = recBounds(clipboard) ?: return
         if (page < 0 || page >= finishedView.pages.size) return
+        if (clipboard.size > 1) { pasteAcrossPages(page); return }
+        val ink = clipboard.firstOrNull() ?: return
+        val b = recBounds(ink) ?: return
         pushUndo()
         fun fit(want: Float, lo: Float, hi: Float) = if (lo > hi) lo else want.coerceIn(lo, hi)
         val dx = fit(cx - b.centerX(), -b.left, FinishedStrokesView.PAGE_W - b.right)
         val dy = fit(cy - b.centerY(), -b.top, FinishedStrokesView.PAGE_H - b.bottom)
-        placeAndSelect(page, clipboard.map { translatedCopy(it, dx, dy) })
+        placeAndSelect(page, ink.map { translatedCopy(it, dx, dy) })
+    }
+
+    /**
+     * Paste a clipboard copied from several pages: each source page goes onto its own blank page,
+     * in order, in the same spot it had. The blank pages come from [start] onward, with new ones
+     * added at the end as needed, so it never lands on top of ink already in this notebook.
+     */
+    private fun pasteAcrossPages(start: Int) {
+        val pages = finishedView.pages
+        val targets = (start until pages.size).filter { pages[it].isBlank() }.take(clipboard.size).toMutableList()
+        val extra = clipboard.size - targets.size
+        if (extra > 0) {
+            targets.addAll(pages.size until pages.size + extra)
+            finishedView.pages = pages + List(extra) { store.addPage(notebook); FinishedStrokesView.Page() }
+            mirror?.paneOpened(this)
+        }
+        pushUndo()
+        clearSelection()
+        for ((k, page) in targets.withIndex()) {
+            val copies = clipboard[k].map { translatedCopy(it, 0f, 0f) }
+            finishedView.pages[page].recs.addAll(copies)
+            addToMulti(page, copies)
+        }
+        refreshSelectionOverlay(); finishedView.invalidate()
+        for (page in targets) { savePage(page); mirror?.pageEdited(this, page) }
+        goToPage(targets.first())
+        Toast.makeText(context, "Pasted onto ${targets.size} pages, starting at page ${targets.first() + 1}", Toast.LENGTH_SHORT).show()
     }
 
     private fun deleteSelection() {
+        if (multiSel.isNotEmpty()) {
+            val groups = selectedByPage()
+            if (groups.any { it.second.contains(graphRec) }) closeGraph()
+            pushUndo()
+            for ((page, recs) in groups) finishedView.pages[page].recs.removeAll(recs.toSet())
+            clearSelection(); finishedView.invalidate()
+            for ((page, _) in groups) { savePage(page); mirror?.pageEdited(this, page) }
+            return
+        }
         if (selRecs.isEmpty() || selPage < 0) return
         if (graphRec != null && selRecs.contains(graphRec)) closeGraph()
         pushUndo()
@@ -1673,7 +1853,9 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun saveMeta() { notebook.paper = finishedView.paperStyle.name; notebook.pageColor = finishedView.pageColor; store.save() }
 
     /** Serialize a page's recs to the on-disk JSON string. Pure — safe to run on the writer thread. */
-    private fun serializeRecs(recs: List<FinishedStrokesView.Rec>): String {
+    private fun serializeRecs(recs: List<FinishedStrokesView.Rec>): String = recsToJson(recs).toString()
+
+    private fun recsToJson(recs: List<FinishedStrokesView.Rec>): JSONObject {
         val arr = JSONArray()
         for (rec in recs) {
             val o = JSONObject().put("c", rec.color).put("w", rec.widthPx.toDouble()).put("h", rec.highlighter)
@@ -1699,7 +1881,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             }
             arr.put(o)
         }
-        return JSONObject().put("strokes", arr).toString()
+        return JSONObject().put("strokes", arr)
     }
 
     /** Queue a page write on the background writer, coalescing bursts to the newest snapshot. */
@@ -1752,56 +1934,62 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
             val f = store.pageFile(pageId)
             if (!f.exists()) return page
             val arr = JSONObject(f.readText()).optJSONArray("strokes") ?: return page
-            for (k in 0 until arr.length()) {
-                val o = arr.getJSONObject(k)
-                val color = o.getInt("c")
-                val width = if (o.has("w")) o.getDouble("w").toFloat() else o.optDouble("s", 6.0).toFloat()
-                val hl = o.optBoolean("h", false)
-                if (o.optString("k", "f") == "s") {
-                    val type = runCatching { ShapeType.valueOf(o.getString("t")) }.getOrNull() ?: continue
-                    val dashed = o.optBoolean("d", false)
-                    val va = o.getJSONArray("v"); val verts = ArrayList<PointF>()
-                    for (j in 0 until va.length()) { val p = va.getJSONArray(j); verts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
-                    if (verts.size < type.vertCount) continue
-                    // v1.5.5 fixed-angle solids come back as turnable SOLIDs covering the same spot.
-                    val spec = (ShapeSpec.legacySolid(type, verts) ?: ShapeSpec(type, verts)).apply {
-                        this.dashed = dashed
-                        if (type == ShapeType.SOLID) o.optJSONObject("sd")?.let { sd ->
-                            solid = Solid(SolidParams.fromJson(sd), Solid.rFromJson(o.optJSONArray("sr")), o.optDouble("sz", 50.0).toFloat().coerceIn(2f, 4000f), SolidFill.fromJson(o.optJSONObject("sf")))
-                        }
-                        hashed = !o.optBoolean("nh", false)
-                        rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)
-                        rot = o.optDouble("r", 0.0).toFloat()
-                        o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
-                        if (type == ShapeType.GRAPH) graph = GraphCard.fromJson(o.optJSONObject("g"))
-                        fillColor = o.optInt("fc", 0)
-                        if (type == ShapeType.SYMBOL) {
-                            symbol = runCatching { Sym.valueOf(o.optString("sy")) }.getOrNull()
-                            symScale = o.optDouble("ss", 1.0).toFloat().coerceIn(0.2f, 20f)
-                            props = o.optJSONObject("pr")
-                            if (symbol?.kind == SymKind.STRIP && !o.has("sl")) stripFromBox()
-                        }
-                    }
-                    if (spec.type == ShapeType.SOLID && spec.solid == null) continue
-                    if (spec.type == ShapeType.GRAPH && spec.graph == null) continue
-                    if (spec.type == ShapeType.SYMBOL && spec.symbol == null) continue
-                    page.recs.add(buildShapeRec(spec, color, width, hl))
-                } else {
-                    val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]
-                    val pts = ArrayList<PointF>()
-                    if (pa != null) for (j in 0 until pa.length()) { val p = pa.getJSONArray(j); pts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
-                    val brush = runCatching { Brush.valueOf(o.optString("b", "PEN")) }.getOrDefault(Brush.PEN)
-                    if (pts.isNotEmpty()) page.recs.add(freehandRec(pts, color, width, hl, brush))
-                }
-            }
+            parseRecs(arr, page.recs)
         } catch (e: Exception) { Log.e("Ink", "load page failed", e) }
         return page
+    }
+
+    /** Rebuild the recs of a saved "strokes" array into [into], skipping any it can't read. */
+    private fun parseRecs(arr: JSONArray, into: MutableList<FinishedStrokesView.Rec>) {
+        for (k in 0 until arr.length()) {
+            val o = arr.getJSONObject(k)
+            val color = o.getInt("c")
+            val width = if (o.has("w")) o.getDouble("w").toFloat() else o.optDouble("s", 6.0).toFloat()
+            val hl = o.optBoolean("h", false)
+            if (o.optString("k", "f") == "s") {
+                val type = runCatching { ShapeType.valueOf(o.getString("t")) }.getOrNull() ?: continue
+                val dashed = o.optBoolean("d", false)
+                val va = o.getJSONArray("v"); val verts = ArrayList<PointF>()
+                for (j in 0 until va.length()) { val p = va.getJSONArray(j); verts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
+                if (verts.size < type.vertCount) continue
+                // v1.5.5 fixed-angle solids come back as turnable SOLIDs covering the same spot.
+                val spec = (ShapeSpec.legacySolid(type, verts) ?: ShapeSpec(type, verts)).apply {
+                    this.dashed = dashed
+                    if (type == ShapeType.SOLID) o.optJSONObject("sd")?.let { sd ->
+                        solid = Solid(SolidParams.fromJson(sd), Solid.rFromJson(o.optJSONArray("sr")), o.optDouble("sz", 50.0).toFloat().coerceIn(2f, 4000f), SolidFill.fromJson(o.optJSONObject("sf")))
+                    }
+                    hashed = !o.optBoolean("nh", false)
+                    rows = o.optInt("tr", 3).coerceIn(1, 40); cols = o.optInt("tc", 3).coerceIn(1, 40); border = o.optBoolean("tb", true)
+                    rot = o.optDouble("r", 0.0).toFloat()
+                    o.optJSONArray("pv")?.let { pivot.set(it.getDouble(0).toFloat(), it.getDouble(1).toFloat()) }
+                    if (type == ShapeType.GRAPH) graph = GraphCard.fromJson(o.optJSONObject("g"))
+                    fillColor = o.optInt("fc", 0)
+                    if (type == ShapeType.SYMBOL) {
+                        symbol = runCatching { Sym.valueOf(o.optString("sy")) }.getOrNull()
+                        symScale = o.optDouble("ss", 1.0).toFloat().coerceIn(0.2f, 20f)
+                        props = o.optJSONObject("pr")
+                        if (symbol?.kind == SymKind.STRIP && !o.has("sl")) stripFromBox()
+                    }
+                }
+                if (spec.type == ShapeType.SOLID && spec.solid == null) continue
+                if (spec.type == ShapeType.GRAPH && spec.graph == null) continue
+                if (spec.type == ShapeType.SYMBOL && spec.symbol == null) continue
+                into.add(buildShapeRec(spec, color, width, hl))
+            } else {
+                val pa = o.optJSONArray("p") ?: o.optJSONArray("i") // "i" = legacy [x,y,t,pr]
+                val pts = ArrayList<PointF>()
+                if (pa != null) for (j in 0 until pa.length()) { val p = pa.getJSONArray(j); pts.add(PointF(p.getDouble(0).toFloat(), p.getDouble(1).toFloat())) }
+                val brush = runCatching { Brush.valueOf(o.optString("b", "PEN")) }.getOrDefault(Brush.PEN)
+                if (pts.isNotEmpty()) into.add(freehandRec(pts, color, width, hl, brush))
+            }
+        }
     }
 
     fun addPage() {
         saveAllPages()
         store.addPage(notebook)
         undoStack.clear(); redoStack.clear()
+        clearSelection()   // the reload below makes new recs
         loadAllPages()
         finishedView.post {
             val last = finishedView.pages.size - 1
