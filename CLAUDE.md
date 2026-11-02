@@ -7,6 +7,7 @@ Electron desktop app for engineering project management (task board, projects, c
 - `ipc/CLAUDE.md` — per-handler notes, linked-account integrations (Gradescope/Variate/Brightspace/GitHub/Claude), desktop mode, non-obvious IPC semantics.
 - `pwa/CLAUDE.md` — PWA structure, its separate settings doc, deploy/cache-bust.
 - `pi/CLAUDE.md` — the Raspberry Pi build: what it offloads, its API, install/self-update, and how it stays current.
+- **`mobile-ink/CLAUDE.md` — EngInk (the Android notebook app): a task → file map. Read it FIRST for any EngInk request** (ink, notebook, symbols, Analyze panel, value sheet, grapher). It's the one folder you may not have opened yet, so it won't have loaded on its own. Drawing analysis is `mobile-ink/app/src/main/assets/analysis/ink-analysis.js`; the rest is the flat Kotlin package `mobile-ink/app/src/main/java/com/engorg/inkpad/`.
 - **Exact IPC channel names/signatures: grep `preload.js`** (the source of truth) — not documented here on purpose.
 
 ---

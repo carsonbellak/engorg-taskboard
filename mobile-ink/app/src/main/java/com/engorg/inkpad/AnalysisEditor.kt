@@ -138,13 +138,13 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
         val spot = wireSpot(rec, x, y) ?: return
         val flat = abs(spot.ux) >= abs(spot.uy)
         val comp = JSONObject().put("name", "Current in this wire").put("title", "Current in this wire").put("fields", JSONArray()
-            .put(JSONObject().put("key", "vars").put("label", "Current name").put("keypad", "text").put("ph", "ix").put("hint", "A source can use it: 2ix"))
+            .put(JSONObject().put("key", "vars").put("label", "Current name").put("keypad", "text").put("ph", "ix").put("hint", "Like ix, i1 or i(t). A source can use it: 5i(t)"))
             .put(JSONObject().put("key", "rev").put("label", "Arrow points")
                 .put("options", JSONArray().put(if (flat) "→" else "↓").put(if (flat) "←" else "↑")).put("optValues", JSONArray().put("").put("1"))))
         sheetPane = pane
         sheet.show(comp, JSONObject().put("vars", cNextI.ifEmpty { "ix" }), onSave = { values ->
-            val name = values["vars"].orEmpty()
-            if (!name.startsWith("i", ignoreCase = true)) Toast.makeText(act, "A current's name starts with i: ix, i1", Toast.LENGTH_SHORT).show()
+            val name = values["vars"].orEmpty().filterNot { it.isWhitespace() }
+            if (!CURRENT_NAME.matches(name)) Toast.makeText(act, "A current's name looks like ix, i1 or i(t)", Toast.LENGTH_SHORT).show()
             else {
                 val props = JSONObject().put("vars", name)
                 if (values["rev"] == "1") props.put("rev", "1")
@@ -362,6 +362,9 @@ class AnalysisEditor(private val act: Activity, host: FrameLayout) {
     fun dispose() { main.removeCallbacks(quietRelabel); closeSheet(); eng?.dispose(); eng = null }
 
     companion object {
+        /** A name ink-analysis.js `partVars` reads as a current. */
+        private val CURRENT_NAME = Regex("""[iI][A-Za-z0-9_]*(\(t\))?""")
+
         /** `res.comps` (keyed by record index) as a map. */
         fun compsOf(res: JSONObject): Map<Int, JSONObject> {
             val map = HashMap<Int, JSONObject>()

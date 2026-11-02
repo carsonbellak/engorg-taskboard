@@ -68,7 +68,7 @@ class ValueSheet(private val act: Activity, private val host: FrameLayout) {
         val options: JSONArray? = f.optJSONArray("options")
         private val optValues: JSONArray? = f.optJSONArray("optValues")
         val units: List<String> = f.optJSONArray("units")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
-        /** Circuit variables a source's value can use: keys that put "ix" after the number ("2 ix"). */
+        /** Circuit variables a source's value can use: keys that put "ix" or "i(t)" after the number ("2 ix"). */
         val vars: List<String> = f.optJSONArray("vars")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } } ?: emptyList()
         val mode: String = when {
             options != null -> "opt"

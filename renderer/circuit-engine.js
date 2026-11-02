@@ -20,6 +20,9 @@
 const CircuitEngine = (() => {
   const VT = 0.025852;  // thermal voltage @ 300 K
   const GMIN = 1e-12;   // conductance to ground on every node — keeps floating nodes solvable
+  // Across a capacitor at DC: its node's return stays local instead of going through ground, which
+  // a current source of gain 1 feeding only that capacitor would otherwise make singular.
+  const GLEAK = 1e-15;
 
   // ---- SI value parsing / formatting ----------------------------------------
   const PREFIX = { f: 1e-15, p: 1e-12, n: 1e-9, u: 1e-6, 'µ': 1e-6, m: 1e-3, k: 1e3, K: 1e3, M: 1e6, G: 1e9, T: 1e12 };
@@ -297,8 +300,8 @@ const CircuitEngine = (() => {
               const geq = ctx.be ? q.C / ctx.h : 2 * q.C / ctx.h;
               const ieq = ctx.be ? geq * st.v : geq * st.v + st.i;   // history current, b → a
               stampG(A, a, b, geq); stampI(z, a, b, -ieq);
-            }
-            break;                                                  // DC: open circuit
+            } else stampG(A, a, b, GLEAK);                          // DC: open circuit
+            break;
           case 'L':
             if (mode === 'tran') {
               const st = ctx.ind[q.id];

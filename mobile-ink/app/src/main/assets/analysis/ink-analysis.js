@@ -210,14 +210,16 @@ const InkAnalysis = (() => {
     return CE.parseSI(s);
   }
   // A value written in circuit variables ("2ix", "1/2 Vx", "Vx/2", "2ix − 3Vy"): [{ k, name }], or
-  // null when it's a plain number. Variable names start with i or v and run at least two characters,
-  // so "5 V" and "10 mV" stay numbers. A value that mixes in anything else comes back with bad: true.
+  // null when it's a plain number. Variable names start with i or v and run at least two characters
+  // or end in (t), so "5 V" and "10 mV" stay numbers while "5 i(t)" doesn't. A value that mixes in
+  // anything else comes back with bad: true.
   function varExpr(v) {
     if (blank(v) || typeof v === 'number') return null;
-    const s = String(v).replace(/[()*·\s]/g, '').replace(/−/g, '-');
-    if (!/(^|[\d.\/+\-pnuµmkMG])[iIvV][A-Za-z0-9_]/.test(s)) return null;
+    // τ keeps a name's "(t)" through the strip: "5 i(t)" is 5 × i(t), not 5 × a variable "it".
+    const s = String(v).replace(/\(t\)/g, 'τ').replace(/[()*·\s]/g, '').replace(/−/g, '-');
+    if (!/(^|[\d.\/+\-pnuµmkMG])[iIvV][A-Za-z0-9_τ]/.test(s)) return null;
     const terms = [];
-    const re = /([-+]?)((?:[\d.]+(?:e[-+]?\d+)?)(?:\/[\d.]+)?)?([pnuµmkMG])?([iIvV][A-Za-z0-9_]+)(?:\/([\d.]+))?/y;
+    const re = /([-+]?)((?:[\d.]+(?:e[-+]?\d+)?)(?:\/[\d.]+)?)?([pnuµmkMG])?([iIvV](?:[A-Za-z0-9_]+τ?|τ))(?:\/([\d.]+))?/y;
     let at = 0;
     while (at < s.length) {
       re.lastIndex = at;
@@ -226,22 +228,24 @@ const InkAnalysis = (() => {
       let k = m[2] ? siVal(m[2] + (m[3] || '')) : m[3] ? NaN : 1;
       if (m[5]) k /= parseFloat(m[5]);
       if (!isFinite(k)) { terms.bad = true; break; }
-      terms.push({ k: m[1] === '-' ? -k : k, name: m[4] });
+      terms.push({ k: m[1] === '-' ? -k : k, name: m[4].replace('τ', '(t)') });
       at = re.lastIndex;
     }
     return terms;
   }
-  // The variables a part names ("ix", "Vx, ix", "-ix" = the opposite way round): [{ name, sign }].
+  // The variables a part names ("ix", "Vx, ix", "i(t)", "-ix" = the opposite way round): [{ name, sign }].
   function partVars(p) {
     return String((p && p.vars) || '').split(/[,;\s]+/).filter(Boolean).map(t => {
-      const m = t.replace(/−/g, '-').match(/^([-+]?)([iIvV][A-Za-z0-9_]*)$/);
+      const m = t.replace(/−/g, '-').match(/^([-+]?)([iIvV][A-Za-z0-9_]*(?:\(t\))?)$/);
       return m ? { name: m[2], sign: m[1] === '-' ? -1 : 1 } : null;
     }).filter(Boolean);
   }
 
-  // Variables match however they're typed ("ix", "i_x", "Ix") and show as i_x (subscript on the page).
-  const varKey = (name) => String(name).toLowerCase().replace(/_/g, '');
-  const varShow = (name) => String(name).replace(/^([iIvV])([A-Za-z0-9]+)$/, '$1_$2');
+  // Variables match however they're typed ("ix", "i_x", "Ix", "ix(t)") and show as i_x (subscript on the page).
+  const varKey = (name) => String(name).toLowerCase().replace(/_|\(t\)$/g, '');
+  const varShow = (name) => String(name).replace(/^([iIvV])([A-Za-z0-9]+)(\(t\))?$/, '$1_$2$3');
+  // The key a source's keypad offers. A one-letter name keeps its (t), or "5 v" would read as 5 volts.
+  const varKeyName = (name) => (name.length === 1 ? name + '(t)' : name);
 
   // ---- value fields (contract §3: keypad + unit buttons for every field) ------------------------------
   const UNIT_SPEC = {
@@ -292,18 +296,19 @@ const InkAnalysis = (() => {
     const nm = f('name', 'Name', '', '');
     // Names this part's voltage or current so a source elsewhere can depend on it.
     const vr = f('vars', 'Variable here', '', 'ix or Vx', { keypad: 'text', hint: (V_SOURCES.has(s.sym) ? 'Vx reads from the source\'s + mark.' : 'Vx: the + and − show on the page.') + ' A minus sign swaps it: -Vx, -ix.' });
-    const src = (hint) => ({ vars: PAGE_VARS.slice(), hint });
+    const useVar = PAGE_VARS.length ? `For a variable, tap the number, then ${PAGE_VARS[0]} on the keypad.` : 'Tap a wire to name its current and it becomes a key here.';
+    const src = (hint) => ({ vars: PAGE_VARS.slice(), hint: hint && hint + ' ' + useVar });
     switch (s.sym) {
       case 'RESISTOR': case 'RESISTOR_BOX': return [f('value', 'Resistance', 'Ω', '1k', { hint: 'e.g. 4.7k, 1meg, 1/2' }), vr, nm];
       case 'CAPACITOR': case 'CAP_POLAR': return [f('value', 'Capacitance', 'F', '1u', { hint: 'e.g. 100n, 10u, 1/4' }), vr, nm];
       case 'INDUCTOR': return [f('value', 'Inductance', 'H', '1m', { hint: 'e.g. 10m, 1/2' }), vr, nm];
-      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', src('+ is at the end you dragged to. A variable makes it dependent: 2ix')), ...stepFields(f), vr, nm];
+      case 'VSOURCE': return [f('value', 'Voltage', 'V', '5', src('+ is at the end you dragged to.')), ...stepFields(f), vr, nm];
       case 'BATTERY': return [f('value', 'Voltage', 'V', '9', src('')), vr, nm];
-      case 'VSOURCE_DEP': return [f('value', 'Value', 'V', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. + is at the end you dragged to') }), vr, nm];
-      case 'ISOURCE_DEP': return [f('value', 'Value', 'A', '2ix', { keypad: 'si', units: [], ...src('e.g. 2ix, 1/2 Vx. Flows the way the arrow points') }), vr, nm];
+      case 'VSOURCE_DEP': return [f('value', 'Value', 'V', '2ix', { keypad: 'si', units: [], ...src('+ is at the end you dragged to.') }), vr, nm];
+      case 'ISOURCE_DEP': return [f('value', 'Value', 'A', '2ix', { keypad: 'si', units: [], ...src('Flows the way the arrow points.') }), vr, nm];
       case 'VSOURCE_AC': return [...acFields(f, f('amp', 'Amplitude A (peak)', 'V', '10')), vr, nm];
       case 'ISOURCE_AC': return [...acFields(f, f('amp', 'Amplitude A (peak)', 'A', '1m', { hint: 'flows the way the arrow points' })), vr, nm];
-      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('flows the way the arrow points. A variable makes it dependent: 2Vx')), ...stepFields(f), vr, nm];
+      case 'ISOURCE': return [f('value', 'Current', 'A', '1m', src('Flows the way the arrow points.')), ...stepFields(f), vr, nm];
       case 'DIODE': return [f('model', 'Model', '', '1N4148', { options: ['1N4148', '1N4007', '1N5819'] }), vr, nm];
       case 'LED': return [f('color', 'Colour', '', 'red', { options: ['red', 'green', 'blue', 'yellow', 'white'] }), vr, nm];
       case 'SWITCH': return [f('state', 'Position', '', 'closed', { options: ['closed', 'open', 'opens at t', 'closes at t'], optValues: ['closed', 'open', 'opens', 'closes'] }), f('t', 'Switches at t =', 's', '0', { hint: 'For a switch that opens or closes' }), vr, nm];
@@ -362,13 +367,14 @@ const InkAnalysis = (() => {
   function currentFields(s, f) {
     const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
     const pair = flat ? (dx >= 0 ? ['→', '←'] : ['←', '→']) : (dy >= 0 ? ['↓', '↑'] : ['↑', '↓']);
-    return [f('vars', 'Current name', '', 'ix', { keypad: 'text', hint: 'A source can use it: 2ix' }), f('rev', 'Arrow points', '', '', { options: pair, optValues: ['', '1'] })];
+    return [f('vars', 'Current name', '', 'ix', { keypad: 'text', hint: 'Like ix, i1 or i(t). A source can use it: 5i(t)' }), f('rev', 'Arrow points', '', '', { options: pair, optValues: ['', '1'] })];
   }
   // A part's named variables as drawn beside it. A current shows its sense with an arrow ("ix→"); a
   // voltage just its name, because its + and − are real marks placed around the label (see pol).
   function varLabel(s) {
     if (!s.inline) return '';
-    if (s.sym === 'CURRENT') return partVars(s.props).map(v => varShow(v.name)).join(' ');
+    // A name that can't be a variable still shows, so the arrow never looks unnamed.
+    if (s.sym === 'CURRENT') return partVars(s.props).map(v => varShow(v.name)).join(' ') || String(s.props.vars || '').trim();
     const dx = s.terms[1][0] - s.terms[0][0], dy = s.terms[1][1] - s.terms[0][1], flat = Math.abs(dx) >= Math.abs(dy);
     return partVars(s.props).map(({ name, sign }) => {
       if (/^v/i.test(name)) return varShow(name);
@@ -470,7 +476,7 @@ const InkAnalysis = (() => {
   function circuit(syms, drawnWires, out) {
     const parts = syms.filter(s => ECE.has(s.sym));
     if (!parts.length) return;
-    PAGE_VARS = [...new Set(parts.flatMap(s => (PROBES.has(s.sym) ? (s.sym === 'PROBE_POS' ? ['V' + probeNum(s)] : []) : partVars(s.props).map(v => v.name))))];
+    PAGE_VARS = [...new Set(parts.flatMap(s => (PROBES.has(s.sym) ? (s.sym === 'PROBE_POS' ? ['V' + probeNum(s)] : []) : partVars(s.props).map(v => varKeyName(v.name)))))];
     const wires = cutWires(parts.filter(s => s.sym === 'CURRENT'), drawnWires);
     const real = parts.filter(s => s.sym !== 'GROUND' && s.sym !== 'NODE' && !PROBES.has(s.sym) && (s.sym !== 'CURRENT' || s.cut));
     const probes = parts.filter(s => PROBES.has(s.sym));
@@ -631,7 +637,7 @@ const InkAnalysis = (() => {
       const c = comp.get(s), flipped = c.ep && c.ep.n[0] !== c.pins[0];   // voltage sources are stamped + at t1
       if (s.sym === 'CURRENT') {
         const v = partVars(s.props)[0];
-        if (!v) warns.push('A wire current has no name — tap its arrow to name it.');
+        if (!v) warns.push(blank(s.props.vars) ? 'A wire current has no name — tap its arrow to name it.' : `“${String(s.props.vars).trim()}” can't be used as a variable — a current's name looks like ix, i1 or i(t).`);
         if (v && c.ep) varTab.set(varKey(v.name), { name: varShow(v.name), i: c.id, sign: s.props.rev === '1' ? -1 : 1 });
         continue;
       }
