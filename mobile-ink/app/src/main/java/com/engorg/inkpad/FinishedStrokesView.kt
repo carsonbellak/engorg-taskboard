@@ -35,7 +35,8 @@ import kotlin.math.sin
  */
 class FinishedStrokesView(context: Context) : View(context) {
 
-    enum class PaperStyle { PLAIN, GRID, RULED, DOTS }
+    /** DOTS_HALF = dots at half the spacing (16 page-units); circuit parts still snap to every other dot. */
+    enum class PaperStyle { PLAIN, GRID, RULED, DOTS, DOTS_HALF }
 
     /** One drawable object on a page: freehand ink (shape == null) or a parametric shape. */
     class Rec(
@@ -742,19 +743,23 @@ class FinishedStrokesView(context: Context) : View(context) {
                 paperPaint.style = Paint.Style.STROKE; paperPaint.strokeWidth = 1f
                 var yw = sp; while (yw < PAGE_H) { val ys = t + yw * s; canvas.drawLine(l, ys, right, ys, paperPaint); yw += sp }
             }
-            PaperStyle.DOTS -> {
+            PaperStyle.DOTS, PaperStyle.DOTS_HALF -> {
                 paperPaint.style = Paint.Style.FILL
+                val half = paperStyle == PaperStyle.DOTS_HALF
+                val dsp = if (half) sp / 2f else sp
                 // A single small dot needs far more weight than a continuous grid line to be
                 // visible at the same spacing — bump the alpha and scale the radius with zoom.
-                paperPaint.color = if (lum < 128) Color.argb(96, 255, 255, 255) else Color.argb(74, 30, 50, 90)
+                // The half grid has 4× the dots, so they're a touch lighter and smaller.
+                paperPaint.color = if (half) { if (lum < 128) Color.argb(84, 255, 255, 255) else Color.argb(64, 30, 50, 90) }
+                    else { if (lum < 128) Color.argb(96, 255, 255, 255) else Color.argb(74, 30, 50, 90) }
                 // Radius tracks the zoom (≈1.35 page-units) so the dots stay proportional as you
                 // zoom into a page instead of pinning to a tiny 3.6px cap and looking like specks.
-                val r = (1.35f * s).coerceIn(1.6f, 14f)
-                var yw = sp
+                val r = if (half) (0.95f * s).coerceIn(1.2f, 10f) else (1.35f * s).coerceIn(1.6f, 14f)
+                var yw = dsp
                 while (yw < PAGE_H) {
-                    var xw = sp
-                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * s, t + yw * s, r, paperPaint); xw += sp }
-                    yw += sp
+                    var xw = dsp
+                    while (xw < PAGE_W) { canvas.drawCircle(l + xw * s, t + yw * s, r, paperPaint); xw += dsp }
+                    yw += dsp
                 }
             }
             else -> {}

@@ -1476,9 +1476,11 @@ and the maximum height is $h = \frac{v_0^2 \sin^2\theta}{2g}$.
       if (paper === 'GRID') for (let x = GRID; x < PAGE_W; x += GRID) { c.moveTo(x, 0); c.lineTo(x, PAGE_H); }
       for (let y = GRID; y < PAGE_H; y += GRID) { c.moveTo(0, y); c.lineTo(PAGE_W, y); }
       c.stroke();
-    } else if (paper === 'DOTS') {
-      c.fillStyle = light ? 'rgba(255,255,255,0.38)' : 'rgba(30,50,90,0.29)';
-      for (let y = GRID; y < PAGE_H; y += GRID) for (let x = GRID; x < PAGE_W; x += GRID) { c.beginPath(); c.arc(x, y, 1.6, 0, 7); c.fill(); }
+    } else if (paper === 'DOTS' || paper === 'DOTS_HALF') {
+      const half = paper === 'DOTS_HALF', sp = half ? GRID / 2 : GRID, r = half ? 1.2 : 1.6;
+      c.fillStyle = half ? (light ? 'rgba(255,255,255,0.33)' : 'rgba(30,50,90,0.25)')
+                         : (light ? 'rgba(255,255,255,0.38)' : 'rgba(30,50,90,0.29)');
+      for (let y = sp; y < PAGE_H; y += sp) for (let x = sp; x < PAGE_W; x += sp) { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }
     }
   }
 
@@ -1530,7 +1532,7 @@ and the maximum height is $h = \frac{v_0^2 \sin^2\theta}{2g}$.
           <label class="hw-opt" title="Pen stroke width — the same at every text size, like a real pen">Pen <input id="hw-pen" type="range" min="0.6" max="5" step="0.1"><button id="hw-pen-val" class="hw-pen-val"></button></label>
           <div class="hw-inks" id="hw-inks">${INKS.map(i => `<button class="hw-ink" data-ink="${i.c}" title="${esc(i.name)}" style="background:${i.c}"></button>`).join('')}</div>
           <select id="hw-paper" class="kicad-input hw-select" title="Paper">
-            <option value="GRID">Grid</option><option value="RULED">Ruled</option><option value="DOTS">Dots</option><option value="PLAIN">Plain</option>
+            <option value="GRID">Grid</option><option value="RULED">Ruled</option><option value="DOTS">Dots</option><option value="DOTS_HALF">Dots (½)</option><option value="PLAIN">Plain</option>
           </select>
           <select id="hw-page" class="kicad-input hw-select" title="Page color">
             <option value="white">White</option><option value="cream">Cream</option><option value="dark">Dark</option>

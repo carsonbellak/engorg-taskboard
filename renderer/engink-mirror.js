@@ -179,11 +179,15 @@ const enginkMirror = (() => {
       if (paper === 'GRID') for (let x = PAPER_SP; x < PAGE_W; x += PAPER_SP) { ctx.moveTo(x * s, 0); ctx.lineTo(x * s, PAGE_H * s); }
       for (let y = PAPER_SP; y < PAGE_H; y += PAPER_SP) { ctx.moveTo(0, y * s); ctx.lineTo(PAGE_W * s, y * s); }
       ctx.stroke();
-    } else if (paper === 'DOTS') {
-      ctx.fillStyle = light ? 'rgba(255,255,255,0.38)' : 'rgba(30,50,90,0.29)';
-      const r = Math.min(Math.max(1.35 * s, 1.6), 14);
-      for (let y = PAPER_SP; y < PAGE_H; y += PAPER_SP)
-        for (let x = PAPER_SP; x < PAGE_W; x += PAPER_SP) { ctx.beginPath(); ctx.arc(x * s, y * s, r, 0, 7); ctx.fill(); }
+    } else if (paper === 'DOTS' || paper === 'DOTS_HALF') {
+      // DOTS_HALF: half spacing, slightly lighter + smaller dots (matches FinishedStrokesView).
+      const half = paper === 'DOTS_HALF';
+      const sp = half ? PAPER_SP / 2 : PAPER_SP;
+      ctx.fillStyle = half ? (light ? 'rgba(255,255,255,0.33)' : 'rgba(30,50,90,0.25)')
+                           : (light ? 'rgba(255,255,255,0.38)' : 'rgba(30,50,90,0.29)');
+      const r = half ? Math.min(Math.max(0.95 * s, 1.2), 10) : Math.min(Math.max(1.35 * s, 1.6), 14);
+      for (let y = sp; y < PAGE_H; y += sp)
+        for (let x = sp; x < PAGE_W; x += sp) { ctx.beginPath(); ctx.arc(x * s, y * s, r, 0, 7); ctx.fill(); }
     }
   }
 

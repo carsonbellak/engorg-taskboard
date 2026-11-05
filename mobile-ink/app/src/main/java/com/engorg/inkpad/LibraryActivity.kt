@@ -56,7 +56,7 @@ class LibraryActivity : ComponentActivity() {
         Color.rgb(0x22, 0x27, 0x31), // slate (dark)
         Color.rgb(0x0F, 0x11, 0x16), // near-black
     )
-    private val paperOptions = listOf("PLAIN", "GRID", "RULED", "DOTS")
+    private val paperOptions = listOf("PLAIN", "GRID", "RULED", "DOTS", "DOTS_HALF")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -800,6 +800,7 @@ class LibraryActivity : ComponentActivity() {
             "GRID" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * g, px * 0.1f, px * g, px * 0.9f, ln); c.drawLine(px * 0.1f, px * g, px * 0.9f, px * g, ln); g += 0.2f } }
             "RULED" -> { var g = 0.3f; while (g < 0.9f) { c.drawLine(px * 0.15f, px * g, px * 0.85f, px * g, ln); g += 0.2f } }
             "DOTS" -> { var y = 0.3f; while (y < 0.9f) { var x = 0.3f; while (x < 0.9f) { c.drawCircle(px * x, px * y, px * 0.055f, fill); x += 0.2f }; y += 0.2f } }
+            "DOTS_HALF" -> { var y = 0.2f; while (y < 0.85f) { var x = 0.2f; while (x < 0.85f) { c.drawCircle(px * x, px * y, px * 0.035f, fill); x += 0.1f }; y += 0.1f } }
         }
         return bmp
     }
