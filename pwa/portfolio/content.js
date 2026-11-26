@@ -36,9 +36,9 @@
 window.PORTFOLIO = {
   name: 'Carson Bellak',
   role: 'Engineering Student',                          // TODO, e.g. "Electrical Engineering · Purdue '27"
-  tagline: 'I design, build and program hardware, from 3D-printed mechanisms and custom PCBs to the software that tests them.',
+  tagline: 'I design test hardware: circuit boards, rack-mounted fixtures and the software that runs them.',
   location: '',                                         // TODO (optional)
-  status: 'Open to internships',                       // small chip in the header; '' hides it
+  status: '',                                          // (unused in the current layout)
   photo: '',                                            // TODO (optional) '/portfolio/assets/images/me.jpg'
   resume: '/portfolio/assets/resume.pdf',
 
@@ -49,11 +49,19 @@ window.PORTFOLIO = {
   },
 
   // The interactive model in the header.
-  hero: { model: '/portfolio/assets/models/optical-probe-shell.stl', color: '#4f86c6', caption: 'Optical probe shell · drag to orbit' },
+  // The rotating tile in the header: cycles through these models (spins each, then moves on).
+  // `project` links the label to that project's section. Add an entry per model you make.
+  showcase: [
+    { model: '/portfolio/assets/models/optical-probe-mounted.glb', label: 'Optical probe shell', project: 'optical-probe', zUp: false },
+    { model: '/portfolio/assets/models/little-blue-mounted.glb', label: 'Little Blue test cabinet', project: 'little-blue', zUp: false },
+    { model: '/portfolio/assets/models/socket-plate-mounted.glb', label: 'Meter socket plate', project: 'socket-plate', zUp: false, view: [-1, 0.6, -1.3] },
+    { model: '/portfolio/assets/models/calibration-cube.stl', label: '3D-printer calibration cube', project: 'calibration', color: '#d08a4c' },
+    { model: '/portfolio/assets/models/little-blue-exploded.glb', label: 'Little Blue, exploded', project: 'little-blue', zUp: false },
+  ],
 
   about: [
-    'I\'m an engineering student who learns by building. Most of my projects start as a problem in a lab or in my own workflow and end as a working board, a printed part, or a tool other people use every day.',
-    'In industry I\'ve worked on test hardware for electricity meters: a redesigned optical communication probe, a test cabinet, and the software used to check and configure meters in bulk. Outside work I build my own engineering tools, including the app this page is hosted on.',
+    'I\'m an engineering student working on test equipment for electricity meters: probe hardware, a test cabinet and the tools used to check meters in bulk.',
+    'Most of my work crosses disciplines: a board in KiCad, the enclosure or plate in Creo, then the Python that drives it on the bench. Outside work I build my own engineering tools, including the app this page is hosted on.',
   ],
 
   skills: [
@@ -66,27 +74,31 @@ window.PORTFOLIO = {
   projects: [
     {
       id: 'optical-probe',
+      short: 'Optical probe',
       title: 'Optical probe redesign',
       date: '2026 · Industry project · REV0.D',
       org: '',                                          // TODO (optional) employer name
       summary: 'A redesigned USB optical probe for talking to electricity meters over their infrared port: a 4-layer board with a quad USB-UART bridge, an infrared transmitter and a transimpedance receiver, in a 3D-printed shell.',
       tags: ['Electrical', 'PCB', 'KiCad', '3D printing'],
-      notice: 'Portfolio copy. The board outline, part placement and packages are real. The routing, net names and component values were replaced with randomly generated ones, and the shell is a low-resolution mesh rather than the source CAD, to protect my employer\'s design.',
+      notice: 'Portfolio copy. The board outline, part placement and packages are real. The routing, net names and component values were replaced with randomly generated ones, and the shell is shown as a simplified mesh, to protect my employer\'s design.',
       links: [],
       body: [
         'Meters expose a standard infrared optical port (ANSI C12.18) for reading and configuration. This project was a ground-up redesign of the USB probe that clips onto that port, done on a small team through four board revisions.',
         'The board pairs an FTDI FT4232H quad USB-to-UART bridge with an infrared LED transmitter and a photodiode receiver feeding a transimpedance amplifier and comparator. Mini-USB on one end, the optical head on the other, on a 23 × 60 mm four-layer board.',
         'Most of the engineering was in the receive path. The goal was 921,600 baud, which needs clean edges of about 250 ns, while the first boards showed roughly 1 µs rise and 1.5 µs fall. Characterising that led to the main trade-off: the TIA feedback resistor sets gain against speed, so about 15 kΩ reaches 921,600 baud while about 50 kΩ is needed to pick up the meter\'s pulse output. It also pointed to the comparator as the next bottleneck.',
+        'I also designed the enclosure in Creo: a two-piece 3D-printed shell that splits down the middle around the board, a separate head that holds the LEDs at the optical port, and a silicone mold for casting the cable strain reliefs.',
         'Thermal testing turned up a real failure: at 85 °C the receive line stays low and no data gets through, most likely DC leakage through the receive diode looping through the TIA. I documented the findings and the changes that did and did not help, so the next revision starts from the measurements.',
       ],
       media: [
-        { type: 'pcb', src: '/portfolio/assets/pcb/optical-probe.kicad_pcb', caption: 'Board view (scroll to zoom, click a part). Outline and placement are real; routing and values are randomized.' },
-        { type: 'model', src: '/portfolio/assets/models/optical-probe-shell.stl', caption: '3D-printed probe shell (low-resolution mesh)', color: '#4f86c6' },
+        { type: 'model', label: 'Shell', src: '/portfolio/assets/models/optical-probe-mounted.glb', caption: 'Final printed shell: two halves and the LED head (simplified mesh)', zUp: false },
+        { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/optical-probe-exploded.glb', caption: 'Shell halves split apart', zUp: false },
+        { type: 'pcb', label: 'Board', src: '/portfolio/assets/pcb/optical-probe.kicad_pcb', caption: 'Board view (scroll to zoom, click a part). Outline and placement are real; routing and values are randomized.' },
         { type: 'image', src: '', caption: 'TODO: a photo of the assembled probe on a meter' },
       ],
     },
     {
       id: 'little-blue',
+      short: 'Little Blue',
       title: 'Little Blue test cabinet',
       date: '2025 to 2026 · Industry project',
       org: '',                                          // TODO (optional)
@@ -97,7 +109,7 @@ window.PORTFOLIO = {
       body: [
         'TODO: one or two sentences on what the cabinet tests and who uses it.',
         'I built the full top-level assembly in Creo Parametric: a 4U drawer and a 3U cabinet section with 120 mm filtered fan cooling, a 24 V supply, relay and current-ranging electronics, safety banana jacks for connections, and a socket plate that holds meters under test.',
-        'The socket plate was my own part, released with a dimensioned production drawing. Integrating it meant fitting off-the-shelf rack hardware, fasteners and boards into one assembly that could be purchased against a BOM and built.',
+        'The socket plate was my own part, documented with a dimensioned drawing. Integrating it meant fitting off-the-shelf rack hardware, fasteners and boards into one assembly that could be purchased against a BOM and built.',
       ],
       media: [
         { type: 'model', label: 'Mounted', src: '/portfolio/assets/models/little-blue-mounted.glb', caption: 'Assembled: every rack unit mounted (simplified model)', zUp: false },
@@ -106,7 +118,45 @@ window.PORTFOLIO = {
       ],
     },
     {
+      id: 'socket-plate',
+      short: 'Socket plate',
+      title: 'Meter socket plate',
+      date: '2026 · Industry project · part of Little Blue',
+      org: '',                                          // TODO (optional)
+      summary: 'The plate inside Little Blue that holds two meter sockets under test, with the socket routing board and relays behind it. Designed in Creo and documented with a dimensioned drawing.',
+      tags: ['Mechanical', 'CAD', 'Creo', 'Drawings'],
+      notice: 'The 3D models are simplified: coarse meshes with fasteners and board components removed.',
+      links: [],
+      body: [
+        'Meters under test plug into two standard meter sockets. I designed the front and back plates that carry them, spaced on standoffs so the socket routing board and its relays sit between the plates and the wiring stays short.',
+        'The plate is a 19-inch rack-width panel, 19.00 × 11.75 in, with two large cutouts for the sockets, two slots for wiring and the mounting-hole pattern. The Drawing tab shows it fully dimensioned.',
+        'TODO: anything about tolerancing, the shop that made it, or what changed between revisions.',
+      ],
+      media: [
+        { type: 'model', label: 'Assembled', src: '/portfolio/assets/models/socket-plate-mounted.glb', caption: 'Socket plate assembly: two meter sockets, routing board and relays (simplified)', zUp: false, view: [-1, 0.6, -1.3] },
+        { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/socket-plate-exploded.glb', caption: 'Exploded through the stack: front plate, sockets, routing board, back plate', zUp: false, view: [-1.6, 0.5, -0.9] },
+        { type: 'drawing', label: 'Drawing', src: '/portfolio/assets/drawings/socket-plate-drawing.pdf', caption: 'Socket plate drawing (zoom with + / −, or open the PDF)' },
+      ],
+    },
+    {
+      id: 'calibration',
+      short: 'Printer calibration',
+      title: '3D-printer calibration set',
+      date: '2026 · Personal project',
+      summary: 'Test parts I modelled in Creo to tune my Creality K1C: dimension cubes, a hollow cube for wall and bridging checks, and a 25 mm test cube.',
+      tags: ['3D printing', 'CAD', 'Creo'],
+      links: [],
+      body: [
+        'I keep a small set of calibration parts for my printer: 10, 25 and 50 mm cubes to check dimensional accuracy in each axis, a 50 mm cube hollowed to 25 mm for wall thickness and bridging, and the 25 mm test cube shown here.',
+        'Measuring them after a profile change tells me straight away whether flow, shrinkage or the slicer settings have drifted, before printing a real part.',
+      ],
+      media: [
+        { type: 'model', label: 'Test cube', src: '/portfolio/assets/models/calibration-cube.stl', caption: '25 mm calibration test cube (drag to orbit)', color: '#d08a4c' },
+      ],
+    },
+    {
       id: 'wifi-checker',
+      short: 'Wifi Checker',
       title: 'Wifi Checker: fleet test tool',
       date: '2025 to 2026 · Industry project',
       org: '',                                          // TODO (optional)
@@ -124,6 +174,7 @@ window.PORTFOLIO = {
     },
     {
       id: 'contactor-tester',
+      short: 'Contactor tester',
       title: 'Three-phase contactor tester',
       date: '2026 · Industry project',
       org: '',                                          // TODO (optional)
@@ -141,6 +192,7 @@ window.PORTFOLIO = {
     },
     {
       id: 'engorg',
+      short: 'EngOrg',
       title: 'EngOrg: engineering workspace',
       date: '2025 to present · Personal project',
       summary: 'A desktop app, phone app, Android notebook and Raspberry Pi service I built to run my engineering coursework and lab work from one place.',

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'engorg-v40';
+const CACHE_NAME = 'engorg-v41';
 // Holds what the Android share sheet sent (see the share-target handler below) until app.js
 // picks it up, so it must survive the activate-time cache cleanup.
 const SHARE_INBOX = 'engorg-share-inbox';
@@ -129,6 +129,9 @@ self.addEventListener('fetch', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return; // POSTs (API calls, share target) aren't cacheable
+  // The public portfolio is a separate site: let the browser fetch it directly (its multi-MB
+  // models shouldn't pass through, or be cached by, the app shell's worker).
+  if (url.origin === self.location.origin && url.pathname.startsWith('/portfolio')) return;
 
   // Always go to network for Firebase/Google APIs
   if (url.hostname.includes('googleapis.com') ||

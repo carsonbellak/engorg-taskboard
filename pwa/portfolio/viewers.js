@@ -54,18 +54,32 @@
       const w = host.clientWidth || 600, h = host.clientHeight || 450;
       this.scene = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 1000);
-      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      // logarithmic depth: CAD assemblies have many near-coplanar faces (sheet metal, panels on
+      // frames) that z-fight ("flicker") with a normal depth buffer
+      this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, logarithmicDepthBuffer: true });
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       this.renderer.setSize(w, h, false);
       this.renderer.setClearColor(0x000000, 0);
       this.renderer.outputEncoding = THREE.sRGBEncoding;
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.05;
       this.root.insertBefore(this.renderer.domElement, this.status);
 
-      this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 0.75));
-      const key = new THREE.DirectionalLight(0xffffff, 0.75); key.position.set(3, 5, 4);
-      const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(-4, 2, -3);
-      this.scene.add(key, fill);
-      this.camera.add(new THREE.DirectionalLight(0xffffff, 0.2)); // headlight so no face goes flat black
+      // Studio lighting: a soft room environment (from Google's model-viewer) for even, product-
+      // shot shading, plus a gentle key light for shape definition.
+      if (THREE.RoomEnvironment) {
+        const pmrem = new THREE.PMREMGenerator(this.renderer);
+        this._envTex = pmrem.fromScene(new THREE.RoomEnvironment(), 0.04).texture;
+        this.scene.environment = this._envTex;
+        pmrem.dispose();
+        const key = new THREE.DirectionalLight(0xffffff, 0.6); key.position.set(3, 6, 4);
+        this.scene.add(key);
+      } else {
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a8a, 0.75));
+        const key = new THREE.DirectionalLight(0xffffff, 0.75); key.position.set(3, 5, 4);
+        const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(-4, 2, -3);
+        this.scene.add(key, fill);
+      }
       this.scene.add(this.camera);
 
       this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
@@ -90,10 +104,25 @@
       this._io.observe(this.root);
 
       if (this.opts.tools) this._buildTools();
-      this._load(this.opts.src).catch(err => {
-        console.error('[portfolio] model load failed', err);
-        this._setStatus('error', 'Could not load this model.');
-      });
+      this._loadWithRetry();
+    }
+
+    // Big models over flaky connections: retry twice with backoff, then offer a Retry button.
+    async _loadWithRetry() {
+      for (let attempt = 0; attempt < 3 && !this._disposed; attempt++) {
+        try { await this._load(this.opts.src); return; }
+        catch (err) {
+          console.warn('[portfolio] model load failed (attempt ' + (attempt + 1) + ')', err);
+          if (attempt < 2) { this._setStatus('loading', 'Connection hiccup, retrying…'); await new Promise(r => setTimeout(r, 800 * (attempt + 1))); }
+        }
+      }
+      if (this._disposed) return;
+      this._setStatus('error', 'Could not load this model.');
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn btn-sm'; b.textContent = 'Retry'; b.style.marginTop = '12px'; b.style.pointerEvents = 'auto';
+      b.addEventListener('click', () => { this._setStatus('loading'); this._loadWithRetry(); });
+      this.status.firstElementChild.appendChild(document.createElement('br'));
+      this.status.firstElementChild.appendChild(b);
     }
 
     _setStatus(kind, text) {
@@ -197,14 +226,41 @@
 
       const r = sphere.radius || 1;
       const dist = r / Math.sin(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 1.08;
-      this.camera.near = dist / 100;
-      this.camera.far = dist * 100;
+      // tight clip range = more depth precision (with the log buffer, no visible flicker)
+      this.camera.near = r * 0.02;
+      this.camera.far = dist + r * 6;
       this.camera.updateProjectionMatrix();
-      this._home = new THREE.Vector3(1, 0.75, 1.15).normalize().multiplyScalar(dist);
-      this.controls.minDistance = r * 0.6;
+
+      // soft contact shadow under the model (product-shot grounding)
+      const fitBox = new THREE.Box3().setFromObject(pivot);
+      const c = document.createElement('canvas'); c.width = c.height = 128;
+      const g = c.getContext('2d'); const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grd.addColorStop(0, 'rgba(0,0,0,0.28)'); grd.addColorStop(0.55, 'rgba(0,0,0,0.12)'); grd.addColorStop(1, 'rgba(0,0,0,0)');
+      g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+      const fs = fitBox.getSize(new THREE.Vector3());
+      const shadow = new THREE.Mesh(new THREE.PlaneGeometry(fs.x * 1.5 + r * 0.1, fs.z * 1.5 + r * 0.1),
+        new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, toneMapped: false }));
+      shadow.rotation.x = -Math.PI / 2; shadow.position.y = fitBox.min.y - r * 0.002; shadow.renderOrder = -1;
+      this.scene.add(shadow); this._shadow = shadow;
+      // Frame the model's box (not its bounding sphere) from the starting direction, so tall
+      // or flat parts fill the stage instead of sitting small in the middle.
+      const dir = new THREE.Vector3(...(this.opts.view || [1, 0.75, 1.15])).normalize();
+      const fwd = dir.clone().negate(), right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+      const upv = new THREE.Vector3().crossVectors(right, fwd);
+      const tanV = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)), tanH = tanV * Math.max(this.camera.aspect, 0.3);
+      let need = 0;
+      for (const x of [fitBox.min.x, fitBox.max.x]) for (const y of [fitBox.min.y, fitBox.max.y]) for (const z of [fitBox.min.z, fitBox.max.z]) {
+        const corner = new THREE.Vector3(x, y, z);
+        const toward = corner.dot(dir);
+        need = Math.max(need, toward + Math.abs(corner.dot(right)) / tanH, toward + Math.abs(corner.dot(upv)) / tanV);
+      }
+      const fitDist = Math.min(dist, need * 1.12);
+      this._home = dir.multiplyScalar(fitDist);
+      this.controls.minDistance = Math.min(r * 0.6, fitDist * 0.5);
       this.controls.maxDistance = dist * 5;
       this.resetView();
       this._setStatus('done');
+      if (this.opts.onLoad) this.opts.onLoad(this);
     }
 
     async _loadStep(src) {
@@ -277,6 +333,8 @@
         });
       }
       if (this.controls) this.controls.dispose();
+      if (this._envTex) this._envTex.dispose();
+      if (this._shadow) this._shadow.material.map.dispose();
       if (this.renderer) { this.renderer.dispose(); this.renderer.forceContextLoss(); }
       this.root.remove();
     }
@@ -317,6 +375,61 @@
     dispose() { this._disposed = true; this.root.remove(); }
   }
 
+  // ------------------------------------------------------------------ PDF drawings
+  const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  class PdfViewer {
+    constructor(host, opts) {
+      this.root = document.createElement('div');
+      this.root.className = 'pdf-host';
+      host.appendChild(this.root);
+      this.pages = document.createElement('div');
+      this.pages.className = 'pdf-pages';
+      this.root.appendChild(this.pages);
+      this.status = document.createElement('div');
+      this.status.className = 'viewer-status';
+      this.status.innerHTML = '<div><div class="spin"></div><span>Loading drawing…</span></div>';
+      this.root.appendChild(this.status);
+      this.zoom = 1;
+      const bar = document.createElement('div');
+      bar.className = 'viewer-tools';
+      const mk = (txt, label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'icon-btn'; b.textContent = txt; b.title = label; b.setAttribute('aria-label', label); b.addEventListener('click', fn); bar.appendChild(b); };
+      mk('−', 'Zoom out', () => this._setZoom(this.zoom / 1.4));
+      mk('+', 'Zoom in', () => this._setZoom(this.zoom * 1.4));
+      const a = document.createElement('a'); a.className = 'icon-btn'; a.href = opts.src; a.target = '_blank'; a.rel = 'noopener'; a.title = 'Open PDF'; a.setAttribute('aria-label', 'Open PDF');
+      a.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
+      bar.appendChild(a);
+      this.root.appendChild(bar);
+      this._open(opts.src).catch(err => { console.error('[portfolio] pdf failed', err); if (!this._disposed) this.status.innerHTML = `<div>Could not show the drawing. <a href="${opts.src}" target="_blank" rel="noopener">Open the PDF</a></div>`; });
+    }
+    async _open(src) {
+      await loadOnce('pdfjs', () => loadScript(PDFJS + 'pdf.min.js'));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+      this.doc = await window.pdfjsLib.getDocument(src).promise;
+      if (this._disposed) return;
+      await this._render();
+      this.status.hidden = true;
+    }
+    async _render() {
+      const token = (this._token = {});
+      this.pages.innerHTML = '';
+      const width = Math.max(200, this.root.clientWidth - 24) * this.zoom;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      for (let n = 1; n <= this.doc.numPages; n++) {
+        const page = await this.doc.getPage(n);
+        if (this._disposed || token !== this._token) return;
+        const v1 = page.getViewport({ scale: 1 });
+        const vp = page.getViewport({ scale: (width / v1.width) * dpr });
+        const c = document.createElement('canvas');
+        c.width = vp.width; c.height = vp.height; c.style.width = width + 'px';
+        this.pages.appendChild(c);
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }
+    }
+    _setZoom(z) { this.zoom = Math.min(4, Math.max(0.5, z)); if (this.doc) this._render(); }
+    dispose() { this._disposed = true; if (this.doc) this.doc.destroy(); this.root.remove(); }
+  }
+
   window.ModelViewer = ModelViewer;
   window.PcbViewer = PcbViewer;
+  window.PdfViewer = PdfViewer;
 })();
