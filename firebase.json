@@ -56,6 +56,14 @@
         "destination": "/timer-setup.html"
       },
       {
+        "source": "/portfolio",
+        "destination": "/portfolio/index.html"
+      },
+      {
+        "source": "/portfolio/",
+        "destination": "/portfolio/index.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
@@ -82,6 +90,13 @@
       },
       {
         "source": "index.html",
+        "headers": [
+          { "key": "Cache-Control", "value": "no-cache" }
+        ]
+      },
+      {
+        "comment": "Portfolio edits should show up on the next visit, not after the 1-hour JS cache.",
+        "source": "/portfolio/**/*.@(js|css|html)",
         "headers": [
           { "key": "Cache-Control", "value": "no-cache" }
         ]

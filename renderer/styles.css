@@ -13888,6 +13888,27 @@ embed.eco-media-content { object-fit: fill; }
 }
 .hw-pen-val.is-auto { border-color: transparent; color: var(--accent); cursor: default; }
 .hw-group-val { min-width: 10px; font-size: 11.5px; color: var(--text-muted); }
+/* ⚙ next to Mess + its fine-tune popover (fixed: the toolbar scrolls sideways and would clip it) */
+.hw-more {
+  position: relative; padding: 1px 4px; border-radius: 5px; border: var(--border-width, 1px) solid transparent;
+  background: transparent; cursor: pointer; font-size: 13px; line-height: 1.1; color: var(--text-muted);
+}
+.hw-more:hover, .hw-more.active { color: var(--accent); border-color: var(--border-color); }
+.hw-more.tuned::after { content: ''; position: absolute; top: 0; right: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.hw-pop {
+  position: fixed; z-index: 1000; width: 270px; padding: 10px 12px; box-sizing: border-box;
+  max-height: calc(100vh - 16px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+  background: var(--bg-elevated, var(--bg-secondary)); border: var(--border-width, 1px) solid var(--border-color);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.hw-pop[hidden] { display: none; }
+.hw-pop-head { margin-top: 4px; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.hw-pop-row { display: grid; grid-template-columns: 64px 1fr 66px; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-secondary); }
+.hw-pop-row input[type="range"] { width: 100%; min-width: 0; accent-color: var(--accent); }
+.hw-pop-val { font-size: 11.5px; color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.hw-pop-foot { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.hw-pop-note { flex: 1; font-size: 11px; color: var(--text-muted); line-height: 1.3; }
 .hw-commit { padding: 4px 10px; font-size: 12px; }
 .hw-sections {
   display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; max-height: 32%; overflow-y: auto;

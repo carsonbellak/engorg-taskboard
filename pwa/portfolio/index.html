@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio</title>
+  <meta name="description" content="Engineering portfolio: projects, interactive CAD models and PCB designs.">
+  <meta name="theme-color" content="#14161b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <link rel="icon" href="/icon-192.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/portfolio/portfolio.css">
+</head>
+<body>
+  <a class="skip" href="#projects">Skip to projects</a>
+
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#" data-brand></a>
+      <nav class="topnav" aria-label="Sections">
+        <a href="#projects">Projects</a>
+        <a href="#about">About</a>
+        <a href="#contact">Contact</a>
+        <a class="btn btn-sm btn-primary" data-resume hidden target="_blank" rel="noopener">Resume</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero wrap">
+      <div class="hero-text">
+        <span class="chip chip-status" data-status hidden></span>
+        <h1 data-name></h1>
+        <p class="hero-role" data-role></p>
+        <p class="hero-tagline" data-tagline></p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#projects">See projects</a>
+          <a class="btn" data-resume hidden target="_blank" rel="noopener">Download resume</a>
+        </div>
+      </div>
+      <figure class="hero-viewer" data-hero hidden>
+        <div class="stage" data-hero-stage></div>
+        <figcaption class="mono" data-hero-caption></figcaption>
+      </figure>
+    </section>
+
+    <section id="projects" class="wrap section">
+      <div class="section-head">
+        <h2>Projects</h2>
+        <div class="filters" role="toolbar" aria-label="Filter projects" data-filters></div>
+      </div>
+      <div class="grid" data-grid></div>
+    </section>
+
+    <section id="about" class="wrap section about">
+      <div class="about-text">
+        <h2>About</h2>
+        <div data-about></div>
+      </div>
+      <div class="about-side">
+        <img class="about-photo" data-photo alt="" hidden>
+        <div class="skills" data-skills></div>
+      </div>
+    </section>
+
+    <section id="contact" class="wrap section contact">
+      <h2>Get in touch</h2>
+      <div class="contact-links" data-contact></div>
+    </section>
+  </main>
+
+  <footer class="wrap footer mono"><span data-footer></span></footer>
+
+  <dialog class="project" data-dialog aria-labelledby="pd-title">
+    <div class="pd">
+      <div class="pd-media">
+        <div class="pd-stage" data-pd-stage></div>
+        <p class="pd-caption mono" data-pd-caption></p>
+        <div class="pd-thumbs" data-pd-thumbs role="tablist" aria-label="Media"></div>
+      </div>
+      <div class="pd-info">
+        <button class="icon-btn pd-close" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+        <p class="pd-date mono" data-pd-date></p>
+        <h2 id="pd-title" data-pd-title></h2>
+        <div class="tags" data-pd-tags></div>
+        <p class="pd-notice" data-pd-notice hidden></p>
+        <div class="pd-body" data-pd-body></div>
+        <div class="pd-links" data-pd-links></div>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="/portfolio/content.js"></script>
+  <script src="/portfolio/viewers.js"></script>
+  <script src="/portfolio/portfolio.js"></script>
+</body>
+</html>

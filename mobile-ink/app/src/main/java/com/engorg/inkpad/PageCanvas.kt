@@ -126,7 +126,10 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     // Draw-and-hold: finish a stroke, keep the pen still for a beat, and it snaps to a straight line
     // from where it started (then follows the pen as a rubber band, snapping level/plumb near 0°/90°).
+    // A closed loop snaps instead to the shape it resembles ([snapped]), committed as an editable shape.
     private var straightened = false
+    private var snapped: ShapeSpec? = null
+    private var snappedPage = 0
     private val holdAnchor = PointF()
     private val holdToStraight = Runnable { straightenStroke() }
     private val holdMs = 600L
@@ -582,7 +585,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
     private fun updateWet() {
         val wPx = pageUnitSize(currentHighlighter) * scale
         wetOverlay.setStroke(samples.map { PointF(it.x, it.y) }, host.brushColor, wPx, currentHighlighter, currentBrush)
-        val showBall = leashPx() > 1f && samples.isNotEmpty() && !straightened
+        val showBall = leashPx() > 1f && samples.isNotEmpty() && !straightened && snapped == null
         wetOverlay.setBall(ballX, ballY, headX, headY, (wPx / 2f).coerceAtLeast(dp(7).toFloat()), showBall)
         mirror?.let { m ->
             // Only the samples added since the last send (converting the whole stroke on every move
@@ -608,12 +611,41 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
 
     /** Pen held still after a stroke: replace it with a straight line from its first point. */
     private fun straightenStroke() {
-        if (mode != Mode.DRAW || straightened || host.pendingShape != null || samples.isEmpty()) return
+        if (mode != Mode.DRAW || straightened || snapped != null || host.pendingShape != null || samples.isEmpty()) return
+        if (snapToShape()) return
         val s0 = samples.first()
         if (hypot(ballX - s0.x, ballY - s0.y) < dp(24)) return   // a dot / tiny tick — leave it be
         straightened = true
         performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
         setStraightTo(ballX, ballY)
+    }
+
+    /**
+     * Pen held still on a closed loop: if it resembles a rectangle, circle/ellipse, triangle or other
+     * four-cornered outline, show that clean shape in place of the ink. It's committed on lift
+     * ([commitSnapped]); further pen movement before then is ignored.
+     */
+    private fun snapToShape(): Boolean {
+        val (page, pts) = samplesToPage() ?: return false
+        val m = ShapeRecognizer.detect(pts) ?: return false
+        val spec = ShapeSpec(m.type, m.verts)
+        snapped = spec; snappedPage = page
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        // Preview: the shape's outline as the wet stroke, back in screen space.
+        val top = finishedView.pageTop(page)
+        samples.clear()
+        for (part in spec.parts()) for (p in part.pts) samples.add(Sample(p.x * scale + tx, (p.y + top) * scale + ty))
+        mirrorSent = Int.MAX_VALUE   // a replaced stroke: the mirror gets it whole
+        updateWet()
+        return true
+    }
+
+    /** Lay the snapped shape on its page in the current pen, like one placed from the Shapes menu. */
+    private fun commitSnapped(spec: ShapeSpec) {
+        if (snappedPage !in finishedView.pages.indices) return
+        finishedView.pages[snappedPage].recs.add(buildShapeRec(spec, host.brushColor, pageUnitSize(currentHighlighter), currentHighlighter))
+        finishedView.invalidate(); savePage(snappedPage)
+        mirror?.pageEdited(this, snappedPage)
     }
 
     /** Rebuild the wet stroke as a straight line from its start to ([ex],[ey]), snapping level/plumb. */
@@ -713,7 +745,8 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 if (addArmed) { if (hypot(event.getX(idx) - lastPanX, event.getY(idx) - lastPanY) > dp(12)) addArmed = false; return true }
                 when (mode) {
                     Mode.DRAW -> {
-                        if (straightened) setStraightTo(event.getX(idx), event.getY(idx))
+                        if (snapped != null) { /* the shape holds until the pen lifts */ }
+                        else if (straightened) setStraightTo(event.getX(idx), event.getY(idx))
                         else {
                             captureSamples(event, idx); updateWet()
                             // Re-arm the hold timer whenever the pen actually travels.
@@ -754,7 +787,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
                 }
                 if (addArmed) { addArmed = false; if (!cancel) addPage() }
                 else when (mode) {
-                    Mode.DRAW -> { if (!cancel) { if (host.pendingShape != null) commitPendingShape() else commitSamples() }; straightened = false; wetOverlay.clear(); samples.clear(); mirrorSent = 0; mirror?.wetCleared(this) }
+                    Mode.DRAW -> { if (!cancel) { val sn = snapped; if (sn != null) commitSnapped(sn) else if (host.pendingShape != null) commitPendingShape() else commitSamples() }; straightened = false; snapped = null; wetOverlay.clear(); samples.clear(); mirrorSent = 0; mirror?.wetCleared(this) }
                     Mode.ERASE -> if (dirtyErase) { dirtyErase = false; savePage(currentPage()) }
                     Mode.SELECT -> endSelect()
                     else -> {}
@@ -785,7 +818,7 @@ class PageCanvas(context: Context, private val store: NotebookStore, private val
         pushUndo()
         currentHighlighter = host.tool == Tool.HIGHLIGHTER
         currentBrush = if (currentHighlighter) Brush.PEN else host.brush
-        straightened = false; holdAnchor.set(event.getX(idx), event.getY(idx))
+        straightened = false; snapped = null; holdAnchor.set(event.getX(idx), event.getY(idx))
         samples.clear(); smInit = false; captureSamples(event, idx); updateWet()
     }
 

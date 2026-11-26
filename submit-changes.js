@@ -37,6 +37,8 @@ const CACHE_DIR = path.join(os.homedir(), '.engorg-submit');
 const CLONE_DIR = path.join(CACHE_DIR, repo);
 // Skip binaries/installer artifacts — this flow is for source/text changes.
 const BINARY_EXT = /\.(exe|zip|log|dll|node|wasm|bin|dat|ico|icns|png|jpe?g|gif|webp|woff2?|ttf|otf|mp4|mov|pdf|docx|xlsx|pptx)$/i;
+// Binary files under this path DO ship (public portfolio media served by Firebase Hosting).
+const BINARY_ALLOW = /^pwa\/portfolio\/assets\//;
 // Source dirs the app ships that the repo may not track yet. Only tracked top-level
 // dirs are walked, so a brand-new source dir has to be listed here to be picked up.
 const SOURCE_TOP = ['core', 'pi'];
@@ -120,9 +122,13 @@ function walk(absDir, rel, allowTop, out) {
       if (rel === '' && allowTop && !allowTop.has(e.name)) continue;
       walk(abs, r, allowTop, out);
     } else if (e.isFile()) {
-      // Root files (incl. brand-new ones) are always eligible; skip binaries.
-      if (BINARY_EXT.test(e.name)) continue;
-      if (looksBinary(abs)) continue;
+      // Root files (incl. brand-new ones) are always eligible; skip binaries,
+      // except portfolio media (photos, STL/GLB models, resume PDF), which the
+      // PWA hosting deploy from the clone needs to serve /portfolio.
+      if (!BINARY_ALLOW.test(r)) {
+        if (BINARY_EXT.test(e.name)) continue;
+        if (looksBinary(abs)) continue;
+      }
       out.push(r);
     }
   }

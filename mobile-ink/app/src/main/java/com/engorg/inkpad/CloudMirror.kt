@@ -67,6 +67,9 @@ class CloudMirror(private val ctx: Context, private val acct: CloudAuth.Account)
     @Volatile private var notebook: String? = null
     @Volatile private var view: String? = null
     private val pages = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    // Background keys already uploaded for the open notebook (index -> key).
+    private val bgWritten = java.util.concurrent.ConcurrentHashMap<Int, String>()
+    @Volatile private var openId: String? = null
     @Volatile private var metaDirty = false
     @Volatile private var stopped = false
     private var flushQueued = false
@@ -96,7 +99,19 @@ class CloudMirror(private val ctx: Context, private val acct: CloudAuth.Account)
     fun send(o: JSONObject) {
         if (stopped) return
         when (o.optString("t")) {
-            "open" -> { notebook = JSONObject(o.toString()).apply { remove("t") }.toString(); pages.clear(); metaDirty = true; schedule(150) }
+            "open" -> {
+                val id = o.optString("id")
+                if (id != openId) { openId = id; bgWritten.clear() }
+                notebook = JSONObject(o.toString()).apply { remove("t") }.toString(); pages.clear(); metaDirty = true; schedule(150)
+            }
+            "bg" -> {
+                // Page backgrounds don't change, so each goes up once per notebook, straight away.
+                val index = o.optInt("index"); val key = o.optString("key")
+                if (bgWritten[index] == key) return
+                bgWritten[index] = key
+                val nb = o.optString("nb"); val img = o.optString("img")
+                try { io.execute { try { writeBg(index, nb, key, img) } catch (e: Exception) { bgWritten.remove(index); android.util.Log.w("EngInk", "cloud mirror bg failed", e) } } } catch (_: Exception) {}
+            }
             "page" -> { pages[o.optInt("index")] = o.optJSONArray("recs")?.toString() ?: "[]"; schedule(350) }
             "view" -> { view = JSONObject(o.toString()).apply { remove("t") }.toString(); metaDirty = true; schedule(900) }
         }
@@ -159,5 +174,12 @@ class CloudMirror(private val ctx: Context, private val acct: CloudAuth.Account)
         val z = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP)
         if (z.length > 1_000_000) return   // past Firestore's 1 MB document limit: skip rather than fail the rest
         patch("$docs/pages/p$index", JSONObject().put("session", s(session)).put("index", i(index.toLong())).put("z", s(z)).put("updatedAt", i(System.currentTimeMillis())))
+    }
+
+    /** A page's background image (base64 JPEG, already sized under the doc limit), beside its strokes. */
+    private fun writeBg(index: Int, nb: String, key: String, img: String) {
+        if (stopped) return
+        patch("$docs/pages/b$index", JSONObject().put("session", s(session)).put("index", i(index.toLong()))
+            .put("nb", s(nb)).put("key", s(key)).put("img", s(img)).put("updatedAt", i(System.currentTimeMillis())))
     }
 }

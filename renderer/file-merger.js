@@ -6,13 +6,16 @@
 // (renderer/lib/pdf-lib.min.js → window.PDFLib): PDF inputs have their pages
 // copied straight in; image inputs are embedded on their own page. Arbitrary image
 // formats (webp/gif/bmp, or odd JP/PNG variants) are normalized through a <canvas>
-// to PNG bytes that pdf-lib can embed. The native open/save dialogs and the actual
+// to PNG bytes that pdf-lib can embed. TIFFs (which Chromium can't decode at all)
+// are decoded in main by Windows' own codec (window.api.fileMerger.decodeTiff) into
+// one PNG per page plus its DPI, so a multi-page scan becomes that many PDF pages at
+// its true physical size. The native open/save dialogs and the actual
 // file write live in main (window.api.fileMerger.* → ipc/file-merger.js). Reading
 // each input's bytes reuses window.api.files.readBinary. Desktop-only utility.
 
 const fileMerger = (() => {
   const PAGE_SIZES = { letter: [612, 792], a4: [595.28, 841.89] };
-  const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp']);
+  const IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'tif', 'tiff']);
 
   let mounted = false;
   let files = [];        // [{ uid, name, path, ext, size, meta }]
@@ -29,6 +32,7 @@ const fileMerger = (() => {
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
   const isPdf = (f) => f.ext === 'pdf';
+  const isTiff = (f) => f.ext === 'tif' || f.ext === 'tiff';
   const iconFor = (f) => (isPdf(f) ? '📄' : '🖼️');
 
   // ---- mount / render ------------------------------------------------------
@@ -162,7 +166,7 @@ const fileMerger = (() => {
       const ext = (p.ext || (p.name.split('.').pop() || '')).toLowerCase();
       if (ext !== 'pdf' && !IMAGE_EXTS.has(ext)) continue; // ignore unsupported picks
       counter += 1;
-      const entry = { uid: 'fm' + counter, name: p.name, path: p.path, ext, size: p.size || 0, meta: '' };
+      const entry = { uid: 'fm' + counter, name: p.name, path: p.path, ext, size: p.size || 0, meta: '', tiff: null };
       files.push(entry);
       describe(entry); // fill in page count / dimensions in the background
     }
@@ -173,6 +177,13 @@ const fileMerger = (() => {
   // Non-blocking metadata: PDF page count / image pixel dimensions.
   async function describe(entry) {
     try {
+      if (isTiff(entry)) {
+        const pages = await tiffPages(entry);
+        const n = pages.length, first = pages[0];
+        entry.meta = `TIFF · ${n} page${n === 1 ? '' : 's'} · ${first.width}×${first.height} · ${fmtBytes(entry.size)}`;
+        updateMeta(entry);
+        return;
+      }
       const ab = await window.api.files.readBinary(entry.path);
       const bytes = new Uint8Array(ab);
       if (isPdf(entry)) {
@@ -186,9 +197,30 @@ const fileMerger = (() => {
     } catch (_) {
       entry.meta = `${entry.ext.toUpperCase()} · ${fmtBytes(entry.size)}`;
     }
-    // Update just this row's meta if still present
+    updateMeta(entry);
+  }
+
+  // Update just this row's meta if still present
+  function updateMeta(entry) {
     const row = document.querySelector(`.fmerge-row[data-uid="${entry.uid}"] .fmerge-meta`);
     if (row) row.textContent = entry.meta;
+  }
+
+  // Decoded TIFF pages ([{ bytes: PNG, width, height, dpiX, dpiY }]). Started when the
+  // file is added (for the row's page count) and reused by merge; a failure is not
+  // cached, so merging retries it.
+  function tiffPages(entry) {
+    if (!entry.tiff) {
+      if (!window.api.fileMerger || typeof window.api.fileMerger.decodeTiff !== 'function') {
+        return Promise.reject(new Error('TIFF support needs a full app restart'));
+      }
+      entry.tiff = window.api.fileMerger.decodeTiff(entry.path).then((res) => {
+        if (!res || res.error || !res.pages || !res.pages.length) throw new Error((res && res.error) || 'no pages in TIFF');
+        return res.pages;
+      });
+      entry.tiff.catch(() => { entry.tiff = null; });
+    }
+    return entry.tiff;
   }
 
   function imageDimensions(bytes, ext) {
@@ -203,7 +235,7 @@ const fileMerger = (() => {
   }
 
   function mimeFor(ext) {
-    return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp' })[ext] || 'application/octet-stream';
+    return ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff' })[ext] || 'application/octet-stream';
   }
 
   // ---- merge ---------------------------------------------------------------
@@ -224,6 +256,17 @@ const fileMerger = (() => {
         const f = files[i];
         setStatus(`Processing ${i + 1}/${files.length}: ${f.name}…`);
         try {
+          if (isTiff(f)) {
+            const pages = await tiffPages(f);
+            for (const pg of pages) {
+              const img = await outDoc.embedPng(new Uint8Array(pg.bytes));
+              // Scans carry their DPI — size the page physically (300 dpi letter → 8.5×11 in)
+              const ptX = pg.dpiX > 1 ? 72 / pg.dpiX : 1, ptY = pg.dpiY > 1 ? 72 / pg.dpiY : 1;
+              placeImage(outDoc, img, img.width * ptX, img.height * ptY);
+              pagesAdded++;
+            }
+            continue;
+          }
           const ab = await window.api.files.readBinary(f.path);
           const bytes = new Uint8Array(ab);
           if (isPdf(f)) {
@@ -277,7 +320,11 @@ const fileMerger = (() => {
 
   async function addImagePage(outDoc, ext, bytes) {
     const img = await embedImage(outDoc, ext, bytes);
-    const iw = img.width, ih = img.height;
+    placeImage(outDoc, img, img.width, img.height);
+  }
+
+  // Put an embedded image on its own page. iw/ih = its natural size in points.
+  function placeImage(outDoc, img, iw, ih) {
     if (pageSize === 'auto') {
       const page = outDoc.addPage([iw, ih]);
       page.drawImage(img, { x: 0, y: 0, width: iw, height: ih });

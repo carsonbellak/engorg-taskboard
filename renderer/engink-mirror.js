@@ -10,7 +10,8 @@
 // Wire format (from MirrorClient.kt):
 //   { t:'server', running, error? }                         server up/down
 //   { t:'client', connected, device, version? }             a tablet paired / dropped
-//   { t:'open', id, title, paper, pageColor, pageCount }     notebook opened (resets model)
+//   { t:'open', id, title, paper, pageColor, pageCount, bgs? } notebook opened (resets model); bgs = per-page background key or null
+//   { t:'bg', nb, index, key, img }                          a page's background image (imported PDF page), base64 JPEG
 //   { t:'page', index, recs:[{ c,w,h,k,d?,segs:[[[x,y]...]] }] } a page's committed strokes (d=dashed shape)
 //   { t:'wet', page, pts:[[x,y]...], c, w, h }               in-progress stroke (older tablets: the whole stroke)
 //   { t:'wetAdd', page, pts, c, w, h, reset }                in-progress stroke, just the new points
@@ -35,7 +36,18 @@ const enginkMirror = (() => {
     view: null,              // { scale, tx, ty, page } — tablet viewport
     pinnedPage: null,        // when the user browses pages themselves (free-look)
     showPair: false,         // pairing details opened from the status chip while connected
+    bgImgs: new Map(),       // background key -> decoded Image (imported PDF pages); survives re-opens
   };
+  const BG_KEEP = 60;        // decoded backgrounds kept (≈ a long PDF), oldest dropped first
+
+  /** The decoded background for page [i], if the tablet sent one. */
+  function pageBg(i) {
+    const keys = model.notebook && model.notebook.bgs;
+    const key = keys && keys[i];
+    const im = key && model.bgImgs.get(key);
+    return im && im.complete && im.naturalWidth ? im : null;
+  }
+  function drawBg(c, i, w, h) { const im = pageBg(i); if (im) c.drawImage(im, 0, 0, w, h); }
   // Desktop-side inspection transform (independent of the tablet).
   // mode 'page' fits the whole page; 'width' fills the width (scroll to move down the page).
   const look = { zoom: 1, panX: 0, panY: 0, mode: 'page' };
@@ -86,19 +98,37 @@ const enginkMirror = (() => {
           if (!active) showConnectCard(msg.device);
         } else {
           model.connected = model.connected.filter(c => c.device !== msg.device);
-          if (!model.connected.length) { model.notebook = null; model.pages.clear(); model.wet = null; model.view = null; hideConnectCard(); }
+          if (!model.connected.length) { model.notebook = null; model.pages.clear(); model.bgImgs.clear(); model.wet = null; model.view = null; hideConnectCard(); }
         }
         refreshStatus();
         requestRender();
         break;
       case 'open':
-        model.notebook = { id: msg.id, title: msg.title || 'Notebook', paper: msg.paper || 'GRID', pageColor: (msg.pageColor != null ? msg.pageColor : -1), pageCount: msg.pageCount || 1 };
+        model.notebook = { id: msg.id, title: msg.title || 'Notebook', paper: msg.paper || 'GRID', pageColor: (msg.pageColor != null ? msg.pageColor : -1), pageCount: msg.pageCount || 1, bgs: Array.isArray(msg.bgs) ? msg.bgs : null };
         model.pages.clear(); model.wet = null; model.pinnedPage = null;
         refreshStatus(); requestRender();
         break;
       case 'page':
         if (Array.isArray(msg.recs)) model.pages.set(msg.index, msg.recs);
         requestRender();
+        break;
+      case 'bg': {
+        if (!msg.key || !msg.img) break;   // keyed by unique page file; drawn only where the open notebook lists it
+        if (model.bgImgs.has(msg.key)) break;
+        const im = new Image();
+        im.onload = () => requestRender();
+        im.src = 'data:image/jpeg;base64,' + msg.img;
+        model.bgImgs.set(msg.key, im);
+        while (model.bgImgs.size > BG_KEEP) model.bgImgs.delete(model.bgImgs.keys().next().value);
+        break;
+      }
+      case 'meta':
+        // Same notebook, changed shape (internet mirroring): page count / backgrounds without a reset.
+        if (model.notebook && msg.id === model.notebook.id) {
+          if (msg.pageCount) model.notebook.pageCount = msg.pageCount;
+          if (Array.isArray(msg.bgs)) model.notebook.bgs = msg.bgs;
+          updatePageLabel(); requestRender();
+        }
         break;
       case 'wet':
         model.wet = { page: msg.page, pts: msg.pts || [], c: msg.c, w: msg.w, h: !!msg.h };
@@ -246,8 +276,9 @@ const enginkMirror = (() => {
     // clip to page for paper + strokes
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, pageW, pageH); ctx.clip();
-    drawPaper(nb.paper, nb.pageColor, s);
     const p = curPage();
+    drawBg(ctx, p, pageW, pageH);
+    drawPaper(nb.paper, nb.pageColor, s);
     drawRecs(model.pages.get(p), s);
     if (model.wet && model.wet.page === p && model.wet.pts.length) {
       ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -324,6 +355,7 @@ const enginkMirror = (() => {
       // paper + strokes via the shared drawing on a temporary ctx binding
       const savedCtx = ctx; ctx = cx;
       cx.save(); cx.beginPath(); cx.rect(0, 0, PAGE_W, PAGE_H); cx.clip();
+      drawBg(cx, i, PAGE_W, PAGE_H);
       drawPaper(nb.paper, nb.pageColor, s);
       drawRecs(model.pages.get(i), s);
       cx.restore();
@@ -357,6 +389,7 @@ const enginkMirror = (() => {
       cx.fillStyle = rgb(nb.pageColor); cx.fillRect(0, 0, c.width, c.height);
       const savedCtx = ctx; ctx = cx;
       cx.save(); cx.beginPath(); cx.rect(0, 0, c.width, c.height); cx.clip();
+      drawBg(cx, i, c.width, c.height);
       drawPaper(nb.paper, nb.pageColor, k);
       drawRecs(model.pages.get(i), k);
       cx.restore();
@@ -566,6 +599,7 @@ const enginkMirror = (() => {
         snap.docChanges().forEach(async (ch) => {
           if (ch.type === 'removed') return;
           const d = ch.doc.data();
+          if (d.img) { handle({ t: 'bg', nb: d.nb, index: d.index, key: d.key, img: d.img }); return; }
           try { handle({ t: 'page', index: d.index, recs: JSON.parse(await gunzip(d.z)) }); } catch (e) { console.warn('EngInk cloud page failed', e); }
         });
       }, err => console.warn('EngInk cloud pages:', err && err.code));
@@ -588,6 +622,7 @@ const enginkMirror = (() => {
       try {
         const nb = d.notebook ? JSON.parse(d.notebook) : null;
         if (nb && nb.id !== notebookId) { notebookId = nb.id; handle(Object.assign({ t: 'open' }, nb)); watchPages(base, d.session); }
+        else if (nb) handle({ t: 'meta', id: nb.id, pageCount: nb.pageCount, bgs: nb.bgs });
         if (d.view) handle(Object.assign({ t: 'view' }, JSON.parse(d.view)));
       } catch (_) { /* malformed meta — wait for the next write */ }
     }

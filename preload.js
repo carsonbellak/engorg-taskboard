@@ -323,6 +323,7 @@ const __api = {
   // The merge itself runs in the renderer with the bundled pdf-lib global.
   fileMerger: {
     selectFiles: () => ipcRenderer.invoke('fileMerger:selectFiles'),
+    decodeTiff: (filePath) => ipcRenderer.invoke('fileMerger:decodeTiff', filePath),
     save: (bytes, defaultName) => ipcRenderer.invoke('fileMerger:save', bytes, defaultName),
   },
   // Handwriter — LaTeX → handwriting pages are drawn in the renderer; main only saves the PDF/PNG.

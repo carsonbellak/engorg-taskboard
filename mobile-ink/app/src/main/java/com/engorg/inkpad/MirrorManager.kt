@@ -110,6 +110,7 @@ object MirrorManager : PageCanvas.MirrorSink {
     }
 
     fun disconnect() {
+        bgGen++   // stop any background images still queued for the old link
         try { ws?.close(1000, null) } catch (_: Exception) {}
         ws = null
         cloud?.stop(); cloud = null
@@ -198,6 +199,59 @@ object MirrorManager : PageCanvas.MirrorSink {
         .put("t", "open").put("id", pane.notebook.id).put("title", pane.notebook.title)
         .put("paper", pane.finishedView.paperStyle.name).put("pageColor", pane.finishedView.pageColor)
         .put("pageCount", pane.finishedView.pages.size)
+        // Which background (an imported PDF page) each page has, by key; the images follow as "bg" messages.
+        .put("bgs", JSONArray().apply { for (p in pane.finishedView.pages) put(p.bgFile?.name ?: JSONObject.NULL) })
+
+    // ---- page backgrounds (imported PDF pages) ----
+    // Sent as JPEGs on their own thread, nearest the current page first, so a long PDF never holds up
+    // the ink queued behind it. Each is encoded once per mode and reused on the next reflect.
+    private val bgOut = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var bgGen = 0
+    private val bgEncoded = object : android.util.LruCache<String, String>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: String) = value.length
+    }
+
+    private fun queueBackgrounds(pane: PageCanvas) {
+        val gen = ++bgGen
+        val files = pane.finishedView.pages.map { it.bgFile }
+        if (files.all { it == null }) return
+        val nbId = pane.notebook.id
+        val first = pane.currentPage().coerceIn(0, files.size - 1)
+        val order = files.indices.sortedBy { kotlin.math.abs(it - first) }
+        val small = cloud != null
+        try {
+            bgOut.execute {
+                for (i in order) {
+                    if (gen != bgGen || !connected) return@execute
+                    val f = files[i] ?: continue
+                    val cacheKey = f.name + if (small) ":c" else ":l"
+                    val img = bgEncoded.get(cacheKey) ?: (runCatching { encodeBg(f, small) }.getOrNull()?.also { bgEncoded.put(cacheKey, it) }) ?: continue
+                    if (gen != bgGen) return@execute
+                    send(JSONObject().put("t", "bg").put("nb", nbId).put("index", i).put("key", f.name).put("img", img))
+                }
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** A page background as base64 JPEG, sized for the link: full res on the LAN, under Firestore's 1 MB doc limit for the cloud. */
+    private fun encodeBg(f: java.io.File, small: Boolean): String? {
+        val src = android.graphics.BitmapFactory.decodeFile(f.path) ?: return null
+        val maxW = if (small) 1224 else 1632
+        val bmp = if (src.width > maxW) android.graphics.Bitmap.createScaledBitmap(src, maxW, (src.height * maxW.toFloat() / src.width).toInt(), true) else src
+        try {
+            val budget = if (small) 700_000 else 4_000_000
+            for (q in intArrayOf(80, 65, 50, 35)) {
+                val bos = java.io.ByteArrayOutputStream()
+                bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, q, bos)
+                val b64 = android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP)
+                if (b64.length <= budget) return b64
+            }
+            return null
+        } finally {
+            if (bmp !== src) bmp.recycle()
+            src.recycle()
+        }
+    }
 
     /** Snapshot a page's recs (cheap; recs are immutable) and serialize + send it in the background, newest wins. */
     private fun queuePage(pane: PageCanvas, index: Int) {
@@ -250,6 +304,7 @@ object MirrorManager : PageCanvas.MirrorSink {
         bg { send(open) }
         for (i in pane.finishedView.pages.indices) queuePage(pane, i)
         sendView(pane)
+        queueBackgrounds(pane)
     }
 
     private fun flushWet() {
