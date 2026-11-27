@@ -8,7 +8,11 @@
       "serve.js",
       "firebase.json",
       "CLAUDE.md",
-      "**/.*"
+      "**/.*",
+      "portfolio/assets/models/little-blue-*",
+      "portfolio/assets/models/optical-probe-shell.stl",
+      "portfolio/assets/models/calibration-cube.stl",
+      "portfolio/assets/drawings/**"
     ],
     "rewrites": [
       {
@@ -72,39 +76,57 @@
       {
         "source": "**/*.js",
         "headers": [
-          { "key": "Cache-Control", "value": "max-age=3600" }
+          {
+            "key": "Cache-Control",
+            "value": "max-age=3600"
+          }
         ]
       },
       {
         "comment": "App shell must revalidate every load (Firebase applies the LAST matching rule), so a hosting deploy reaches installed PWAs immediately instead of being trapped behind a 1-hour cache. ETags keep this cheap (304s).",
         "source": "app.js",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
         ]
       },
       {
         "source": "styles.css",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
         ]
       },
       {
         "source": "index.html",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
         ]
       },
       {
-        "comment": "Portfolio edits should show up on the next visit, not after the 1-hour JS cache.",
-        "source": "/portfolio/**/*.@(js|css|html)",
+        "comment": "Every portfolio file (incl. multi-MB models) revalidates by ETag on each visit, so a deploy shows up immediately instead of after the 1-hour default cache.",
+        "source": "/portfolio/**",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
         ]
       },
       {
         "source": "sw.js",
         "headers": [
-          { "key": "Cache-Control", "value": "no-cache" }
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
         ]
       }
     ]

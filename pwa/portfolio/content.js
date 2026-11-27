@@ -35,17 +35,21 @@
 
 window.PORTFOLIO = {
   name: 'Carson Bellak',
-  role: 'Engineering Student',                          // TODO, e.g. "Electrical Engineering · Purdue '27"
+  role: 'Mechanical Engineering · Purdue \'28',
   tagline: '',                                         // optional one-liner under your name; '' shows none
   location: '',                                         // TODO (optional)
   status: '',                                          // (unused in the current layout)
   photo: '',                                            // TODO (optional) '/portfolio/assets/images/me.jpg'
   resume: '/portfolio/assets/resume.pdf',
+  assetVersion: '2026-11-27f',
+  // Biggest projects first (also orders the rotating showcase)
+  projectOrder: ['power-supply', 'optical-probe', 'spacer', 'socket-plate', 'wifi-checker', 'engorg', 'calibration'],
 
   contact: {
-    email: '',                                          // TODO
-    linkedin: '',                                       // TODO full URL
-    github: '',                                         // TODO full URL
+    email: 'bellakcarson@gmail.com',
+    phone: '(856) 394-0698',
+    linkedin: 'https://www.linkedin.com/in/carson-bellak-803927353/',
+    github: '',
   },
 
   // The interactive model in the header.
@@ -53,23 +57,26 @@ window.PORTFOLIO = {
   // `project` links the label to that project's section. Add an entry per model you make.
   showcase: [
     { model: '/portfolio/assets/models/optical-probe-mounted.glb', label: 'Optical probe shell', project: 'optical-probe', zUp: false },
-    { model: '/portfolio/assets/models/little-blue-mounted.glb', label: 'Little Blue test cabinet', project: 'little-blue', zUp: false },
+    { model: '/portfolio/assets/models/power-supply-mounted.glb', label: '3-phase precision power supply', project: 'power-supply', zUp: false },
     { model: '/portfolio/assets/models/socket-plate-mounted.glb', label: 'Meter socket plate', project: 'socket-plate', zUp: false, view: [-1, 0.6, -1.3] },
     { model: '/portfolio/assets/models/spacer-shelled-mounted.glb', label: 'Injection-molded spacer', project: 'spacer', zUp: false },
     { model: '/portfolio/assets/models/calibration-cube-mounted.glb', label: '3D-printer calibration cube', project: 'calibration', zUp: false, view: [0.75, 0.55, -1.3] },
-    { model: '/portfolio/assets/models/little-blue-exploded.glb', label: 'Little Blue, exploded', project: 'little-blue', zUp: false },
+    { model: '/portfolio/assets/models/power-supply-exploded.glb', label: 'Power supply, exploded', project: 'power-supply', zUp: false },
   ],
 
   about: [
-    'I\'m an engineering student working on test equipment for electricity meters: probe hardware, a test cabinet and the tools used to check meters in bulk.',
-    'Most of my work crosses disciplines: a board in KiCad, the enclosure or plate in Creo, then the Python that drives it on the bench. Outside work I build my own engineering tools, including the app this page is hosted on.',
+    'I\'m a Mechanical Engineering student at Purdue University, with a minor in mathematics, graduating in 2028.',
+    'I spent a full year as an R&D and testing co-op at Landis+Gyr, in the lab that qualifies the company\'s electricity meters against ANSI specifications. I ran hundreds of hardware validation tests there, and owned design projects from first sketch to production: an injection-molded spacer that cleared a failed customer qualification and shipped at 50,000 units, a ground-up 3-phase precision power supply, and the optical communication probe the company sells to its customers.',
+    'My work tends to cross disciplines. I have hundreds of hours in PTC Creo designing for injection molding and 3D printing, more than a hundred in KiCad on high-power and high-frequency boards, and I\'m IPC J-STD-001 certified for soldering and reflow. I also write the software around the hardware: test utilities that automate manual lab work, and the app this page is hosted on.',
+    'Off the clock I play golf, currently at a 7.5 handicap.',
   ],
 
   skills: [
-    { group: 'Mechanical & CAD', items: ['Creo Parametric', 'Assembly design', 'Engineering drawings', 'FDM 3D printing', 'Design for manufacturing'] },
-    { group: 'Electrical',       items: ['KiCad (4-layer boards)', 'Analog front ends (TIA)', 'USB / FTDI', 'Optical comms (ANSI C12.18)', 'Thermal & bench testing'] },
-    { group: 'Software',         items: ['Python (PyQt5, Tkinter)', 'JavaScript / Node.js', 'Electron', 'Kotlin / Android', 'Firebase', 'Git'] },
-    { group: 'Embedded & test',  items: ['Raspberry Pi', 'I²C', 'UART / RS-485', 'SSH automation', 'Test fixtures'] },
+    { group: 'Mechanical & CAD', items: ['PTC Creo', 'DFM for injection molding', 'Engineering drawings', 'Machining', 'Tight-tolerance hand fabrication'] },
+    { group: '3D printing',      items: ['PC-CF', 'PA6-GF', 'PP-CF', 'Production fixtures', 'Rapid prototyping'] },
+    { group: 'Electrical',       items: ['KiCad', 'High-power & high-frequency PCBs', 'LTspice', 'SMD soldering & reflow', 'IPC J-STD-001', 'Electrical wiring'] },
+    { group: 'Test & validation', items: ['ANSI meter qualification', 'Hardware validation testing', 'Root-cause troubleshooting', 'Oscilloscope', 'I²C'] },
+    { group: 'Software',         items: ['Python', 'JavaScript / Node.js', 'Electron', 'Kotlin / Android', 'Git'] },
   ],
 
   projects: [
@@ -77,66 +84,78 @@ window.PORTFOLIO = {
       id: 'optical-probe',
       short: 'Optical probe',
       title: 'Optical probe redesign',
-      date: '2026 · Industry project · REV0.D',
-      org: '',                                          // TODO (optional) employer name
-      summary: 'A redesigned USB optical probe for talking to electricity meters over their infrared port: a 4-layer board with a quad USB-UART bridge, an infrared transmitter and a transimpedance receiver, in a 3D-printed shell.',
+      date: '2026 · In production',
+      org: 'Landis+Gyr',
+      summary: 'The optical communication probe Landis+Gyr sells to its customers, redesigned from the ground up: a high-frequency board that reads and transmits meter pulses to 1 MHz, in a 3D-printed PC-CF housing rated for 85 °C at 85% humidity.',
       tags: ['Electrical', 'PCB', 'KiCad', '3D printing'],
-      notice: 'Portfolio copy. The board outline, part placement and packages are real. The routing, net names and component values were replaced with randomly generated ones, and the shell is shown as a simplified mesh, to protect my employer\'s design.',
+      notice: 'The board shown here is a portfolio copy: its outline, part placement and package sizes are real, but the routing, net names, component values and reference designators are randomized, and the 3D board is reduced to plain blocks, to protect my employer\'s design.',
       links: [],
       body: [
-        'Meters expose a standard infrared optical port (ANSI C12.18) for reading and configuration. This project was a ground-up redesign of the USB probe that clips onto that port, done on a small team through four board revisions.',
-        'The board pairs an FTDI FT4232H quad USB-to-UART bridge with an infrared LED transmitter and a photodiode receiver feeding a transimpedance amplifier and comparator. Mini-USB on one end, the optical head on the other, on a 23 × 60 mm four-layer board.',
-        'Most of the engineering was in the receive path. The goal was 921,600 baud, which needs clean edges of about 250 ns, while the first boards showed roughly 1 µs rise and 1.5 µs fall. Characterising that led to the main trade-off: the TIA feedback resistor sets gain against speed, so about 15 kΩ reaches 921,600 baud while about 50 kΩ is needed to pick up the meter\'s pulse output. It also pointed to the comparator as the next bottleneck.',
-        'I also designed the enclosure in Creo: a two-piece 3D-printed shell that splits down the middle around the board, a separate head that holds the LEDs at the optical port, and a silicone mold for casting the cable strain reliefs.',
-        'Thermal testing turned up a real failure: at 85 °C the receive line stays low and no data gets through, most likely DC leakage through the receive diode looping through the TIA. I documented the findings and the changes that did and did not help, so the next revision starts from the measurements.',
+        'Meters expose a standard infrared optical port (ANSI C12.18) for reading and configuration. This project was a ground-up redesign of the USB probe that clips onto that port, done on a small team through four board revisions, covering both the electronics and the enclosure.',
+        'The finished design was validated against the rating it has to carry in the field: pulse read and transmit to 1 MHz, and survival under 85/85 conditions, 85 °C at 85% relative humidity. Once it passed, it went into production as the probe the company supplies to its customers.',
       ],
-      media: [
-        { type: 'model', label: 'Shell', src: '/portfolio/assets/models/optical-probe-mounted.glb', caption: 'Final printed shell: two halves and the LED head (simplified mesh)', zUp: false },
-        { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/optical-probe-exploded.glb', caption: 'Shell halves split apart', zUp: false },
-        { type: 'pcb', label: 'Board', src: '/portfolio/assets/pcb/optical-probe.kicad_pcb', caption: 'Board view (scroll to zoom, click a part). Outline and placement are real; routing and values are randomized.' },
-        { type: 'image', src: '', caption: 'TODO: a photo of the assembled probe on a meter' },
+      sections: [
+        {
+          title: 'Mechanical design',
+          body: [
+            'I designed the enclosure in PTC Creo: a two-piece shell that splits down the middle around the board, and a separate head that holds the LEDs square to the meter\'s optical port.',
+            'The shell is printed in carbon-fiber polycarbonate (PC-CF), chosen to hold its shape through the 85 °C / 85% humidity rating. The cable exits through strain reliefs cast in silicone from a mold I also designed.',
+          ],
+          media: [
+            { type: 'model', label: 'Shell', src: '/portfolio/assets/models/optical-probe-mounted.glb', caption: 'Printed shell with the LED head', zUp: false },
+            { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/optical-probe-exploded.glb', caption: 'Shell halves split apart around the LED head', zUp: false },
+          ],
+        },
+        {
+          title: 'Electrical design',
+          body: [
+            'The board pairs a USB-to-UART bridge with an infrared LED transmitter and a photodiode receiver feeding a transimpedance amplifier: USB on one end, the optical head on the other, on a compact multilayer board designed in KiCad.',
+            'Most of the engineering was in the receive path: getting clean, fast edges at high data rates while still picking up the meter\'s own pulse output. The receiver\'s gain trades directly against its speed, so I characterized that trade-off on the bench and tuned the front end to cover both.',
+          ],
+          media: [
+            { type: 'model', label: '3D board', protect: true, src: '/portfolio/assets/models/optical-probe-board-mounted.glb', caption: 'Board in 3D: parts reduced to plain blocks, routing randomized', zUp: false, view: [0.6, 1.1, 1.0] },
+            { type: 'pcb', label: 'Layout', protect: true, src: '/portfolio/assets/pcb/optical-probe.kicad_pcb', caption: 'Layout view (scroll to zoom, click a part). Routing, values and designators are randomized.' },
+          ],
+        },
       ],
     },
     {
-      id: 'little-blue',
-      short: 'Little Blue',
-      title: 'Little Blue test cabinet',
-      date: '2025 to 2026 · Industry project',
-      org: '',                                          // TODO (optional)
-      summary: 'A rack-style test cabinet modelled end to end in Creo: a meter socket plate I designed and drew, rack-mount drawers, cooling, power and current-routing electronics in one assembly.',     // TODO: check the one-line purpose
-      tags: ['Mechanical', 'CAD', 'Creo'],
-      notice: 'Shown as simplified models only: coarse meshes with fasteners, board components and small details removed. Part numbers, the BOM and the source CAD are not published.',
+      id: 'power-supply',
+      short: 'Power supply',
+      title: '3-phase precision power supply',
+      date: '2025 to 2026',
+      org: 'Landis+Gyr',
+      summary: 'A 4500 VA, 3-phase precision source built from the ground up in a server rack: 600 V and 600 A with ±0.001 V and ±0.001 A precision, for powering meters under test.',
+      tags: ['Mechanical', 'Electrical', 'CAD', 'Creo'],
+      notice: 'Part numbers, the BOM and the source CAD are not published.',
       links: [],
       body: [
-        'TODO: one or two sentences on what the cabinet tests and who uses it.',
-        'I built the full top-level assembly in Creo Parametric: a 4U drawer and a 3U cabinet section with 120 mm filtered fan cooling, a 24 V supply, relay and current-ranging electronics, safety banana jacks for connections, and a socket plate that holds meters under test.',
-        'The socket plate was my own part, documented with a dimensioned drawing. Integrating it meant fitting off-the-shelf rack hardware, fasteners and boards into one assembly that could be purchased against a BOM and built.',
+        'A full ground-up build, from mechanical CAD to electrical assembly: a 4500 VA, 3-phase supply that delivers up to 600 V and 600 A with ±0.001 V and ±0.001 A precision, packaged in a server rack so it can sit in the lab alongside the meters it powers.',
+        'I built the full top-level assembly in Creo Parametric: rack-mount drawers, filtered forced-air cooling, the control and range-switching electronics, and the socket plate that holds meters under test.',
+        'The socket plate was my own part. Integrating it meant fitting off-the-shelf rack hardware, fasteners and boards into one assembly that could be purchased against a BOM and built.',
       ],
       media: [
-        { type: 'model', label: 'Mounted', src: '/portfolio/assets/models/little-blue-mounted.glb', caption: 'Assembled: every rack unit mounted (simplified model)', zUp: false },
-        { type: 'model', label: 'Panels off', src: '/portfolio/assets/models/little-blue-panels-off.glb', caption: 'Side and rear panels removed to show the rack units inside', zUp: false },
-        { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/little-blue-exploded.glb', caption: 'Exploded: panels pushed out, units pulled from the rack', zUp: false },
+        { type: 'model', label: 'Mounted', src: '/portfolio/assets/models/power-supply-mounted.glb', caption: 'Assembled: every rack unit mounted', zUp: false },
+        { type: 'model', label: 'Panels off', src: '/portfolio/assets/models/power-supply-panels-off.glb', caption: 'Side and rear panels removed to show the rack units inside', zUp: false },
+        { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/power-supply-exploded.glb', caption: 'Exploded: panels pushed out, units pulled from the rack', zUp: false },
       ],
     },
     {
       id: 'socket-plate',
       short: 'Socket plate',
       title: 'Meter socket plate',
-      date: '2026 · Industry project · part of Little Blue',
-      org: '',                                          // TODO (optional)
-      summary: 'The plate inside Little Blue that holds two meter sockets under test, with the socket routing board and relays behind it. Designed in Creo and documented with a dimensioned drawing.',
-      tags: ['Mechanical', 'CAD', 'Creo', 'Drawings'],
-      notice: 'The 3D models are simplified: coarse meshes with fasteners and board components removed.',
+      date: '2026 · Part of the 3-phase power supply',
+      org: 'Landis+Gyr',
+      summary: 'The plate inside the power supply rack that holds two meter sockets under test, with the socket routing board and relays behind it. Designed in Creo.',
+      tags: ['Mechanical', 'CAD', 'Creo'],
       links: [],
       body: [
         'Meters under test plug into two standard meter sockets. I designed the front and back plates that carry them, spaced on standoffs so the socket routing board and its relays sit between the plates and the wiring stays short.',
-        'The plate is a 19-inch rack-width panel, 19.00 × 11.75 in, with two large cutouts for the sockets, two slots for wiring and the mounting-hole pattern. The Drawing tab shows it fully dimensioned.',
-        'TODO: anything about tolerancing, the shop that made it, or what changed between revisions.',
+        'The plate is a 19-inch rack panel with cutouts for the two sockets and a path for the wiring, painted to match the rack.',
       ],
       media: [
-        { type: 'model', label: 'Assembled', src: '/portfolio/assets/models/socket-plate-mounted.glb', caption: 'Socket plate assembly: two meter sockets, routing board and relays (simplified)', zUp: false, view: [-1, 0.6, -1.3] },
+        { type: 'model', label: 'Assembled', src: '/portfolio/assets/models/socket-plate-mounted.glb', caption: 'Socket plate assembly: two meter sockets, routing board and relays', zUp: false, view: [-1, 0.6, -1.3] },
         { type: 'model', label: 'Exploded', src: '/portfolio/assets/models/socket-plate-exploded.glb', caption: 'Exploded through the stack: front plate, sockets, routing board, back plate', zUp: false, view: [-1.6, 0.5, -0.9] },
-        { type: 'drawing', label: 'Drawing', src: '/portfolio/assets/drawings/socket-plate-drawing.pdf', caption: 'Socket plate drawing (zoom with + / −, or open the PDF)' },
       ],
     },
     {
@@ -159,55 +178,37 @@ window.PORTFOLIO = {
       id: 'spacer',
       short: 'Molded spacer',
       title: 'Injection-molded spacer',
-      date: '2026',
-      org: '',                                          // TODO (optional)
-      summary: 'A 125 mm spacer taken from a solid printed prototype to a part designed for injection molding.',
-      tags: ['Mechanical', 'CAD', 'Creo', 'Injection molding'],
+      date: '2026 · 50,000 units in production',
+      org: 'Landis+Gyr',
+      summary: 'A polycarbonate spacer that fixed a failed customer qualification and unblocked a commitment to one of the company\'s largest customers, then went to production at 50,000 units.',
+      tags: ['Mechanical', 'CAD', 'Creo', 'Injection molding', 'Validation testing'],
       links: [],
       body: [
-        'Three iterations of the same 125 × 27 × 10 mm spacer. The solid version proved the fit; the shelled version hollows it out to an even wall thickness, which is what lets a part fill and cool evenly in an injection mold without sink marks or warping; the slotted version is a further variant of that geometry.',
-        'TODO: what the spacer goes into, the material, and anything learned from the molder (draft, gate location, tolerances).',
+        'A meter failed a customer-specific qualification test, and that failure stalled a commitment to one of Landis+Gyr\'s largest customers. I traced it to its root cause and designed a polycarbonate spacer in PTC Creo that fixed it with no change to the existing meter.',
+        'From there I drove it through validation: re-running the qualification testing the meter had failed, and iterating the design until it passed. The part was designed for injection molding from the start, and it went to production at 50,000 units.',
       ],
       media: [
-        { type: 'model', label: 'Shelled', src: '/portfolio/assets/models/spacer-shelled-mounted.glb', caption: 'Shelled to a uniform wall for molding', zUp: false },
-        { type: 'model', label: 'Solid', src: '/portfolio/assets/models/spacer-solid-mounted.glb', caption: 'First iteration: solid', zUp: false },
-        { type: 'model', label: 'Slotted', src: '/portfolio/assets/models/spacer-slotted-mounted.glb', caption: 'Slotted variant', zUp: false },
+        { type: 'model', label: 'Production', src: '/portfolio/assets/models/spacer-shelled-mounted.glb', caption: 'The injection-molded design', zUp: false },
+        { type: 'model', label: 'Prototype', src: '/portfolio/assets/models/spacer-solid-mounted.glb', caption: 'Earlier solid iteration', zUp: false },
+        { type: 'model', label: 'Variant', src: '/portfolio/assets/models/spacer-slotted-mounted.glb', caption: 'Slotted variant explored during iteration', zUp: false },
       ],
     },
     {
       id: 'wifi-checker',
       short: 'Wifi Checker',
       title: 'Wifi Checker: fleet test tool',
-      date: '2025 to 2026 · Industry project',
-      org: '',                                          // TODO (optional)
-      summary: 'A desktop tool that finds every meter on the network by MAC address, checks Wi-Fi connectivity over ping and SSH, pushes settings in bulk and writes Excel reports, including unattended scheduled runs.',
+      date: '2025 to 2026',
+      org: 'Landis+Gyr',
+      summary: 'A desktop tool that finds every meter under test on the lab network, checks its Wi-Fi connectivity, applies configuration changes in bulk and writes Excel reports, including unattended scheduled runs.',
       tags: ['Software', 'Python', 'Test automation'],
       links: [],
       body: [
         'Testing meter Wi-Fi meant checking dozens of devices by hand. I took an earlier internal script by two colleagues and rebuilt it into a full PyQt5 application of about 3,000 lines.',
-        'It reads a meter status spreadsheet, sweeps the lab subnets in parallel to map each meter\'s MAC address to its current IP, then pings and opens an SSH session to every meter on a thread pool. Each run writes per-meter pass/fail results and timing to Excel.',
-        'Later versions added continuous and scheduled ping sessions (pick days, a start time and a duration, then leave it running overnight), a bulk temperature-shutdown push to selected meters over SSH, multiple test tabs with saved profiles, and a frameless custom UI. It ships as a standalone .exe that installs its own dependencies on first run.',
+        'It reads the list of meters under test, locates each one on the lab network in parallel, and checks its connection on a thread pool. Each run writes per-meter pass/fail results and timing to Excel.',
+        'Later versions added continuous and scheduled test sessions (pick days, a start time and a duration, then leave it running overnight), bulk configuration changes across selected meters, multiple test tabs with saved profiles, and a custom UI. It ships as a standalone .exe that installs its own dependencies on first run.',
       ],
       media: [
         { type: 'image', src: '', caption: 'TODO: a screenshot of the scan view (blur any IPs or MAC addresses)' },
-      ],
-    },
-    {
-      id: 'contactor-tester',
-      short: 'Contactor tester',
-      title: 'Three-phase contactor tester',
-      date: '2026 · Industry project',
-      org: '',                                          // TODO (optional)
-      summary: 'A Raspberry Pi touchscreen app that drives six three-phase contactors through an I²C GPIO expander and checks each one actually switched using independent sense inputs.',
-      tags: ['Software', 'Python', 'Embedded'],
-      links: [],
-      body: [
-        'Built around an MCP23008 I²C GPIO expander driving the low and high contactors on phases A, B and C, plus a direction control for an H-bridge.',
-        'A second set of inputs, either a second MCP23008 or the Pi\'s own GPIO, reads back each contactor\'s real state. The UI shows commanded against sensed state per contactor and flags any mismatch, so a stuck contactor is caught instead of assumed.',
-        'It includes a live register inspector for the expander, works across Raspberry Pi generations (RPi.GPIO on older boards, gpiozero/lgpio on the Pi 5), and falls back to a mock device so the interface can be developed and demonstrated without hardware.',
-      ],
-      media: [
-        { type: 'image', src: '', caption: 'TODO: a photo of the tester or a screenshot of the UI' },
       ],
     },
     {
