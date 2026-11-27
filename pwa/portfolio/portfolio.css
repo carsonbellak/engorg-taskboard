@@ -33,7 +33,8 @@
     --primary-container: #0842a0; --on-primary-container: #d3e3fd;
     --t-blue: #0f2f5c; --t-blue-ink: #d3e3fd; --t-green: #0f3a1f; --t-green-ink: #c4eed0;
     --t-yellow: #3d3000; --t-yellow-ink: #ffe08a; --t-red: #4a1612; --t-red-ink: #ffdad6;
-    --stage: linear-gradient(160deg, #2a2d32 0%, #23262b 100%);
+    /* spotlight behind the model so dark-painted parts still separate from the stage */
+    --stage: radial-gradient(ellipse 70% 65% at 50% 46%, #4a4e55 0%, #33363c 55%, #26282d 100%);
     --shadow: 0 1px 3px rgba(0,0,0,.4), 0 4px 8px 3px rgba(0,0,0,.2);
     color-scheme: dark;
   }

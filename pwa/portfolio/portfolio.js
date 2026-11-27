@@ -29,7 +29,7 @@
   $('[data-brand]').textContent = P.name || 'Portfolio';
   $('[data-name]').textContent = P.name || '';
   $('[data-role]').textContent = [P.role, P.location].filter(Boolean).join(' · ');
-  $('[data-tagline]').textContent = P.tagline || '';
+  { const t = $('[data-tagline]'); t.textContent = P.tagline || ''; t.hidden = !P.tagline; }
   $('[data-footer]').textContent = `© ${new Date().getFullYear()} ${P.name || ''}`.trim();
 
   // Resume buttons appear only once the PDF really exists (the hosting catch-all answers

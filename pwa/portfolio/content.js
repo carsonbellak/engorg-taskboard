@@ -36,7 +36,7 @@
 window.PORTFOLIO = {
   name: 'Carson Bellak',
   role: 'Engineering Student',                          // TODO, e.g. "Electrical Engineering · Purdue '27"
-  tagline: 'I design test hardware: circuit boards, rack-mounted fixtures and the software that runs them.',
+  tagline: '',                                         // optional one-liner under your name; '' shows none
   location: '',                                         // TODO (optional)
   status: '',                                          // (unused in the current layout)
   photo: '',                                            // TODO (optional) '/portfolio/assets/images/me.jpg'
@@ -55,7 +55,8 @@ window.PORTFOLIO = {
     { model: '/portfolio/assets/models/optical-probe-mounted.glb', label: 'Optical probe shell', project: 'optical-probe', zUp: false },
     { model: '/portfolio/assets/models/little-blue-mounted.glb', label: 'Little Blue test cabinet', project: 'little-blue', zUp: false },
     { model: '/portfolio/assets/models/socket-plate-mounted.glb', label: 'Meter socket plate', project: 'socket-plate', zUp: false, view: [-1, 0.6, -1.3] },
-    { model: '/portfolio/assets/models/calibration-cube.stl', label: '3D-printer calibration cube', project: 'calibration', color: '#d08a4c' },
+    { model: '/portfolio/assets/models/spacer-shelled-mounted.glb', label: 'Injection-molded spacer', project: 'spacer', zUp: false },
+    { model: '/portfolio/assets/models/calibration-cube-mounted.glb', label: '3D-printer calibration cube', project: 'calibration', zUp: false, view: [0.75, 0.55, -1.3] },
     { model: '/portfolio/assets/models/little-blue-exploded.glb', label: 'Little Blue, exploded', project: 'little-blue', zUp: false },
   ],
 
@@ -151,7 +152,26 @@ window.PORTFOLIO = {
         'Measuring them after a profile change tells me straight away whether flow, shrinkage or the slicer settings have drifted, before printing a real part.',
       ],
       media: [
-        { type: 'model', label: 'Test cube', src: '/portfolio/assets/models/calibration-cube.stl', caption: '25 mm calibration test cube (drag to orbit)', color: '#d08a4c' },
+        { type: 'model', label: 'Test cube', src: '/portfolio/assets/models/calibration-cube-mounted.glb', caption: '25 mm calibration test cube (drag to orbit)', zUp: false, view: [0.75, 0.55, -1.3] },
+      ],
+    },
+    {
+      id: 'spacer',
+      short: 'Molded spacer',
+      title: 'Injection-molded spacer',
+      date: '2026',
+      org: '',                                          // TODO (optional)
+      summary: 'A 125 mm spacer taken from a solid printed prototype to a part designed for injection molding.',
+      tags: ['Mechanical', 'CAD', 'Creo', 'Injection molding'],
+      links: [],
+      body: [
+        'Three iterations of the same 125 × 27 × 10 mm spacer. The solid version proved the fit; the shelled version hollows it out to an even wall thickness, which is what lets a part fill and cool evenly in an injection mold without sink marks or warping; the slotted version is a further variant of that geometry.',
+        'TODO: what the spacer goes into, the material, and anything learned from the molder (draft, gate location, tolerances).',
+      ],
+      media: [
+        { type: 'model', label: 'Shelled', src: '/portfolio/assets/models/spacer-shelled-mounted.glb', caption: 'Shelled to a uniform wall for molding', zUp: false },
+        { type: 'model', label: 'Solid', src: '/portfolio/assets/models/spacer-solid-mounted.glb', caption: 'First iteration: solid', zUp: false },
+        { type: 'model', label: 'Slotted', src: '/portfolio/assets/models/spacer-slotted-mounted.glb', caption: 'Slotted variant', zUp: false },
       ],
     },
     {
